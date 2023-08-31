@@ -1,0 +1,12 @@
+[package]
+name = "bootloader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../common" }
+riscv = "0.10"
+
+[features]
+board_qemu = []
+board_fu740 = []

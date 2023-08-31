@@ -1,0 +1,22 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../common" }
+bitflags = "1.3.2"
+log = "0.4"
+riscv = "0.10"
+spin = "0.9.4"
+
+[features]
+board_qemu = []
+board_fu740 = []
+error = []
+warn = []
+info = []
+debug = []
+trace = []
+
+default = ["info"]

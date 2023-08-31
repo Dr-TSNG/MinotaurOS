@@ -1,0 +1,2 @@
+[alias]
+task = "run --package tasks"

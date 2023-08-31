@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "bootloader",
+    "common",
+    "kernel",
+    "tasks",
+]
+default-members = ["tasks"]
+
+[profile.release]
+lto = true
+debug = true
