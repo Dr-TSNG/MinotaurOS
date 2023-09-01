@@ -7,7 +7,7 @@ use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicBool, Ordering};
 use riscv::register::satp;
 use common::config::*;
-use common::arch::{PAGE_BITS, PageTableEntry, PhysAddr, PhysPageNum, PTEFlags, shutdown, VirtPageNum};
+use common::arch::{PAGE_BITS, PageTableEntry, PhysAddr, PhysPageNum, PTE_SLOTS, PTEFlags, shutdown, VirtPageNum};
 use common::{include_bytes_aligned, println};
 
 const PADDR_LV0_SLOT: usize = VirtPageNum(KERNEL_PADDR_BASE >> PAGE_BITS).index(0);
@@ -19,11 +19,11 @@ global_asm!(include_str!("boot.asm"));
 struct AlignLv1;
 
 #[repr(align(4096))]
-struct PageTable([PageTableEntry; 512]);
+struct PageTable([PageTableEntry; PTE_SLOTS]);
 
 impl PageTable {
     pub const fn new() -> Self {
-        Self([PageTableEntry::empty(); 512])
+        Self([PageTableEntry::empty(); PTE_SLOTS])
     }
 }
 

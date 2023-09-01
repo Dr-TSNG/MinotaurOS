@@ -14,6 +14,14 @@ bitflags! {
     }
 }
 
+pub const PTE_SLOTS: usize = 512;
+
+pub enum PTEType {
+    Invalid,
+    Directory,
+    Page,
+}
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct PageTableEntry {
@@ -35,17 +43,27 @@ impl PageTableEntry {
     pub fn flags(&self) -> PTEFlags {
         PTEFlags::from_bits(self.bits as u8).unwrap()
     }
-    pub fn is_valid(&self) -> bool {
-        (self.flags() & PTEFlags::V) != PTEFlags::empty()
+    pub fn valid(&self) -> bool {
+        self.flags().contains(PTEFlags::V)
     }
     pub fn readable(&self) -> bool {
-        (self.flags() & PTEFlags::R) != PTEFlags::empty()
+        self.flags().contains(PTEFlags::R)
     }
     pub fn writable(&self) -> bool {
-        (self.flags() & PTEFlags::W) != PTEFlags::empty()
+        self.flags().contains(PTEFlags::W)
     }
     pub fn executable(&self) -> bool {
-        (self.flags() & PTEFlags::X) != PTEFlags::empty()
+        self.flags().contains(PTEFlags::X)
+    }
+    pub fn kind(&self) -> PTEType {
+        let flags = self.flags();
+        if !flags.contains(PTEFlags::V) {
+            PTEType::Invalid
+        } else if flags & (PTEFlags::R | PTEFlags::W | PTEFlags::X) == PTEFlags::empty() {
+            PTEType::Directory
+        } else {
+            PTEType::Page
+        }
     }
     pub fn set_flags(&mut self, flags: PTEFlags) {
         self.bits -= self.bits % (1 << 8);

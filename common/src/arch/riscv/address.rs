@@ -3,7 +3,8 @@ use core::{
     ops::{Add, Sub},
 };
 use core::fmt::Display;
-use super::page_table::PageTableEntry;
+use crate::config::{KERNEL_ADDR_OFFSET, KERNEL_VADDR_BASE};
+use super::pte::PageTableEntry;
 
 pub const SV39_PAGE_BITS: usize = 12;
 pub const SV39_PAGE_SIZE: usize = 4096;
@@ -129,6 +130,22 @@ impl const From<VirtPageNum> for VirtAddr {
     fn from(v: VirtPageNum) -> Self {
         Self(v.0 << SV39_PAGE_BITS)
     }
+}
+
+pub const fn paddr_to_kvaddr(paddr: PhysAddr) -> VirtAddr {
+    VirtAddr(paddr.0 + KERNEL_ADDR_OFFSET)
+}
+
+pub const fn kvaddr_to_paddr(vaddr: VirtAddr) -> PhysAddr {
+    PhysAddr(vaddr.0 - KERNEL_ADDR_OFFSET)
+}
+
+pub const fn ppn_to_kvpn(ppn: PhysPageNum) -> VirtPageNum {
+    VirtPageNum(ppn.0 + KERNEL_ADDR_OFFSET / SV39_PAGE_SIZE)
+}
+
+pub const fn kvpn_to_ppn(kvpn: VirtPageNum) -> PhysPageNum {
+    PhysPageNum(kvpn.0 - KERNEL_ADDR_OFFSET / SV39_PAGE_SIZE)
 }
 
 // Operations

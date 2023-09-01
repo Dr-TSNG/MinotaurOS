@@ -23,14 +23,13 @@ impl log::Log for SimpleLogger {
         // } else {
         //     (-1, -1)
         // };
-        let (pid, tid) = (-1, -1);
+        let tid = 0;
 
         if self.enabled(record.metadata()) {
             println!(
-                "\x1b[{}m[{}] [PID{}] [TID{}] {}\x1b[0m",
+                "\x1b[{}m[{}] [TID {}] {}\x1b[0m",
                 level_color(record.level()),
                 record.level(),
-                pid,
                 tid,
                 record.args()
             );

@@ -1,18 +1,27 @@
 #![no_std]
 #![no_main]
-#![allow(unused)]
 #![feature(asm_const)]
 #![feature(naked_functions)]
+#![feature(alloc_error_handler)]
+
+extern crate alloc;
 
 mod board;
 mod logger;
+mod kobject;
+mod mm;
+mod result;
+mod processor;
+
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use log::error;
 use common::arch::shutdown;
 use common::println;
 use crate::board::{HART_CNT, KERNEL_STACK_SIZE};
+use crate::processor::hart::current_hart;
 
 global_asm!(include_str!("entry.asm"));
 
@@ -24,6 +33,7 @@ static mut KERNEL_STACK: [u8; HART_CNT * KERNEL_STACK_SIZE] = [0; HART_CNT * KER
 
 #[naked]
 #[no_mangle]
+#[allow(undefined_naked_function_abi)]
 pub fn setup_stack(hart: usize) {
     unsafe {
         asm! {
@@ -41,16 +51,26 @@ pub fn setup_stack(hart: usize) {
     }
 }
 
+fn start_main_hart() {
+    println!("[kernel] Minotaur OS");
+    while HART_READY.load(Ordering::Acquire) != HART_CNT - 1 {}
+    println!("[kernel] All harts loaded");
+    mm::allocator::heap::init();
+    logger::init();
+}
+
+fn start_other_hart() {
+    HART_READY.fetch_add(1, Ordering::SeqCst);
+    while !KERNEL_READY.load(Ordering::Acquire) {}
+}
+
 #[no_mangle]
-pub fn rust_main(hart: usize) -> ! {
-    if hart == 0 {
-        println!("[kernel] Minotaur OS");
-        while HART_READY.load(Ordering::Acquire) != HART_CNT - 1 {}
-        println!("[kernel] All harts loaded");
+pub fn rust_main() -> ! {
+    processor::hart::init();
+    if current_hart().id == 0 {
+        start_main_hart();
     } else {
-        println!("[kernel] Hart {} boot into kernel", hart);
-        HART_READY.fetch_add(1, Ordering::SeqCst);
-        while !KERNEL_READY.load(Ordering::Acquire) {}
+        start_other_hart();
     }
 
     panic!("End of execution")
@@ -58,9 +78,9 @@ pub fn rust_main(hart: usize) -> ! {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    println!("----------------------------------");
-    println!("     !!!   KERNEL PANIC   !!!     ");
-    println!("----------------------------------");
-    println!("{}", info);
+    error!("----------------------------------");
+    error!("     !!!   KERNEL PANIC   !!!     ");
+    error!("----------------------------------");
+    error!("{}", info);
     shutdown()
 }
