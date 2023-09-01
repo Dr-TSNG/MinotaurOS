@@ -1,18 +1,22 @@
 pub mod direct;
 mod physical;
 
-use alloc::string::String;
-use core::fmt::Debug;
-use downcast_rs::DowncastSync;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 use common::arch::VirtPageNum;
 use crate::kobject::KObject;
+use crate::mm::page_table::PageTable;
 use crate::result::MosResult;
-use crate::mm::vmas::AddressSpace;
+use crate::mm::vmo::direct::VMObjectDirect;
 
 pub trait VMObject : KObject {
-    fn detail(&self) -> String;
+    fn len(&self) -> usize;
     fn read(&self, offset: usize, buf: &mut [u8]) -> MosResult;
     fn write(&mut self, offset: usize, buf: &[u8]) -> MosResult;
-    fn map(&self, addrs: &mut AddressSpace, vpn: VirtPageNum) -> MosResult;
-    fn unmap(&self, addrs: &mut AddressSpace, vpn: VirtPageNum) -> MosResult;
+    fn map(&self, pt: PageTable, vpn: VirtPageNum) -> MosResult<Vec<VMObjectDirect>>;
+    fn unmap(&self, pt: PageTable, vpn: VirtPageNum) -> MosResult;
+}
+
+pub trait CopiableVMObject : VMObject {
+    fn copy(&self) -> MosResult<Box<dyn VMObject>>;
 }

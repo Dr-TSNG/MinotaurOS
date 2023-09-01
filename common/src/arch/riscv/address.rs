@@ -8,10 +8,10 @@ use super::pte::PageTableEntry;
 
 pub const SV39_PAGE_BITS: usize = 12;
 pub const SV39_PAGE_SIZE: usize = 4096;
-const SV39_PA_WIDTH: usize = 56;
-const SV39_PPN_WIDTH: usize = SV39_PA_WIDTH - SV39_PAGE_BITS;
-const SV39_VPN_BITS: usize = 9;
-const SV39_VPN_MASK: usize = 0x1FF;
+pub const SV39_PA_WIDTH: usize = 56;
+pub const SV39_PPN_WIDTH: usize = SV39_PA_WIDTH - SV39_PAGE_BITS;
+pub const SV39_VPN_BITS: usize = 9;
+pub const SV39_VPN_MASK: usize = 0x1FF;
 
 /// Definitions
 #[repr(C)]
@@ -38,21 +38,9 @@ impl Debug for PhysAddr {
     }
 }
 
-impl Display for PhysAddr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:#x}", self.0))
-    }
-}
-
 impl Debug for PhysPageNum {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("PPN({:#x})", self.0))
-    }
-}
-
-impl Display for PhysPageNum {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:#x}", self.0))
     }
 }
 
@@ -62,21 +50,9 @@ impl Debug for VirtAddr {
     }
 }
 
-impl Display for VirtAddr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:#x}", self.0))
-    }
-}
-
 impl Debug for VirtPageNum {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("VPN({:#x})", self.0))
-    }
-}
-
-impl Display for VirtPageNum {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{:#x}", self.0))
     }
 }
 
@@ -195,11 +171,11 @@ impl PhysPageNum {
     pub fn lv1_mask(&self) -> PhysPageNum {
         PhysPageNum(self.0 & !0x1ff)
     }
-    pub fn step_lv0(&mut self) {
-        self.0 += 1 << (SV39_VPN_BITS * 2)
+    pub fn step_lv0(&self) -> PhysPageNum {
+        PhysPageNum(self.0 + (1 << (SV39_VPN_BITS * 2)))
     }
-    pub fn step_lv1(&mut self) {
-        self.0 += 1 << SV39_VPN_BITS
+    pub fn step_lv1(&self) -> PhysPageNum {
+        PhysPageNum(self.0 + (1 << SV39_VPN_BITS))
     }
 }
 
@@ -216,6 +192,12 @@ impl VirtPageNum {
             vpn >>= SV39_VPN_BITS;
         }
         idx
+    }
+    pub fn step_lv0(&self) -> VirtPageNum {
+        VirtPageNum(self.0 + (1 << (SV39_VPN_BITS * 2)))
+    }
+    pub fn step_lv1(&self) -> VirtPageNum {
+        VirtPageNum(self.0 + (1 << SV39_VPN_BITS))
     }
 }
 

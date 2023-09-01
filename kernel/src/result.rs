@@ -6,4 +6,5 @@ pub enum MosError {
     CrossPageBoundary,
     InvalidAddress,
     PageAlreadyMapped,
+    PageNoncopyable,
 }

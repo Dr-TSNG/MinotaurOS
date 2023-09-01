@@ -1,10 +1,11 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
-KERNEL_PADDR_BASE = 0x80200000;
+BOOTLOADER_PADDR_BASE = 0x80200000;
+KERNEL_PADDR_BASE = 0x80400000;
 
 SECTIONS
 {
-    . = KERNEL_PADDR_BASE;
+    . = BOOTLOADER_PADDR_BASE;
     .text : {
         *(.text.entry)
         *(.text .text.*)
@@ -29,6 +30,8 @@ SECTIONS
 
     . = ALIGN(4K);
     ebss = .;
+
+    . = KERNEL_PADDR_BASE;
 
     /DISCARD/ : {
         *(.eh_frame)

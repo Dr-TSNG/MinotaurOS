@@ -2,7 +2,7 @@ use common::arch::{paddr_to_kvaddr, PageTableEntry, PhysAddr, PhysPageNum, PTE_S
 
 #[derive(Copy, Clone, Debug)]
 pub struct PageTable {
-    ppn: PhysPageNum,
+    pub ppn: PhysPageNum,
 }
 
 pub enum SlotType {

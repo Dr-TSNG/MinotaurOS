@@ -1,72 +1,84 @@
-use alloc::format;
-use alloc::string::String;
-use core::fmt::Debug;
+use alloc::vec;
+use alloc::vec::Vec;
 use log::trace;
-use common::arch::{kvpn_to_ppn, PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum};
-use crate::kobject::{KObject, KObjectType, KoID};
+use common::arch::{kvpn_to_ppn, PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum, VPN_BITS};
+use crate::impl_kobject;
+use crate::kobject::{KObject, KObjectBase, KObjectType, KoID};
 use crate::mm::allocator::heap;
-use crate::mm::page_table::SlotType;
-use crate::mm::vmas::{AddressSpace, ASPerms};
+use crate::mm::page_table::{PageTable, SlotType};
+use crate::mm::vmas::ASPerms;
 use crate::mm::vmo::VMObject;
 use crate::result::{MosError, MosResult};
 
 /// 直接映射：用于分配内核对象的页帧，可以直接映射到内核线性地址空间
-#[derive(Debug)]
 pub struct VMObjectDirect {
+    base: KObjectBase,
+    global: bool,
+    level: usize,
+    pages: usize,
     pub ppn: PhysPageNum,
-    vpn: VirtPageNum,
+    pub vpn: VirtPageNum,
     perms: ASPerms,
 }
+impl_kobject!(KObjectType::VMObject, VMObjectDirect);
 
 impl VMObjectDirect {
-    pub fn new(perms: ASPerms) -> MosResult<Self> {
-        let vpn = heap::alloc_kernel_pages(1)?;
+    /// Kernel ELF 和 Kernel Heap 对象
+    pub fn new_global(level: usize, vpn: VirtPageNum, perms: ASPerms) -> Self {
+        let pages = 1 << ((2 - level) * VPN_BITS);
         let ppn = kvpn_to_ppn(vpn);
-        Ok(Self { vpn, ppn, perms })
+        Self {
+            base: KObjectBase::default(),
+            global: true,
+            level, pages, vpn, ppn, perms,
+        }
+    }
+
+    /// 从堆中分配一个新的直接映射对象
+    pub fn zeroed(level: usize, perms: ASPerms) -> MosResult<Self> {
+        let pages = 1 << ((2 - level) * VPN_BITS);
+        let vpn = heap::alloc_kernel_pages(pages)?;
+        let ppn = kvpn_to_ppn(vpn);
+        let mut obj = Self {
+            base: KObjectBase::default(),
+            global: false,
+            level, pages, vpn, ppn, perms
+        };
+        obj.get_slice_mut().fill(0);
+        Ok(obj)
     }
 
     fn get_slice(&self) -> &[u8] {
         unsafe {
             let ptr = VirtAddr::from(self.vpn).0 as *const u8;
-            core::slice::from_raw_parts(ptr, PAGE_SIZE)
+            core::slice::from_raw_parts(ptr, self.len())
         }
     }
 
     fn get_slice_mut(&mut self) -> &mut [u8] {
         unsafe {
             let ptr = VirtAddr::from(self.vpn).0 as *mut u8;
-            core::slice::from_raw_parts_mut(ptr, PAGE_SIZE)
+            core::slice::from_raw_parts_mut(ptr, self.len())
         }
     }
 }
 
 impl Drop for VMObjectDirect {
     fn drop(&mut self) {
-        heap::dealloc_kernel_pages(self.vpn, PAGE_SIZE).unwrap();
-    }
-}
-
-impl KObject for VMObjectDirect {
-    fn id(&self) -> KoID {
-        todo!()
-    }
-
-    fn res_type(&self) -> KObjectType {
-        todo!()
-    }
-
-    fn description(&self) -> String {
-        todo!()
+        if !self.global {
+            trace!("VMObjectDirect: drop {:x?}", self.vpn);
+            heap::dealloc_kernel_pages(self.vpn, self.len()).unwrap();
+        }
     }
 }
 
 impl VMObject for VMObjectDirect {
-    fn detail(&self) -> String {
-        format!("D[ppn: {}]", self.vpn)
+    fn len(&self) -> usize {
+        self.pages * PAGE_SIZE
     }
 
     fn read(&self, offset: usize, buf: &mut [u8]) -> MosResult {
-        if offset + buf.len() > PAGE_SIZE {
+        if offset + buf.len() > self.len() {
             return Err(MosError::CrossPageBoundary);
         }
         let slice = self.get_slice();
@@ -75,7 +87,7 @@ impl VMObject for VMObjectDirect {
     }
 
     fn write(&mut self, offset: usize, buf: &[u8]) -> MosResult {
-        if offset + buf.len() > PAGE_SIZE {
+        if offset + buf.len() > self.len() {
             return Err(MosError::CrossPageBoundary);
         }
         let slice = self.get_slice_mut();
@@ -83,11 +95,11 @@ impl VMObject for VMObjectDirect {
         Ok(())
     }
 
-    fn map(&self, addrs: &mut AddressSpace, vpn: VirtPageNum) -> MosResult {
-        let mut pt = addrs.root_pt;
+    fn map(&self, mut pt: PageTable, vpn: VirtPageNum) -> MosResult<Vec<VMObjectDirect>> {
+        let mut dirs = vec![];
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
-            if i == 2 {
+            if i == self.level {
                 if pte.valid() {
                     return Err(MosError::PageAlreadyMapped);
                 }
@@ -95,32 +107,45 @@ impl VMObject for VMObjectDirect {
                 if self.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
                 if self.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
                 if self.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
+                trace!(
+                    "DirectMap: create page at lv{}pt {:?} slot {} -> {:?} - {:?}",
+                    i, pt.ppn, idx, self.ppn, self.vpn,
+                );
                 *pte = PageTableEntry::new(self.ppn, flags);
+                break;
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
                     SlotType::Page(_) => return Err(MosError::PageAlreadyMapped),
                     SlotType::Invalid => {
-                        let page = VMObjectDirect::new(ASPerms::empty())?;
+                        let page = VMObjectDirect::zeroed(2, ASPerms::empty())?;
+                        trace!(
+                            "DirectMap: create dir at lv{}pt {:?} slot {} -> {:?}",
+                            i, pt.ppn, idx, page.ppn,
+                        );
                         *pte = PageTableEntry::new(page.ppn, PTEFlags::V);
-                        addrs.insert_pt(page);
+                        pt = PageTable::new(page.ppn);
+                        dirs.push(page);
                     }
                 }
             }
         }
-        trace!("DirectMap: {:?} -> {:?}", self.ppn, vpn);
-        Ok(())
+        Ok(dirs)
     }
 
-    fn unmap(&self, addrs: &mut AddressSpace, vpn: VirtPageNum) -> MosResult {
-        let mut pt = addrs.root_pt;
+    fn unmap(&self, mut pt: PageTable, vpn: VirtPageNum) -> MosResult {
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
-            if i == 2 {
+            if i == self.level {
                 if !pte.valid() {
                     return Err(MosError::InvalidAddress);
                 }
+                trace!(
+                    "DirectUnmap: invalidate page at lv{}pt {:?} slot {} -> {:?} - {:?}",
+                    i, pt.ppn, idx, self.ppn, self.vpn,
+                );
                 pte.set_flags(PTEFlags::empty());
+                break;
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
@@ -128,7 +153,6 @@ impl VMObject for VMObjectDirect {
                 }
             }
         }
-        trace!("DirectUnmap: {:?} -> {:?}", self.ppn, vpn);
         Ok(())
     }
 }
