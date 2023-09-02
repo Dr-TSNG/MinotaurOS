@@ -12,8 +12,8 @@ kernel:
 bootloader:
 	@cargo task build bootloader --board $(BOARD)
 
-qemu:
-	@cargo task run qemu
+debug:
+	@cargo task debug qemu
 
 all: bootloader
 

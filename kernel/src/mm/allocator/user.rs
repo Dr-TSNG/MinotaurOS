@@ -1,14 +1,13 @@
-use alloc::vec;
 use alloc::vec::Vec;
-use core::alloc::Layout;
-use core::ptr::NonNull;
-use common::arch::{PAGE_SIZE, PhysAddr, PhysPageNum};
+use bitvec_rs::BitVec;
+use log::trace;
+use spin::Mutex;
+use common::arch::PhysPageNum;
 use common::println;
 use crate::board::PHYS_MEMORY;
-use crate::mm::allocator::Allocator;
 use crate::result::{MosError, MosResult};
 
-static USER_ALLOCATOR: Allocator = Allocator::empty();
+static USER_ALLOCATOR: Mutex<UserFrameAllocator> = Mutex::new(UserFrameAllocator::new());
 
 pub struct UserFrameTracker {
     pub ppn: PhysPageNum,
@@ -17,44 +16,104 @@ pub struct UserFrameTracker {
 
 impl Drop for UserFrameTracker {
     fn drop(&mut self) {
-        dealloc_user_frames(&self);
+        trace!("UserFrameAllocator: dealloc user frame {:?} for {} pages", self.ppn, self.pages);
+        USER_ALLOCATOR.lock().dealloc(&self);
     }
 }
 
-pub fn alloc_user_frames(pages: usize) -> MosResult<Vec<UserFrameTracker>> {
-    let mut allocator = USER_ALLOCATOR.0.lock();
-    let mut trackers = vec![];
-    for _ in 0..pages {
-        let ppn = allocator.alloc(Layout::from_size_align(PAGE_SIZE, PAGE_SIZE).unwrap())
-            .map(|pa| PhysPageNum::from(PhysAddr(pa.as_ptr() as usize)))
-            .map_err(|_| MosError::OutOfMemory)?;
-        trackers.push(UserFrameTracker { ppn, pages: 1 });
+struct UserFrameAllocator(Vec<Segment>);
+
+impl UserFrameAllocator {
+    const fn new() -> Self {
+        Self(Vec::new())
     }
-    Ok(trackers)
+
+    fn add_to_heap(&mut self, start: PhysPageNum, end: PhysPageNum) {
+        self.0.push(Segment::new(start, end));
+    }
+
+    fn alloc(&mut self, pages: usize) -> MosResult<UserFrameTracker> {
+        for segment in self.0.iter_mut() {
+            if let Some(tracker) = segment.alloc(pages) {
+                return Ok(tracker);
+            }
+        }
+        Err(MosError::OutOfMemory)
+    }
+
+    fn dealloc(&mut self, tracker: &UserFrameTracker) {
+        for segment in self.0.iter_mut() {
+            if segment.start <= tracker.ppn && tracker.ppn < segment.end {
+                segment.dealloc(tracker);
+                return;
+            }
+        }
+        panic!("dealloc user frame {:?} for {} pages failed", tracker.ppn, tracker.pages);
+    }
 }
 
-pub fn alloc_user_frames_cont(pages: usize) -> MosResult<UserFrameTracker> {
-    let ppn = USER_ALLOCATOR.0.lock()
-        .alloc(Layout::from_size_align(pages * PAGE_SIZE, PAGE_SIZE).unwrap())
-        .map(|pa| PhysPageNum::from(PhysAddr(pa.as_ptr() as usize)))
-        .map_err(|_| MosError::OutOfMemory)?;
-    let tracker = UserFrameTracker { ppn, pages };
-    Ok(tracker)
+struct Segment {
+    start: PhysPageNum,
+    end: PhysPageNum,
+    bitmap: BitVec,
+    cur: usize,
 }
 
-fn dealloc_user_frames(tracker: &UserFrameTracker) {
-    let ptr = PhysAddr::from(tracker.ppn).0 as *mut u8;
-    let ptr = NonNull::new(ptr).unwrap();
-    USER_ALLOCATOR.0.lock()
-        .dealloc(ptr, Layout::from_size_align(tracker.pages * PAGE_SIZE, PAGE_SIZE).unwrap());
+impl Segment {
+    fn new(start: PhysPageNum, end: PhysPageNum) -> Self {
+        let bitmap = BitVec::from_elem(end.0 - start.0, false);
+        Self { start, end, bitmap, cur: end.0 - start.0 }
+    }
+
+    fn alloc(&mut self, pages: usize) -> Option<UserFrameTracker> {
+        let mut now = self.cur + 1;
+        let mut count = 0;
+        while now != self.cur {
+            if now >= self.end.0 - self.start.0 {
+                now = 0;
+                count = 0;
+            }
+            if self.bitmap[now] {
+                count = 0;
+            } else {
+                count += 1;
+                if count == pages {
+                    let start = now - pages + 1;
+                    for i in start..=now {
+                        self.bitmap.set(i, true);
+                    }
+                    self.cur = now;
+                    let tracker = UserFrameTracker {
+                        ppn: PhysPageNum(self.start.0 + start),
+                        pages,
+                    };
+                    return Some(tracker);
+                }
+            }
+        }
+        self.cur = self.end.0 - self.start.0;
+        None
+    }
+
+    fn dealloc(&mut self, tracker: &UserFrameTracker) {
+        let start = tracker.ppn.0 - self.start.0;
+        for i in start..start + tracker.pages {
+            self.bitmap.set(i, false);
+        }
+    }
+}
+
+/// 分配连续的用户页帧
+pub fn alloc_user_frames(pages: usize) -> MosResult<UserFrameTracker> {
+    USER_ALLOCATOR.lock().alloc(pages)
 }
 
 pub fn init() {
-    let mut allocator = USER_ALLOCATOR.0.lock();
+    let mut allocator = USER_ALLOCATOR.lock();
     unsafe {
         PHYS_MEMORY.iter().for_each(|&(start, end)| {
             println!("[kernel] Initialize user memory: {:?} - {:?}", start, end);
-            allocator.add_to_heap(start.0, end.0);
+            allocator.add_to_heap(start.into(), end.into());
         });
     }
 }

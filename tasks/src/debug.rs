@@ -57,6 +57,7 @@ fn debug_attach(config: &AttachConfig) -> Result<()> {
         .arg("-ex").arg(format!("file {}", file.to_string_lossy()))
         .arg("-ex").arg("set arch riscv:rv64")
         .arg("-ex").arg("target remote localhost:1234")
+        .arg("-ex").arg("b rust_main")
         .spawn()?.wait()?;
     Ok(())
 }

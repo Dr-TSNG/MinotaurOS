@@ -1,4 +1,4 @@
-use common::arch::{PhysPageNum, VirtPageNum};
+use common::arch::{PhysPageNum, VirtAddr};
 
 pub type MosResult<T = ()> = Result<T, MosError>;
 
@@ -6,8 +6,8 @@ pub type MosResult<T = ()> = Result<T, MosError>;
 pub enum MosError {
     OutOfMemory,
     CrossPageBoundary,
-    InvalidAddress,
+    BadAddress(VirtAddr),
     PageAlreadyMapped(PhysPageNum),
-    PageNotMapped(VirtPageNum),
+    PageNotMapped(PhysPageNum),
     PageNoncopyable,
 }

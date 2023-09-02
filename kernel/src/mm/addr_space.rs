@@ -7,17 +7,15 @@ use core::arch::asm;
 use core::cmp::Ordering;
 use bitflags::bitflags;
 use downcast_rs::Downcast;
-use log::trace;
+use log::{debug, trace};
 use riscv::register::satp;
 use spin::RwLock;
-use common::arch::{PAGE_SIZE, VirtPageNum};
+use common::arch::{PTE_SLOTS, VirtAddr, VirtPageNum};
 use common::config::KERNEL_VADDR_BASE;
 use crate::board::KERNEL_HEAP_END;
-use crate::impl_kobject;
-use crate::kobject::{KObject, KObjectBase, KObjectType, KoID};
 use crate::mm::page_table::PageTable;
 use crate::mm::vmo::direct::VMObjectDirect;
-use crate::mm::vmo::{CopyableVMObject, VMObject};
+use crate::mm::vmo::{CopyableVMObject, MapInfo, VMObject};
 use crate::result::{MosError, MosResult};
 
 bitflags! {
@@ -30,29 +28,25 @@ bitflags! {
 }
 
 pub struct ASRegion {
-    /// 区域起始页号
-    pub start: VirtPageNum,
-    /// 区域结束页号（开区间）
-    pub end: VirtPageNum,
+    /// 区域映射信息
+    pub map_info: MapInfo,
     /// 区域权限
     pub perms: ASPerms,
-    /// 区域是否可复制
-    pub copyable: bool,
     /// 区域名称
     pub name: Option<String>,
-    /// 区域包含的 VM 对象
-    pub vmos: Vec<Box<dyn VMObject>>,
+    /// 区域的 VM 实现
+    pub vmo: Box<dyn VMObject>,
 }
 
 impl PartialEq<Self> for ASRegion {
     fn eq(&self, other: &Self) -> bool {
-        self.start == other.start && self.end == other.end
+        self.map_info.start == other.map_info.start && self.map_info.pages == other.map_info.pages
     }
 }
 
 impl PartialOrd<Self> for ASRegion {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.start.partial_cmp(&other.start)
+        self.map_info.start.partial_cmp(&other.map_info.start)
     }
 }
 
@@ -60,50 +54,33 @@ impl Eq for ASRegion {}
 
 impl Ord for ASRegion {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.start.cmp(&other.start)
+        self.map_info.start.cmp(&other.map_info.start)
     }
 }
 
 impl ASRegion {
     pub fn new(
-        start: VirtPageNum,
-        end: VirtPageNum,
+        map_info: MapInfo,
         perms: ASPerms,
-        copyable: bool,
         name: Option<String>,
+        vmo: Box<dyn VMObject>,
     ) -> ASRegion {
-        ASRegion { start, end, perms, copyable, name, vmos: Vec::new() }
+        ASRegion { map_info, perms, name, vmo }
     }
 
-    pub fn copy(&self) -> MosResult<Vec<ASRegion>> {
-        if !self.copyable {
-            return Err(MosError::PageNoncopyable);
-        }
-        let mut cur: VirtPageNum = self.start;
-        let mut regions = vec![];
-        let mut next_copyable_region = ASRegion::new(cur, cur, self.perms, true, self.name.clone());
-        for vmo in self.vmos.iter() {
-            let vmo = match vmo.as_any().downcast_ref::<Box<dyn CopyableVMObject>>() {
-                Some(vmo) => vmo,
-                None => return Err(MosError::PageNoncopyable),
-            };
-            let copy = vmo.copy()?;
-            let cur_next = cur + copy.len() / PAGE_SIZE;
-            if copy.as_any().downcast_ref::<Box<dyn CopyableVMObject>>().is_some() {
-                next_copyable_region.end = cur_next;
-                next_copyable_region.vmos.push(copy);
-            } else {
-                regions.push(next_copyable_region);
-                next_copyable_region = ASRegion::new(cur_next, cur_next, self.perms, true, self.name.clone());
-                let noncopyable_region = ASRegion::new(cur, cur_next, self.perms, false, self.name.clone());
-                regions.push(noncopyable_region);
-            }
-            cur = cur_next;
-        }
-        if next_copyable_region.start != next_copyable_region.end {
-            regions.push(next_copyable_region);
-        }
-        Ok(regions)
+    pub fn copy(&self) -> MosResult<ASRegion> {
+        let vmo = match self.vmo.as_any().downcast_ref::<Box<dyn CopyableVMObject>>() {
+            Some(vmo) => vmo,
+            None => return Err(MosError::PageNoncopyable),
+        };
+        let copy = vmo.copy()?;
+        let region = ASRegion::new(
+            self.map_info.clone(),
+            self.perms,
+            self.name.clone(),
+            copy,
+        );
+        Ok(region)
     }
 }
 
@@ -112,11 +89,9 @@ impl ASRegion {
 pub type ASID = u16;
 
 pub struct AddressSpace {
-    base: KObjectBase,
     pub root_pt: PageTable,
     inner: RwLock<AddressSpaceInner>,
 }
-impl_kobject!(KObjectType::AddressSpace, AddressSpace);
 
 struct AddressSpaceInner {
     /// 与地址空间关联的 ASID
@@ -129,7 +104,8 @@ struct AddressSpaceInner {
 
 impl AddressSpace {
     pub fn new_bare() -> MosResult<Self> {
-        let root_pt_page = VMObjectDirect::zeroed(2, ASPerms::R | ASPerms::W)?;
+        let root_pt_page = VMObjectDirect::new_page_dir()?;
+        debug!("AddressSpace: create root page table {:?}", root_pt_page.ppn);
         let root_pt = PageTable::new(root_pt_page.ppn);
         let mut inner = AddressSpaceInner {
             asid: 0,
@@ -138,13 +114,14 @@ impl AddressSpace {
         };
         inner.pt_dirs.push(root_pt_page);
         let mut addrs = AddressSpace {
-            base: KObjectBase::default(),
             root_pt,
             inner: RwLock::new(inner),
         };
         addrs.copy_global_mappings()?;
         for region in addrs.inner.read().regions.iter() {
-            trace!("AddressSpace: {:?} {:x?} - {:x?}", region.name, region.start, region.end)
+            let start = region.map_info.start;
+            let end = start + region.map_info.pages;
+            trace!("AddressSpace: {:?} {:x?} - {:x?}", region.name, start, end)
         }
         Ok(addrs)
     }
@@ -154,9 +131,7 @@ impl AddressSpace {
         let mut inner = addrs.inner.write();
         let another_inner = another.inner.read();
         for region in another_inner.regions.iter() {
-            for copy in region.copy()?.into_iter() {
-                inner.regions.insert(copy);
-            }
+            inner.regions.insert(region.copy()?);
         }
         drop(inner);
         Ok(addrs)
@@ -173,44 +148,39 @@ impl AddressSpace {
         let end = VirtPageNum::from(KERNEL_HEAP_END);
         assert_eq!(start.index(2), 0);
         assert_eq!(end.index(2), 0);
-        let mut region = ASRegion::new(
-            start, end,
-            ASPerms::R | ASPerms::W | ASPerms::X,
-            false,
-            Some("Global mapping".to_string()),
-        );
         let mut cur = start;
         while cur < end {
-            let vmo = VMObjectDirect::new_global(1, cur, ASPerms::R | ASPerms::W | ASPerms::X);
-            region.vmos.push(Box::new(vmo));
-            cur = cur.step_lv1();
+            let next = cur.step_lv1();
+            let perms = ASPerms::R | ASPerms::W | ASPerms::X;
+            let map_info = MapInfo::new(self.root_pt, 1, PTE_SLOTS, cur);
+            let vmo = VMObjectDirect::new_global(map_info.clone(), perms);
+            let region = ASRegion::new(
+                map_info,
+                perms,
+                Some("Global lv1 mapping".to_string()),
+                Box::new(vmo),
+            );
+            cur = next;
+            self.map_region(region)?;
         }
-        self.map_region(region)?;
         Ok(())
     }
 
-    fn map_region(&mut self, region: ASRegion) -> MosResult {
+    pub fn map_region(&mut self, region: ASRegion) -> MosResult {
+        let dirs = region.vmo.map()?;
         let mut inner = self.inner.write();
-        let mut cur = region.start;
-        for vmo in region.vmos.iter() {
-            let dirs = vmo.map(self.root_pt, cur)?;
-            inner.pt_dirs.extend(dirs);
-            cur = cur + vmo.len() / PAGE_SIZE;
-        }
+        inner.regions.insert(region);
+        inner.pt_dirs.extend(dirs);
         Ok(())
     }
 
-    fn unmap_region(&mut self, start: VirtPageNum) -> MosResult {
+    pub fn unmap_region(&mut self, start: VirtPageNum) -> MosResult<ASRegion> {
         let mut inner = self.inner.write();
         let region = inner.regions
-            .extract_if(|region| region.start == start)
+            .extract_if(|region| region.map_info.start == start)
             .next()
-            .ok_or(MosError::PageNotMapped(start))?;
-        let mut cur = region.start;
-        for vmo in region.vmos.iter() {
-            vmo.unmap(self.root_pt, cur)?;
-            cur = cur + vmo.len() / PAGE_SIZE;
-        }
-        Ok(())
+            .ok_or(MosError::BadAddress(VirtAddr::from(start)))?;
+        region.vmo.unmap()?;
+        Ok(region)
     }
 }

@@ -12,7 +12,11 @@ pub enum SlotType {
 }
 
 impl PageTable {
-    pub fn new(ppn: PhysPageNum) -> Self {
+    pub const fn empty() -> Self {
+        Self { ppn: PhysPageNum(0) }
+    }
+
+    pub const fn new(ppn: PhysPageNum) -> Self {
         Self { ppn }
     }
 

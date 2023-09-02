@@ -1,4 +1,5 @@
 use core::arch::asm;
+use riscv::register::sstatus;
 use common::println;
 use crate::board::HART_CNT;
 
@@ -31,6 +32,8 @@ pub fn init() {
         asm!("mv {}, tp", out(reg) tp);
         let hart = &mut HARTS[tp];
         hart.id = tp;
+        // 允许内核访问用户态地址空间
+        sstatus::set_sum();
     };
     println!("[kernel] Hart {} initialized", current_hart().id);
 }

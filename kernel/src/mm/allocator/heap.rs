@@ -1,29 +1,19 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
+use buddy_system_allocator::Heap;
 use log::trace;
+use spin::Mutex;
 use common::arch::{kvpn_to_ppn, PAGE_SIZE, PhysPageNum, ppn_to_kvpn, VirtAddr, VirtPageNum};
 use common::println;
 use crate::board::KERNEL_HEAP_END;
-use crate::mm::allocator::Allocator;
 use crate::result::{MosError, MosResult};
 
 #[global_allocator]
-static KERNEL_HEAP: Allocator = Allocator::empty();
+static KERNEL_HEAP: HeapAllocator = HeapAllocator::empty();
 
 #[alloc_error_handler]
 pub fn handle_alloc_error(layout: Layout) -> ! {
     panic!("Failed to allocate, layout = {:?}", layout);
-}
-
-unsafe impl GlobalAlloc for Allocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.0.lock().alloc(layout)
-            .map_or(0 as *mut u8, |va| va.as_ptr())
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        self.0.lock().dealloc(NonNull::new_unchecked(ptr), layout);
-    }
 }
 
 pub struct HeapFrameTracker {
@@ -33,8 +23,27 @@ pub struct HeapFrameTracker {
 
 impl Drop for HeapFrameTracker {
     fn drop(&mut self) {
-        trace!("HeapAllocator: dealloc kernel frame {:?} for {} pages", self.ppn, self.pages);
+        trace!("HeapFrameTracker: dealloc kernel frame {:?} for {} pages", self.ppn, self.pages);
         dealloc_kernel_pages(&self);
+    }
+}
+
+struct HeapAllocator(Mutex<Heap<32>>);
+
+impl HeapAllocator {
+    const fn empty() -> Self {
+        HeapAllocator(Mutex::new(Heap::empty()))
+    }
+}
+
+unsafe impl GlobalAlloc for HeapAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        self.0.lock().alloc(layout)
+            .map_or(0 as *mut u8, |va| va.as_ptr())
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        self.0.lock().dealloc(NonNull::new_unchecked(ptr), layout);
     }
 }
 

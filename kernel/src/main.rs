@@ -10,7 +10,6 @@ extern crate alloc;
 mod boot;
 mod board;
 mod logger;
-mod kobject;
 mod mm;
 mod result;
 mod processor;
@@ -60,9 +59,7 @@ fn start_main_hart() {
     mm::allocator::init();
     logger::init();
 
-    let root_as = boot::init_root_task_address_space().unwrap();
-    unsafe { root_as.activate(); }
-    println!("[kernel] Root task address space activated");
+    boot::init_root_task_address_space().unwrap();
 }
 
 fn start_other_hart() {
