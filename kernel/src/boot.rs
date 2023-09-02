@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use crate::mm::vmas::AddressSpace;
+use crate::mm::addr_space::AddressSpace;
 use crate::result::MosResult;
 
 pub fn init_root_task_address_space() -> MosResult<Box<AddressSpace>> {

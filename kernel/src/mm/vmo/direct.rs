@@ -6,7 +6,7 @@ use crate::impl_kobject;
 use crate::kobject::{KObject, KObjectBase, KObjectType, KoID};
 use crate::mm::allocator::heap;
 use crate::mm::page_table::{PageTable, SlotType};
-use crate::mm::vmas::ASPerms;
+use crate::mm::addr_space::ASPerms;
 use crate::mm::vmo::VMObject;
 use crate::result::{MosError, MosResult};
 
