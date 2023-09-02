@@ -1,10 +1,11 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use log::trace;
-use common::arch::{kvpn_to_ppn, PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum, VPN_BITS};
+use common::arch::{kvpn_to_ppn, PAGE_SIZE, PageTableEntry, PhysPageNum, ppn_to_kvpn, PTEFlags, VirtAddr, VirtPageNum, VPN_BITS};
 use crate::impl_kobject;
 use crate::kobject::{KObject, KObjectBase, KObjectType, KoID};
 use crate::mm::allocator::heap;
+use crate::mm::allocator::heap::HeapFrameTracker;
 use crate::mm::page_table::{PageTable, SlotType};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::vmo::VMObject;
@@ -13,12 +14,12 @@ use crate::result::{MosError, MosResult};
 /// 直接映射：用于分配内核对象的页帧，可以直接映射到内核线性地址空间
 pub struct VMObjectDirect {
     base: KObjectBase,
-    global: bool,
     level: usize,
     pages: usize,
     pub ppn: PhysPageNum,
     pub vpn: VirtPageNum,
     perms: ASPerms,
+    _tracker: Option<HeapFrameTracker>,
 }
 impl_kobject!(KObjectType::VMObject, VMObjectDirect);
 
@@ -29,20 +30,21 @@ impl VMObjectDirect {
         let ppn = kvpn_to_ppn(vpn);
         Self {
             base: KObjectBase::default(),
-            global: true,
             level, pages, vpn, ppn, perms,
+            _tracker: None,
         }
     }
 
     /// 从堆中分配一个新的直接映射对象
     pub fn zeroed(level: usize, perms: ASPerms) -> MosResult<Self> {
         let pages = 1 << ((2 - level) * VPN_BITS);
-        let vpn = heap::alloc_kernel_pages(pages)?;
-        let ppn = kvpn_to_ppn(vpn);
+        let tracker = heap::alloc_kernel_frames(pages)?;
+        let ppn = tracker.ppn;
+        let vpn = ppn_to_kvpn(ppn);
         let mut obj = Self {
             base: KObjectBase::default(),
-            global: false,
-            level, pages, vpn, ppn, perms
+            level, pages, vpn, ppn, perms,
+            _tracker: Some(tracker),
         };
         obj.get_slice_mut().fill(0);
         Ok(obj)
@@ -59,15 +61,6 @@ impl VMObjectDirect {
         unsafe {
             let ptr = VirtAddr::from(self.vpn).0 as *mut u8;
             core::slice::from_raw_parts_mut(ptr, self.len())
-        }
-    }
-}
-
-impl Drop for VMObjectDirect {
-    fn drop(&mut self) {
-        if !self.global {
-            trace!("VMObjectDirect: drop {:x?}", self.vpn);
-            heap::dealloc_kernel_pages(self.vpn, self.len()).unwrap();
         }
     }
 }
@@ -101,7 +94,7 @@ impl VMObject for VMObjectDirect {
             let pte = pt.get_pte_mut(*idx);
             if i == self.level {
                 if pte.valid() {
-                    return Err(MosError::PageAlreadyMapped);
+                    return Err(MosError::PageAlreadyMapped(pte.ppn()));
                 }
                 let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D;
                 if self.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
@@ -116,7 +109,7 @@ impl VMObject for VMObjectDirect {
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    SlotType::Page(_) => return Err(MosError::PageAlreadyMapped),
+                    SlotType::Page(_) => return Err(MosError::PageAlreadyMapped(pte.ppn())),
                     SlotType::Invalid => {
                         let page = VMObjectDirect::zeroed(2, ASPerms::empty())?;
                         trace!(

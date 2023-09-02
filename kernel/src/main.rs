@@ -3,6 +3,7 @@
 #![feature(asm_const)]
 #![feature(naked_functions)]
 #![feature(alloc_error_handler)]
+#![feature(btree_extract_if)]
 
 extern crate alloc;
 

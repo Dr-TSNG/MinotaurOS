@@ -1,5 +1,4 @@
 pub mod direct;
-mod physical;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;

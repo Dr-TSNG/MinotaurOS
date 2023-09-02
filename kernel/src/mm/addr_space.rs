@@ -30,12 +30,17 @@ bitflags! {
 }
 
 pub struct ASRegion {
+    /// 区域起始页号
     pub start: VirtPageNum,
+    /// 区域结束页号（开区间）
     pub end: VirtPageNum,
+    /// 区域权限
     pub perms: ASPerms,
-    pub public: bool,
+    /// 区域是否可复制
     pub copyable: bool,
+    /// 区域名称
     pub name: Option<String>,
+    /// 区域包含的 VM 对象
     pub vmos: Vec<Box<dyn VMObject>>,
 }
 
@@ -64,11 +69,10 @@ impl ASRegion {
         start: VirtPageNum,
         end: VirtPageNum,
         perms: ASPerms,
-        public: bool,
         copiable: bool,
         name: Option<String>,
     ) -> ASRegion {
-        ASRegion { start, end, perms, public, copyable: copiable, name, vmos: Vec::new() }
+        ASRegion { start, end, perms, copyable: copiable, name, vmos: Vec::new() }
     }
 
     pub fn copy(&self) -> MosResult<Vec<ASRegion>> {
@@ -77,7 +81,7 @@ impl ASRegion {
         }
         let mut cur: VirtPageNum = self.start;
         let mut regions = vec![];
-        let mut next_copiable_region = ASRegion::new(cur, cur, self.perms, self.public, true, self.name.clone());
+        let mut next_copiable_region = ASRegion::new(cur, cur, self.perms, true, self.name.clone());
         for vmo in self.vmos.iter() {
             let vmo = match vmo.as_any().downcast_ref::<Box<dyn CopiableVMObject>>() {
                 Some(vmo) => vmo,
@@ -90,8 +94,8 @@ impl ASRegion {
                 next_copiable_region.vmos.push(copy);
             } else {
                 regions.push(next_copiable_region);
-                next_copiable_region = ASRegion::new(cur_next, cur_next, self.perms, self.public, true, self.name.clone());
-                let noncopyable_region = ASRegion::new(cur, cur_next, self.perms, self.public, false, self.name.clone());
+                next_copiable_region = ASRegion::new(cur_next, cur_next, self.perms, true, self.name.clone());
+                let noncopyable_region = ASRegion::new(cur, cur_next, self.perms, false, self.name.clone());
                 regions.push(noncopyable_region);
             }
             cur = cur_next;
@@ -100,12 +104,6 @@ impl ASRegion {
             regions.push(next_copiable_region);
         }
         Ok(regions)
-    }
-}
-
-impl Drop for ASRegion {
-    fn drop(&mut self) {
-        // TODO: unmap
     }
 }
 
@@ -121,9 +119,12 @@ pub struct AddressSpace {
 impl_kobject!(KObjectType::AddressSpace, AddressSpace);
 
 struct AddressSpaceInner {
+    /// 与地址空间关联的 ASID
     asid: ASID,
+    /// 地址空间中的区域
     regions: BTreeSet<ASRegion>,
-    pt_tracker: Vec<VMObjectDirect>,
+    /// 该地址空间关联的页表帧
+    pt_dirs: Vec<VMObjectDirect>,
 }
 
 impl AddressSpace {
@@ -133,9 +134,9 @@ impl AddressSpace {
         let mut inner = AddressSpaceInner {
             asid: 0,
             regions: BTreeSet::new(),
-            pt_tracker: vec![],
+            pt_dirs: vec![],
         };
-        inner.pt_tracker.push(root_pt_page);
+        inner.pt_dirs.push(root_pt_page);
         let mut addrs = AddressSpace {
             base: KObjectBase::default(),
             root_pt,
@@ -176,19 +177,40 @@ impl AddressSpace {
             start, end,
             ASPerms::R | ASPerms::W | ASPerms::X,
             false,
-            false,
             Some("Global mapping".to_string()),
         );
         let mut cur = start;
-        let mut inner = self.inner.write();
         while cur < end {
             let vmo = VMObjectDirect::new_global(1, cur, ASPerms::R | ASPerms::W | ASPerms::X);
-            let dirs = vmo.map(self.root_pt, cur)?;
-            inner.pt_tracker.extend(dirs);
             region.vmos.push(Box::new(vmo));
             cur = cur.step_lv1();
         }
-        inner.regions.insert(region);
+        self.map_region(region)?;
+        Ok(())
+    }
+
+    fn map_region(&mut self, region: ASRegion) -> MosResult {
+        let mut inner = self.inner.write();
+        let mut cur = region.start;
+        for vmo in region.vmos.iter() {
+            let dirs = vmo.map(self.root_pt, cur)?;
+            inner.pt_dirs.extend(dirs);
+            cur = cur + vmo.len() / PAGE_SIZE;
+        }
+        Ok(())
+    }
+
+    fn unmap_region(&mut self, start: VirtPageNum) -> MosResult {
+        let mut inner = self.inner.write();
+        let region = inner.regions
+            .extract_if(|region| region.start == start)
+            .next()
+            .ok_or(MosError::PageNotMapped(start))?;
+        let mut cur = region.start;
+        for vmo in region.vmos.iter() {
+            vmo.unmap(self.root_pt, cur)?;
+            cur = cur + vmo.len() / PAGE_SIZE;
+        }
         Ok(())
     }
 }
