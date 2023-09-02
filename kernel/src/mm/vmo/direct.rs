@@ -4,10 +4,9 @@ use log::trace;
 use common::arch::{kvpn_to_ppn, PAGE_SIZE, PageTableEntry, PhysPageNum, ppn_to_kvpn, PTEFlags, VirtAddr, VirtPageNum, VPN_BITS};
 use crate::impl_kobject;
 use crate::kobject::{KObject, KObjectBase, KObjectType, KoID};
-use crate::mm::allocator::heap;
-use crate::mm::allocator::heap::HeapFrameTracker;
 use crate::mm::page_table::{PageTable, SlotType};
 use crate::mm::addr_space::ASPerms;
+use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::vmo::VMObject;
 use crate::result::{MosError, MosResult};
 
@@ -38,7 +37,7 @@ impl VMObjectDirect {
     /// 从堆中分配一个新的直接映射对象
     pub fn zeroed(level: usize, perms: ASPerms) -> MosResult<Self> {
         let pages = 1 << ((2 - level) * VPN_BITS);
-        let tracker = heap::alloc_kernel_frames(pages)?;
+        let tracker = alloc_kernel_frames(pages)?;
         let ppn = tracker.ppn;
         let vpn = ppn_to_kvpn(ppn);
         let mut obj = Self {

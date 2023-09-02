@@ -57,7 +57,7 @@ fn start_main_hart() {
     println!("[kernel] Minotaur OS");
     while HART_READY.load(Ordering::Acquire) != HART_CNT - 1 {}
     println!("[kernel] All harts loaded");
-    mm::allocator::heap::init();
+    mm::allocator::init();
     logger::init();
 
     let root_as = boot::init_root_task_address_space().unwrap();
