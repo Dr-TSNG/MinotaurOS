@@ -26,6 +26,8 @@ use crate::processor::hart::current_hart;
 
 global_asm!(include_str!("entry.asm"));
 
+const LOGO: &str = include_str!("../../logo.txt");
+
 static HART_READY: AtomicUsize = AtomicUsize::new(0);
 
 static KERNEL_READY: AtomicBool = AtomicBool::new(false);
@@ -53,6 +55,7 @@ pub fn setup_stack(hart: usize) {
 }
 
 fn start_main_hart() {
+    println!("{}", LOGO);
     println!("[kernel] Minotaur OS");
     while HART_READY.load(Ordering::Acquire) != HART_CNT - 1 {}
     println!("[kernel] All harts loaded");
