@@ -16,6 +16,6 @@ pub trait VMObject : KObject {
     fn unmap(&self, pt: PageTable, vpn: VirtPageNum) -> MosResult;
 }
 
-pub trait CopiableVMObject : VMObject {
+pub trait CopyableVMObject : VMObject {
     fn copy(&self) -> MosResult<Box<dyn VMObject>>;
 }

@@ -17,7 +17,7 @@ use crate::impl_kobject;
 use crate::kobject::{KObject, KObjectBase, KObjectType, KoID};
 use crate::mm::page_table::PageTable;
 use crate::mm::vmo::direct::VMObjectDirect;
-use crate::mm::vmo::{CopiableVMObject, VMObject};
+use crate::mm::vmo::{CopyableVMObject, VMObject};
 use crate::result::{MosError, MosResult};
 
 bitflags! {
@@ -69,10 +69,10 @@ impl ASRegion {
         start: VirtPageNum,
         end: VirtPageNum,
         perms: ASPerms,
-        copiable: bool,
+        copyable: bool,
         name: Option<String>,
     ) -> ASRegion {
-        ASRegion { start, end, perms, copyable: copiable, name, vmos: Vec::new() }
+        ASRegion { start, end, perms, copyable, name, vmos: Vec::new() }
     }
 
     pub fn copy(&self) -> MosResult<Vec<ASRegion>> {
@@ -81,27 +81,27 @@ impl ASRegion {
         }
         let mut cur: VirtPageNum = self.start;
         let mut regions = vec![];
-        let mut next_copiable_region = ASRegion::new(cur, cur, self.perms, true, self.name.clone());
+        let mut next_copyable_region = ASRegion::new(cur, cur, self.perms, true, self.name.clone());
         for vmo in self.vmos.iter() {
-            let vmo = match vmo.as_any().downcast_ref::<Box<dyn CopiableVMObject>>() {
+            let vmo = match vmo.as_any().downcast_ref::<Box<dyn CopyableVMObject>>() {
                 Some(vmo) => vmo,
                 None => return Err(MosError::PageNoncopyable),
             };
             let copy = vmo.copy()?;
             let cur_next = cur + copy.len() / PAGE_SIZE;
-            if copy.as_any().downcast_ref::<Box<dyn CopiableVMObject>>().is_some() {
-                next_copiable_region.end = cur_next;
-                next_copiable_region.vmos.push(copy);
+            if copy.as_any().downcast_ref::<Box<dyn CopyableVMObject>>().is_some() {
+                next_copyable_region.end = cur_next;
+                next_copyable_region.vmos.push(copy);
             } else {
-                regions.push(next_copiable_region);
-                next_copiable_region = ASRegion::new(cur_next, cur_next, self.perms, true, self.name.clone());
+                regions.push(next_copyable_region);
+                next_copyable_region = ASRegion::new(cur_next, cur_next, self.perms, true, self.name.clone());
                 let noncopyable_region = ASRegion::new(cur, cur_next, self.perms, false, self.name.clone());
                 regions.push(noncopyable_region);
             }
             cur = cur_next;
         }
-        if next_copiable_region.start != next_copiable_region.end {
-            regions.push(next_copiable_region);
+        if next_copyable_region.start != next_copyable_region.end {
+            regions.push(next_copyable_region);
         }
         Ok(regions)
     }

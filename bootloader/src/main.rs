@@ -14,9 +14,6 @@ const VADDR_LV0_SLOT: usize = VirtPageNum(KERNEL_VADDR_BASE.0 >> PAGE_BITS).inde
 
 global_asm!(include_str!("boot.asm"));
 
-#[repr(align(2097152))] // 2 MiB
-struct AlignLv1;
-
 #[repr(align(4096))]
 struct PageTable([PageTableEntry; PTE_SLOTS]);
 
