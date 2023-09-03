@@ -1,26 +1,36 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
-BOOTLOADER_PADDR_BASE = 0x80200000;
-KERNEL_PADDR_BASE = 0x80400000;
+KERNEL_VADDR_BASE = 0xFFFFFFFF80200000;
 
 SECTIONS
 {
-    . = BOOTLOADER_PADDR_BASE;
+    . = KERNEL_VADDR_BASE;
+    skernel = .;
+
+    stext = .;
     .text : {
         *(.text.entry)
         *(.text .text.*)
     }
 
+    . = ALIGN(4K);
+    etext = .;
+    srodata = .;
     .rodata : {
         *(.rodata .rodata.*)
         *(.srodata .srodata.*)
     }
 
+    . = ALIGN(4K);
+    erodata = .;
+    sdata = .;
     .data : {
         *(.data .data.*)
         *(.sdata .sdata.*)
     }
 
+    . = ALIGN(4K);
+    edata = .;
     .bss : {
         *(.bss.stack)
         sbss = .;
@@ -30,8 +40,7 @@ SECTIONS
 
     . = ALIGN(4K);
     ebss = .;
-
-    . = KERNEL_PADDR_BASE;
+    ekernel = .;
 
     /DISCARD/ : {
         *(.eh_frame)

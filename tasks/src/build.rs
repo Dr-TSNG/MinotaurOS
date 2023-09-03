@@ -7,8 +7,6 @@ use clap::{Parser, Subcommand};
 pub enum Build {
     #[clap(name = "kernel")]
     Kernel(BuildConfig),
-    #[clap(name = "bootloader")]
-    Bootloader(BuildConfig),
 }
 
 #[derive(Parser)]
@@ -54,7 +52,6 @@ impl CommandExt for Command {
 pub fn run(command: Build) -> Result<()> {
     match command {
         Build::Kernel(config) => build_kernel(&config)?,
-        Build::Bootloader(config) => build_bootloader(&config)?,
     }
     Ok(())
 }
@@ -84,31 +81,6 @@ fn build_kernel(config: &BuildConfig) -> Result<()> {
         .arg("--strip-all")
         .arg("-O").arg("binary")
         .arg(build_dir_file("kernel.bin", config.release)?)
-        .spawn()?.wait()?
-        .exit_ok()?;
-    Ok(())
-}
-
-fn build_bootloader(config: &BuildConfig) -> Result<()> {
-    build_kernel(config)?;
-    Command::new("cargo")
-        .current_dir("bootloader")
-        .env("BOARD", &config.board)
-        .env("KERNEL_BIN", build_dir_file("kernel.bin", config.release)?)
-        .arg("build")
-        .offline(config.offline)
-        .release(config.release)
-        .arg("--no-default-features")
-        .arg("--features")
-        .arg(format!("board_{}", config.board))
-        .spawn()?.wait()?
-        .exit_ok()?;
-    Command::new("rust-objcopy")
-        .arg("--binary-architecture=riscv64")
-        .arg(build_dir_file("bootloader", config.release)?)
-        .arg("--strip-all")
-        .arg("-O").arg("binary")
-        .arg(build_dir_file("bootloader.bin", config.release)?)
         .spawn()?.wait()?
         .exit_ok()?;
     Ok(())

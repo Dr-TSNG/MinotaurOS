@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use log::trace;
-use common::arch::{PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum};
+use crate::arch::{PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_user_frames, UserFrameTracker};
 use crate::mm::page_table::{PageTable, SlotType};

@@ -40,14 +40,14 @@ fn run_qemu(config: &RunConfig) -> Result<()> {
         board: "qemu".to_string(),
         log_level: config.log_level.clone(),
     };
-    build::run(build::Build::Bootloader(build_config))?;
+    build::run(build::Build::Kernel(build_config))?;
     Command::new("qemu-system-riscv64")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .arg("-machine").arg("virt")
         .arg("-nographic")
-        .arg("-kernel").arg(build::build_dir_file("bootloader.bin", config.release)?)
+        .arg("-kernel").arg(build::build_dir_file("kernel.bin", config.release)?)
         .arg("-bios").arg(&config.sbi)
         .arg("-smp").arg(format!("{}", config.smp))
         .arg("-m").arg(&config.mem)

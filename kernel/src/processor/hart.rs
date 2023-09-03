@@ -1,7 +1,7 @@
 use core::arch::asm;
 use riscv::register::sstatus;
-use common::println;
 use crate::board::HART_CNT;
+use crate::println;
 
 pub struct Hart {
     pub id: usize,
@@ -26,12 +26,11 @@ pub fn current_hart() -> &'static mut Hart {
     }
 }
 
-pub fn init() {
+pub fn init(hart_id: usize) {
     unsafe {
-        let tp: usize;
-        asm!("mv {}, tp", out(reg) tp);
-        let hart = &mut HARTS[tp];
-        hart.id = tp;
+        // 将当前 hart 的 id 保存到 tp 寄存器
+        asm!("mv tp, {}", in(reg) hart_id);
+        HARTS[hart_id].id = hart_id;
         // 允许内核访问用户态地址空间
         sstatus::set_sum();
     };

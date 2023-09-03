@@ -4,7 +4,7 @@ pub mod lazy;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::any::Any;
-use common::arch::VirtPageNum;
+use crate::arch::VirtPageNum;
 use crate::mm::addr_space::ASPerms;
 use crate::mm::page_table::PageTable;
 use crate::result::MosResult;

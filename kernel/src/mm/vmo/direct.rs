@@ -1,7 +1,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use log::trace;
-use common::arch::{kvpn_to_ppn, PAGE_SIZE, PageTableEntry, PhysPageNum, ppn_to_kvpn, PTEFlags, VirtAddr, VirtPageNum};
+use crate::arch::{kvpn_to_ppn, PAGE_SIZE, PageTableEntry, PhysPageNum, ppn_to_kvpn, PTEFlags, VirtAddr, VirtPageNum};
 use crate::mm::page_table::{PageTable, SlotType};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};

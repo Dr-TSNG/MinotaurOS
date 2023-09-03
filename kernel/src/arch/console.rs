@@ -1,6 +1,6 @@
 use core::fmt::{self, Write};
 use spin::Mutex;
-use super::riscv::sbi::console_putchar;
+use super::rv64::sbi::console_putchar;
 
 struct Stdout;
 

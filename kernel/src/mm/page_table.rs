@@ -1,4 +1,4 @@
-use common::arch::{paddr_to_kvaddr, PageTableEntry, PhysAddr, PhysPageNum, PTE_SLOTS, PTEType, VirtAddr};
+use crate::arch::{paddr_to_kvaddr, PageTableEntry, PhysAddr, PhysPageNum, PTE_SLOTS, PTEType, VirtAddr};
 
 #[derive(Copy, Clone, Debug)]
 pub struct PageTable {

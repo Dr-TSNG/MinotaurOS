@@ -3,9 +3,9 @@ use core::ptr::NonNull;
 use buddy_system_allocator::Heap;
 use log::trace;
 use spin::Mutex;
-use common::arch::{kvpn_to_ppn, PAGE_SIZE, PhysPageNum, ppn_to_kvpn, VirtAddr, VirtPageNum};
-use common::println;
-use crate::board::KERNEL_HEAP_END;
+use crate::arch::{kvpn_to_ppn, PAGE_SIZE, PhysPageNum, ppn_to_kvpn, VirtAddr, VirtPageNum};
+use crate::config::KERNEL_HEAP_END;
+use crate::println;
 use crate::result::{MosError, MosResult};
 
 #[global_allocator]

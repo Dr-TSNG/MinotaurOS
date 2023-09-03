@@ -2,9 +2,9 @@ use alloc::vec::Vec;
 use bitvec_rs::BitVec;
 use log::trace;
 use spin::Mutex;
-use common::arch::PhysPageNum;
-use common::println;
+use crate::arch::PhysPageNum;
 use crate::board::PHYS_MEMORY;
+use crate::println;
 use crate::result::{MosError, MosResult};
 
 static USER_ALLOCATOR: Mutex<UserFrameAllocator> = Mutex::new(UserFrameAllocator::new());
@@ -110,10 +110,8 @@ pub fn alloc_user_frames(pages: usize) -> MosResult<UserFrameTracker> {
 
 pub fn init() {
     let mut allocator = USER_ALLOCATOR.lock();
-    unsafe {
-        PHYS_MEMORY.iter().for_each(|&(start, end)| {
-            println!("[kernel] Initialize user memory: {:?} - {:?}", start, end);
-            allocator.add_to_heap(start.into(), end.into());
-        });
-    }
+    PHYS_MEMORY.iter().for_each(|&(start, end)| {
+        println!("[kernel] Initialize user memory: {:?} - {:?}", start, end);
+        allocator.add_to_heap(start.into(), end.into());
+    });
 }

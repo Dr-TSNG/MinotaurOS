@@ -9,12 +9,9 @@ env:
 kernel:
 	@cargo task build kernel --board $(BOARD)
 
-bootloader:
-	@cargo task build bootloader --board $(BOARD)
-
 debug:
 	@cargo task debug qemu
 
-all: bootloader
+all: kernel
 
-.PHONY: clean env kernel bootloader qemu all
+.PHONY: clean env kernel qemu all

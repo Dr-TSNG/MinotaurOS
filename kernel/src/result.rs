@@ -1,4 +1,6 @@
-use common::arch::{PhysPageNum, VirtAddr};
+#![allow(unused)]
+
+use crate::arch::{PhysPageNum, VirtAddr};
 
 pub type MosResult<T = ()> = Result<T, MosError>;
 

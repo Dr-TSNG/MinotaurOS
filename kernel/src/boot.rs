@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use log::info;
-use common::arch::{PAGE_SIZE, VirtAddr, VirtPageNum};
+use crate::arch::{PAGE_SIZE, VirtAddr, VirtPageNum};
 use crate::mm::addr_space::{AddressSpace, ASPerms, ASRegion};
 use crate::mm::vmo::lazy::VMObjectLazy;
 use crate::mm::vmo::MapInfo;

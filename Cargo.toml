@@ -1,8 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "bootloader",
-    "common",
     "kernel",
     "tasks",
 ]

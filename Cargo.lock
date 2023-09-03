@@ -81,14 +81,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c2d713722e2cb980962a6e18b1a5fa83e31da20d72fa345644870b9b7c1e66b"
 
 [[package]]
-name = "bootloader"
-version = "0.1.0"
-dependencies = [
- "common",
- "riscv",
-]
-
-[[package]]
 name = "buddy_system_allocator"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -145,15 +137,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
-name = "common"
-version = "0.1.0"
-dependencies = [
- "bitflags",
- "riscv",
- "spin",
-]
-
-[[package]]
 name = "critical-section"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -188,7 +171,6 @@ dependencies = [
  "bitflags",
  "bitvec-rs",
  "buddy_system_allocator",
- "common",
  "downcast-rs",
  "log",
  "riscv",

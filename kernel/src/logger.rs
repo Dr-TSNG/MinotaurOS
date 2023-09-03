@@ -1,5 +1,5 @@
 use log::{Level, LevelFilter, Metadata, Record};
-use common::println;
+use crate::println;
 
 #[cfg(feature = "error")]
 const LOG_LEVEL: LevelFilter = LevelFilter::Error;
