@@ -13,6 +13,7 @@ mod logger;
 mod mm;
 mod result;
 mod processor;
+mod trap;
 
 
 use core::arch::{asm, global_asm};
@@ -56,11 +57,11 @@ pub fn setup_stack(hart: usize) {
 
 fn start_main_hart() {
     println!("{}", LOGO);
-    println!("[kernel] Minotaur OS");
     while HART_READY.load(Ordering::Acquire) != HART_CNT - 1 {}
     println!("[kernel] All harts loaded");
     mm::allocator::init();
     logger::init();
+    trap::init();
 
     boot::init_root_task_address_space().unwrap();
 }
@@ -68,6 +69,7 @@ fn start_main_hart() {
 fn start_other_hart() {
     HART_READY.fetch_add(1, Ordering::SeqCst);
     while !KERNEL_READY.load(Ordering::Acquire) {}
+    trap::init();
 }
 
 #[no_mangle]
