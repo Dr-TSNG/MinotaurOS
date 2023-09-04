@@ -3,14 +3,8 @@
 .section .text.entry
 .globl _start
 _start:
-    # a0 = hart id
-    # pc = KERNEL_PADDR_BASE
-
-    # stack_size = 4096 * 16
-    # 设置栈指针 sp = boot_stack_top - hart_id * stack_size
-    slli t0, a0, 16
+    # 设置启动栈
     la sp, boot_stack_top
-    sub sp, sp, t0
 
     # 设置引导页表
     la t0, boot_page_table
@@ -24,7 +18,7 @@ _start:
 
 .section .bss.stack
 boot_stack:
-    .space 4096 * 16 * 8  # 8 CPUS at most
+    .space 4096 * 16
 boot_stack_top:
 
 .section .rodata

@@ -1,45 +1,46 @@
 #![allow(unused)]
 
 use core::arch::asm;
+use sbi_spec::dbcn::{CONSOLE_READ, CONSOLE_WRITE, EID_DBCN};
+use sbi_spec::srst::{EID_SRST, RESET_REASON_NO_REASON, RESET_TYPE_SHUTDOWN, SYSTEM_RESET};
+use sbi_spec::time::{EID_TIME, SET_TIMER};
 
-const SBI_SET_TIMER: usize = 0;
-const SBI_CONSOLE_PUTCHAR: usize = 1;
-const SBI_CONSOLE_GETCHAR: usize = 2;
-const SBI_CLEAR_IPI: usize = 3;
-const SBI_SEND_IPI: usize = 4;
-const SBI_REMOTE_FENCE_I: usize = 5;
-const SBI_REMOTE_SFENCE_VMA: usize = 6;
-const SBI_REMOTE_SFENCE_VMA_ASID: usize = 7;
-const SBI_SHUTDOWN: usize = 8;
+pub use sbi_spec::binary::Error as SBIError;
+use crate::arch::{kvaddr_to_paddr, VirtAddr};
 
 #[inline(always)]
-fn sbi_call(which: usize, arg0: usize, arg1: usize, arg2: usize) -> usize {
-    let mut ret;
+fn sbi_call(eid: usize, fid: usize, arg0: usize, arg1: usize, arg2: usize) -> Result<usize, SBIError> {
+    let error: usize;
+    let value: usize;
     unsafe {
-        asm!(
-            "ecall",
-            inlateout("x10") arg0 => ret,
-            in("x11") arg1,
-            in("x12") arg2,
-            in("x17") which,
-        );
+        asm! {
+        "ecall",
+        inlateout("a0") arg0 => error,
+        inlateout("a1") arg1 => value,
+        in("a2") arg2,
+        in("a6") fid,
+        in("a7") eid,
+        };
     }
-    ret
+    let ret = sbi_spec::binary::SbiRet { error, value };
+    ret.into_result()
 }
 
-pub fn set_timer(timer: usize) {
-    sbi_call(SBI_SET_TIMER, timer, 0, 0);
+pub fn set_timer(timer: usize) -> Result<(), SBIError> {
+    sbi_call(EID_TIME, SET_TIMER, timer, 0, 0).map(|_| ())
 }
 
-pub fn console_putchar(c: usize) {
-    sbi_call(SBI_CONSOLE_PUTCHAR, c, 0, 0);
+pub fn console_read(buffer: &mut [u8]) -> Result<usize, SBIError> {
+    sbi_call(EID_DBCN, CONSOLE_READ, buffer.len(), buffer.as_mut_ptr() as usize, 0)
 }
 
-pub fn console_getchar() -> usize {
-    sbi_call(SBI_CONSOLE_GETCHAR, 0, 0, 0)
+pub fn console_write(content: &str) -> Result<usize, SBIError> {
+    let content = content.as_bytes();
+    let paddr = kvaddr_to_paddr(VirtAddr(content.as_ptr() as usize));
+    sbi_call(EID_DBCN, CONSOLE_WRITE, content.len(), paddr.0, 0)
 }
 
-pub fn shutdown() -> ! {
-    sbi_call(SBI_SHUTDOWN, 0, 0, 0);
-    panic!("It should shutdown!");
+pub fn shutdown() -> Result<!, SBIError> {
+    sbi_call(EID_SRST, SYSTEM_RESET, RESET_TYPE_SHUTDOWN as usize, RESET_REASON_NO_REASON as usize, 0)?;
+    unreachable!()
 }

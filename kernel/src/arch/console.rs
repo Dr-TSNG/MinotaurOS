@@ -1,14 +1,12 @@
 use core::fmt::{self, Write};
 use spin::Mutex;
-use super::rv64::sbi::console_putchar;
+use crate::arch::rv64;
 
 struct Stdout;
 
 impl Write for Stdout {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        for c in s.chars() {
-            console_putchar(c as usize);
-        }
+        rv64::sbi::console_write(s).unwrap();
         Ok(())
     }
 }

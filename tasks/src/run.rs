@@ -14,7 +14,7 @@ pub enum Run {
 pub struct RunConfig {
     #[clap(long, default_value_t = true)]
     pub release: bool,
-    #[clap(long, default_value = "prebuilts/rustsbi-qemu.bin")]
+    #[clap(long, default_value = "prebuilts/opensbi-qemu.bin")]
     pub sbi: String,
     #[clap(long, default_value = "2")]
     pub smp: u8,
