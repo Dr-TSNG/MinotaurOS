@@ -4,8 +4,10 @@
 #![feature(asm_const)]
 #![feature(btree_extract_if)]
 #![feature(const_trait_impl)]
+#![feature(inline_const)]
 #![feature(naked_functions)]
 #![feature(never_type)]
+#![feature(sync_unsafe_cell)]
 
 extern crate alloc;
 

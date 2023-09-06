@@ -32,8 +32,6 @@ SECTIONS
         . = ALIGN(4K);
         *(.bss.heap)
         . = ALIGN(4K);
-        .(.bss.tls)
-        . = ALIGN(4K);
         *(.bss .bss.*)
         *(.sbss .sbss.*)
     }

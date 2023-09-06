@@ -1,5 +1,4 @@
 mod heap;
-mod tls;
 mod user;
 
 pub use heap::{alloc_kernel_frames, HeapFrameTracker};
