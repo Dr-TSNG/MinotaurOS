@@ -10,8 +10,10 @@ use downcast_rs::Downcast;
 use log::{debug, trace};
 use riscv::register::satp;
 use spin::RwLock;
-use crate::arch::{PTE_SLOTS, VirtAddr, VirtPageNum};
-use crate::config::{KERNEL_HEAP_END, KERNEL_VADDR_BASE};
+use crate::arch::{kvpn_to_ppn, PhysPageNum, PTE_SLOTS, VirtAddr, VirtPageNum};
+use crate::board::CONSOLE_PADDR_BASE;
+use crate::config::{CONSOLE_VADDR_BASE, KERNEL_VADDR_BASE, LINKAGE_EKERNEL};
+use crate::debug::console;
 use crate::mm::page_table::PageTable;
 use crate::mm::vmo::direct::VMObjectDirect;
 use crate::mm::vmo::{CopyableVMObject, MapInfo, VMObject};
@@ -144,15 +146,16 @@ impl AddressSpace {
 
     fn copy_global_mappings(&mut self) -> MosResult {
         let start = VirtPageNum::from(KERNEL_VADDR_BASE);
-        let end = VirtPageNum::from(KERNEL_HEAP_END);
+        let end = VirtPageNum::from(*LINKAGE_EKERNEL);
         assert_eq!(start.index(2), 0);
         assert_eq!(end.index(2), 0);
         let mut cur = start;
         while cur < end {
             let next = cur.step_lv1();
-            let perms = ASPerms::R | ASPerms::W | ASPerms::X;
             let map_info = MapInfo::new(self.root_pt, 1, PTE_SLOTS, cur);
-            let vmo = VMObjectDirect::new_global(map_info.clone(), perms);
+            let ppn = kvpn_to_ppn(cur);
+            let perms = ASPerms::R | ASPerms::W | ASPerms::X;
+            let vmo = VMObjectDirect::new_global(map_info.clone(), ppn, perms);
             let region = ASRegion::new(
                 map_info,
                 perms,
@@ -161,6 +164,20 @@ impl AddressSpace {
             );
             cur = next;
             self.map_region(region)?;
+        }
+        if let Some(base) = CONSOLE_PADDR_BASE {
+            let map_info = MapInfo::new(self.root_pt, 2, 1, VirtPageNum::from(CONSOLE_VADDR_BASE));
+            let ppn = PhysPageNum::from(base);
+            let perms = ASPerms::R | ASPerms::W;
+            let vmo = VMObjectDirect::new_global(map_info.clone(), ppn, perms);
+            let region = ASRegion::new(
+                map_info,
+                ASPerms::R | ASPerms::W,
+                Some("Main tty MMIO".to_string()),
+                Box::new(vmo),
+            );
+            self.map_region(region)?;
+            console::try_init_late();
         }
         Ok(())
     }

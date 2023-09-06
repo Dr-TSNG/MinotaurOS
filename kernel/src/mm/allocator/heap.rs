@@ -4,12 +4,15 @@ use buddy_system_allocator::Heap;
 use log::trace;
 use spin::Mutex;
 use crate::arch::{kvpn_to_ppn, PAGE_SIZE, PhysPageNum, ppn_to_kvpn, VirtAddr, VirtPageNum};
-use crate::config::KERNEL_HEAP_END;
+use crate::config::KERNEL_HEAP_SIZE;
 use crate::println;
 use crate::result::{MosError, MosResult};
 
 #[global_allocator]
 static KERNEL_HEAP: HeapAllocator = HeapAllocator::empty();
+
+#[link_section = ".bss.heap"]
+static mut HEAP_SPACE: [u8; KERNEL_HEAP_SIZE] = [0; KERNEL_HEAP_SIZE];
 
 #[alloc_error_handler]
 pub fn handle_alloc_error(layout: Layout) -> ! {
@@ -68,13 +71,10 @@ fn dealloc_kernel_pages(tracker: &HeapFrameTracker) {
 }
 
 pub fn init() {
-    extern "C" {
-        fn ekernel();
-    }
-    let kernel_heap_start = VirtAddr(ekernel as usize);
     unsafe {
-        println!("[kernel] Initialize kernel heap: {:?} - {:?}", kernel_heap_start, KERNEL_HEAP_END);
-        KERNEL_HEAP.0.lock()
-            .add_to_heap(kernel_heap_start.0, KERNEL_HEAP_END.0);
+        let start = HEAP_SPACE.as_ptr();
+        let end = start.add(KERNEL_HEAP_SIZE);
+        println!("[kernel] Initialize kernel heap: {:?} - {:?}", start, end);
+        KERNEL_HEAP.0.lock().add_to_heap(start as usize, end as usize);
     }
 }

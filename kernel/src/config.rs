@@ -1,9 +1,26 @@
-use crate::arch::{paddr_to_kvaddr, PAGE_SIZE, PhysAddr, VirtAddr};
+use lazy_static::lazy_static;
+use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
+
+pub const MAX_HARTS: usize = 16;
 
 pub const KERNEL_PADDR_BASE: PhysAddr = PhysAddr(0x8020_0000);
 pub const KERNEL_VADDR_BASE: VirtAddr = VirtAddr(0xFFFF_FFFF_8020_0000);
 pub const KERNEL_ADDR_OFFSET: usize = KERNEL_VADDR_BASE.0 - KERNEL_PADDR_BASE.0;
 
-pub const KERNEL_STACK_SIZE: usize = PAGE_SIZE * 16;
+pub const KERNEL_STACK_SIZE: usize = PAGE_SIZE * 64; // 64 KB
+pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 4096; // 4 MB
+pub const KERNEL_TLS_SIZE: usize = PAGE_SIZE * 64 * MAX_HARTS; // 64 KB for each
 
-pub const KERNEL_HEAP_END: VirtAddr = paddr_to_kvaddr(PhysAddr(0x82000000));
+pub const CONSOLE_VADDR_BASE: VirtAddr = VirtAddr(0xFFFF_FFFF_F000_0000);
+
+extern {
+    fn sbss();
+    fn ebss();
+    fn ekernel();
+}
+
+lazy_static! {
+    pub static ref LINKAGE_SBSS: VirtAddr = unsafe { VirtAddr(sbss as usize) };
+    pub static ref LINKAGE_EBSS: VirtAddr = unsafe { VirtAddr(ebss as usize) };
+    pub static ref LINKAGE_EKERNEL: VirtAddr = unsafe { VirtAddr(ekernel as usize) };
+}

@@ -13,7 +13,7 @@ mod arch;
 mod boot;
 pub mod config;
 mod board;
-mod logger;
+mod debug;
 mod mm;
 mod processor;
 mod result;
@@ -22,22 +22,32 @@ mod utils;
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use log::error;
 use arch::shutdown;
 use config::KERNEL_ADDR_OFFSET;
-use crate::board::HART_CNT;
-use crate::config::KERNEL_STACK_SIZE;
-use crate::processor::hart::current_hart;
+use crate::config::{LINKAGE_EBSS, LINKAGE_SBSS};
+use crate::processor::hart;
 
 global_asm!(include_str!("entry.asm"));
 
 const LOGO: &str = include_str!("../../logo.txt");
 
+fn clear_bss() {
+    unsafe {
+        let len = LINKAGE_EBSS.0 - LINKAGE_SBSS.0;
+        core::slice::from_raw_parts_mut(LINKAGE_SBSS.0 as *mut u8, len).fill(0);
+    }
+}
+
 fn start_main_hart() {
+    clear_bss();
+    hart::init(0);
+    debug::console::try_init();
+
     println!("{}", LOGO);
+
     mm::allocator::init();
-    logger::init();
+    debug::logger::init();
     trap::init();
 
     boot::init_root_task_address_space().unwrap();
@@ -45,6 +55,7 @@ fn start_main_hart() {
 
 #[naked]
 #[no_mangle]
+#[allow(undefined_naked_function_abi)]
 pub unsafe fn pspace_main(hart_id: usize) {
     asm! {
     "la t0, main",
@@ -70,5 +81,7 @@ fn panic(info: &PanicInfo) -> ! {
     error!("     !!!   KERNEL PANIC   !!!     ");
     error!("----------------------------------");
     error!("{}", info);
+    debug::unwind::print_stack_trace();
     shutdown()
 }
+

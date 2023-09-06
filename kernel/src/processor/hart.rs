@@ -1,6 +1,6 @@
 use core::arch::asm;
 use riscv::register::sstatus;
-use crate::board::HART_CNT;
+use crate::config::MAX_HARTS;
 use crate::println;
 
 pub struct Hart {
@@ -16,7 +16,7 @@ impl Hart {
 }
 
 const HART_EACH: Hart = Hart::new();
-static mut HARTS: [Hart; HART_CNT] = [HART_EACH; HART_CNT];
+static mut HARTS: [Hart; MAX_HARTS] = [HART_EACH; MAX_HARTS];
 
 pub fn current_hart() -> &'static mut Hart {
     unsafe {

@@ -1,7 +1,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 use log::trace;
-use crate::arch::{kvpn_to_ppn, PAGE_SIZE, PageTableEntry, PhysPageNum, ppn_to_kvpn, PTEFlags, VirtAddr, VirtPageNum};
+use crate::arch::{PAGE_SIZE, PageTableEntry, PhysPageNum, ppn_to_kvpn, PTEFlags, VirtAddr};
 use crate::mm::page_table::{PageTable, SlotType};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
@@ -18,8 +18,7 @@ pub struct VMObjectDirect {
 
 impl VMObjectDirect {
     /// Kernel ELF 和 Kernel Heap 对象
-    pub fn new_global(map_info: MapInfo, perms: ASPerms) -> Self {
-        let ppn = kvpn_to_ppn(map_info.start);
+    pub fn new_global(map_info: MapInfo, ppn: PhysPageNum, perms: ASPerms) -> Self {
         Self {
             map_info,
             ppn,
@@ -32,7 +31,7 @@ impl VMObjectDirect {
     pub fn new_page_dir() -> MosResult<Self> {
         let tracker = alloc_kernel_frames(1)?;
         let ppn = tracker.ppn;
-        let map_info = MapInfo::new(PageTable::empty(), 2, 1, VirtPageNum(0));
+        let map_info = MapInfo::new(PageTable::empty(), 2, 1, ppn_to_kvpn(ppn));
         let mut obj = Self {
             map_info,
             ppn,
@@ -45,7 +44,7 @@ impl VMObjectDirect {
 
     fn get_slice_mut(&mut self) -> &mut [u8] {
         unsafe {
-            let vpn = ppn_to_kvpn(self.ppn);
+            let vpn = self.map_info.start;
             let ptr = VirtAddr::from(vpn).0 as *mut u8;
             let len = self.map_info.pages * PAGE_SIZE;
             core::slice::from_raw_parts_mut(ptr, len)

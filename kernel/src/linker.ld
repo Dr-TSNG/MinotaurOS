@@ -7,42 +7,42 @@ SECTIONS
     . = KERNEL_VADDR_BASE;
     skernel = .;
 
-    stext = .;
     .text : {
         *(.text.entry)
         *(.text .text.*)
     }
 
     . = ALIGN(4K);
-    etext = .;
-    srodata = .;
+    __etext = .;
     .rodata : {
         *(.rodata .rodata.*)
         *(.srodata .srodata.*)
     }
 
     . = ALIGN(4K);
-    erodata = .;
-    sdata = .;
     .data : {
         *(.data .data.*)
         *(.sdata .sdata.*)
     }
 
     . = ALIGN(4K);
-    edata = .;
     .bss : {
         *(.bss.stack)
         sbss = .;
+        . = ALIGN(4K);
+        *(.bss.heap)
+        . = ALIGN(4K);
+        .(.bss.tls)
+        . = ALIGN(4K);
         *(.bss .bss.*)
         *(.sbss .sbss.*)
     }
 
     . = ALIGN(4K);
     ebss = .;
-    ekernel = .;
+    PROVIDE(__eh_frame = .);
+    .eh_frame : { KEEP (*(.eh_frame)) *(.eh_frame.*) }
 
-    /DISCARD/ : {
-        *(.eh_frame)
-    }
+    . = ALIGN(2M);
+    ekernel = .;
 }
