@@ -41,7 +41,6 @@ fn debug_qemu(config: &RunConfig) -> Result<()> {
         .arg("-machine").arg("virt")
         .arg("-nographic")
         .arg("-kernel").arg(build::build_dir_file("kernel.bin", config.release)?)
-        .arg("-bios").arg(&config.sbi)
         .arg("-smp").arg(format!("{}", config.smp))
         .arg("-m").arg(&config.mem)
         .arg("-drive").arg(format!("file={},if=none,format=raw,id=x0", &config.disk))

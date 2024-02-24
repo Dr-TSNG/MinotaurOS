@@ -14,8 +14,6 @@ pub enum Run {
 pub struct RunConfig {
     #[clap(long, default_value_t = true)]
     pub release: bool,
-    #[clap(long, default_value = "prebuilts/opensbi-qemu.bin")]
-    pub sbi: String,
     #[clap(long, default_value = "2")]
     pub smp: u8,
     #[clap(long, default_value = "128M")]
@@ -48,7 +46,6 @@ fn run_qemu(config: &RunConfig) -> Result<()> {
         .arg("-machine").arg("virt")
         .arg("-nographic")
         .arg("-kernel").arg(build::build_dir_file("kernel.bin", config.release)?)
-        .arg("-bios").arg(&config.sbi)
         .arg("-smp").arg(format!("{}", config.smp))
         .arg("-m").arg(&config.mem)
         .arg("-drive").arg(format!("file={},if=none,format=raw,id=x0", &config.disk))
