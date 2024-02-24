@@ -1,13 +1,13 @@
 use alloc::vec::Vec;
 use bitvec_rs::BitVec;
 use log::trace;
-use spin::Mutex;
 use crate::arch::PhysPageNum;
 use crate::board::PHYS_MEMORY;
 use crate::println;
 use crate::result::{MosError, MosResult};
+use crate::sync::mutex::IrqMutex;
 
-static USER_ALLOCATOR: Mutex<UserFrameAllocator> = Mutex::new(UserFrameAllocator::new());
+static USER_ALLOCATOR: IrqMutex<UserFrameAllocator> = IrqMutex::new(UserFrameAllocator::new());
 
 pub struct UserFrameTracker {
     pub ppn: PhysPageNum,

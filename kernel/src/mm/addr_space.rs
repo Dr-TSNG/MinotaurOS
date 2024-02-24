@@ -9,7 +9,6 @@ use bitflags::bitflags;
 use downcast_rs::Downcast;
 use log::{debug, trace};
 use riscv::register::satp;
-use spin::RwLock;
 use crate::arch::{kvpn_to_ppn, PhysPageNum, PTE_SLOTS, VirtAddr, VirtPageNum};
 use crate::board::CONSOLE_PADDR_BASE;
 use crate::config::{CONSOLE_VADDR_BASE, KERNEL_VADDR_BASE, LINKAGE_EKERNEL};
@@ -18,6 +17,7 @@ use crate::mm::page_table::PageTable;
 use crate::mm::vmo::direct::VMObjectDirect;
 use crate::mm::vmo::{CopyableVMObject, MapInfo, VMObject};
 use crate::result::{MosError, MosResult};
+use crate::sync::mutex::RwLock;
 
 bitflags! {
     pub struct ASPerms: u8 {

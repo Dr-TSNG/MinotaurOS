@@ -2,11 +2,11 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
 use buddy_system_allocator::Heap;
 use log::trace;
-use spin::Mutex;
 use crate::arch::{kvpn_to_ppn, PAGE_SIZE, PhysPageNum, ppn_to_kvpn, VirtAddr, VirtPageNum};
 use crate::config::KERNEL_HEAP_SIZE;
 use crate::println;
 use crate::result::{MosError, MosResult};
+use crate::sync::mutex::IrqMutex;
 
 #[global_allocator]
 static KERNEL_HEAP: HeapAllocator = HeapAllocator::empty();
@@ -31,11 +31,11 @@ impl Drop for HeapFrameTracker {
     }
 }
 
-struct HeapAllocator(Mutex<Heap<32>>);
+struct HeapAllocator(IrqMutex<Heap<32>>);
 
 impl HeapAllocator {
     const fn empty() -> Self {
-        HeapAllocator(Mutex::new(Heap::empty()))
+        HeapAllocator(IrqMutex::new(Heap::empty()))
     }
 }
 

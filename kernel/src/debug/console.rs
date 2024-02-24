@@ -1,6 +1,6 @@
 use core::fmt::{Arguments, Write};
-use spin::Mutex;
 use crate::board;
+use crate::sync::mutex::Mutex;
 
 pub trait Console: Write {
     fn try_init() {}

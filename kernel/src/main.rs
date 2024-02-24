@@ -21,6 +21,8 @@ mod processor;
 mod result;
 mod trap;
 mod utils;
+mod sync;
+mod task;
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
@@ -29,6 +31,7 @@ use arch::shutdown;
 use config::KERNEL_ADDR_OFFSET;
 use crate::config::{LINKAGE_EBSS, LINKAGE_SBSS};
 use crate::processor::hart;
+use crate::result::MosResult;
 
 global_asm!(include_str!("entry.asm"));
 
@@ -41,7 +44,7 @@ fn clear_bss() {
     }
 }
 
-fn start_main_hart() {
+fn start_main_hart() -> MosResult<()> {
     clear_bss();
     hart::init(0);
     debug::console::try_init();
@@ -51,8 +54,9 @@ fn start_main_hart() {
     mm::allocator::init();
     debug::logger::init();
     trap::init();
+    boot::init_root_task_address_space()?;
 
-    boot::init_root_task_address_space().unwrap();
+    Ok(())
 }
 
 #[naked]
@@ -72,8 +76,7 @@ pub unsafe fn pspace_main(hart_id: usize) {
 
 #[no_mangle]
 fn main() -> ! {
-    start_main_hart();
-
+    start_main_hart().unwrap();
     panic!("End of execution")
 }
 
