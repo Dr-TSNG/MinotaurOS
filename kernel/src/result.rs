@@ -7,10 +7,7 @@ use core::pin::Pin;
 use crate::arch::{PhysPageNum, VirtAddr};
 
 pub type MosResult<T = ()> = Result<T, MosError>;
-pub type SyscallResult<T = usize> = Result<T, SyscallErrorCode>;
-pub type SysFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-pub type AMosResult<'a> = SysFuture<'a, MosResult>;
-pub type ASyscallResult<'a> = SysFuture<'a, SyscallResult>;
+pub type SyscallResult<T = isize> = Result<T, SyscallErrorCode>;
 
 #[derive(Debug)]
 pub enum MosError {

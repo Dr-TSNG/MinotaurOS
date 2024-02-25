@@ -1,6 +1,6 @@
 use alloc::collections::VecDeque;
-use core::future::Future;
 use async_task::{Runnable, ScheduleInfo, Task, WithInfo};
+use core::future::Future;
 use crate::sync::mutex::IrqMutex;
 
 struct TaskQueue {
@@ -22,7 +22,7 @@ impl TaskQueue {
         self.queue.lock().push_front(runnable);
     }
 
-    pub fn fetch(&self) -> Option<Runnable> {
+    pub fn take(&self) -> Option<Runnable> {
         self.queue.lock().pop_front()
     }
 }
@@ -47,7 +47,7 @@ pub fn spawn<F>(future: F) -> (Runnable, Task<F::Output>)
 /// 启动协程
 pub fn start_coroutine() -> usize {
     let mut switched = 0;
-    while let Some(task) = TASK_QUEUE.fetch() {
+    while let Some(task) = TASK_QUEUE.take() {
         task.run();
         switched += 1;
     }

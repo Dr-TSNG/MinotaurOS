@@ -1,7 +1,7 @@
 use riscv::register::sstatus;
-use crate::sync::mutex::spin::SpinMutex;
 
 mod spin;
+mod sync;
 // mod rwlock;
 
 /// 锁策略，用于在加锁前后执行特殊操作
@@ -13,8 +13,9 @@ pub trait MutexStrategy {
 pub struct DefaultStrategy;
 pub struct IrqStrategy;
 
-pub type Mutex<T> = SpinMutex<T, DefaultStrategy>;
-pub type IrqMutex<T> = SpinMutex<T, IrqStrategy>;
+pub type Mutex<T> = spin::SpinMutex<T, DefaultStrategy>;
+pub type IrqMutex<T> = spin::SpinMutex<T, IrqStrategy>;
+pub type AsyncMutex<T> = sync::AsyncMutex<T, DefaultStrategy>;
 // TODO: Real RwLock
 pub type RwLock<T> = ::spin::RwLock<T>;
 
