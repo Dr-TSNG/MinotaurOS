@@ -78,7 +78,7 @@ impl Segment {
             } else {
                 count += 1;
                 if count == pages {
-                    let start = now - pages + 1;
+                    let start = now + 1 - pages;
                     for i in start..=now {
                         self.bitmap.set(i, true);
                     }

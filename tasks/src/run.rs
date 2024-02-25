@@ -12,7 +12,7 @@ pub enum Run {
 
 #[derive(Parser)]
 pub struct RunConfig {
-    #[clap(long, default_value_t = true)]
+    #[clap(long)]
     pub release: bool,
     #[clap(long, default_value = "2")]
     pub smp: u8,

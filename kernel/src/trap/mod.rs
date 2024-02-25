@@ -1,4 +1,4 @@
-mod context;
+pub mod context;
 
 use core::arch::global_asm;
 use log::debug;

@@ -26,6 +26,10 @@ impl MapInfo {
     pub const fn new(root_pt: PageTable, level: usize, pages: usize, start: VirtPageNum) -> Self {
         Self { root_pt, level, pages, start }
     }
+
+    pub fn end(&self) -> VirtPageNum {
+        self.start + self.pages
+    }
 }
 
 pub trait VMObject: Any + Send + Sync {

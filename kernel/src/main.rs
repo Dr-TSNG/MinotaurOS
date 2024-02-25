@@ -7,6 +7,8 @@
 #![feature(inline_const)]
 #![feature(naked_functions)]
 #![feature(never_type)]
+#![feature(panic_info_message)]
+#![feature(stmt_expr_attributes)]
 #![feature(sync_unsafe_cell)]
 
 extern crate alloc;
@@ -16,6 +18,8 @@ mod boot;
 pub mod config;
 mod board;
 mod debug;
+mod driver;
+// mod fs;
 mod mm;
 mod processor;
 mod result;
@@ -44,7 +48,7 @@ fn clear_bss() {
     }
 }
 
-fn start_main_hart() -> MosResult<()> {
+fn start_main_hart() -> MosResult {
     clear_bss();
     hart::init(0);
     debug::console::try_init();
@@ -54,7 +58,8 @@ fn start_main_hart() -> MosResult<()> {
     mm::allocator::init();
     debug::logger::init();
     trap::init();
-    boot::init_root_task_address_space()?;
+    let _addrs = boot::init_root_task_address_space()?;
+    driver::init()?;
 
     Ok(())
 }
@@ -85,8 +90,16 @@ fn panic(info: &PanicInfo) -> ! {
     error!("----------------------------------");
     error!("     !!!   KERNEL PANIC   !!!     ");
     error!("----------------------------------");
-    error!("{}", info);
-    debug::unwind::print_stack_trace();
+    if let Some(location) = info.location() {
+        error!(
+            "Panicked at {}:{} {}",
+            location.file(),
+            location.line(),
+            info.message().unwrap()
+        );
+    } else {
+        error!("Panicked: {}", info.message().unwrap());
+    }
+    // debug::unwind::print_stack_trace();
     shutdown()
 }
-
