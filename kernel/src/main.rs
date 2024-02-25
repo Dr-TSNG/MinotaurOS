@@ -4,6 +4,7 @@
 #![feature(asm_const)]
 #![feature(btree_extract_if)]
 #![feature(const_trait_impl)]
+#![feature(extract_if)]
 #![feature(inline_const)]
 #![feature(naked_functions)]
 #![feature(never_type)]
@@ -19,14 +20,14 @@ pub mod config;
 mod board;
 mod debug;
 mod driver;
-// mod fs;
+mod fs;
 mod mm;
+mod process;
 mod processor;
 mod result;
 mod trap;
 mod utils;
 mod sync;
-mod task;
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
