@@ -4,7 +4,7 @@ use core::ptr::NonNull;
 use log::info;
 use virtio_drivers::{BufferDirection, Hal};
 use crate::arch::{kvaddr_to_paddr, paddr_to_kvaddr, PhysAddr, PhysPageNum, VirtAddr};
-use crate::driver::BlockDevice;
+use crate::driver::Device;
 use crate::driver::virtio::VirtIOBlock;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::result::MosResult;
@@ -64,8 +64,9 @@ unsafe impl Hal for VirtioHal {
 
 pub fn init_board() -> MosResult {
     let virtio_blk = Arc::new(VirtIOBlock::new()?);
+    let virtio_blk = Device::Block(virtio_blk);
     let virtio_dev_id = virtio_blk.metadata().dev_id;
-    super::BLOCK_DEVICES.write().insert(virtio_dev_id, virtio_blk);
+    super::DEVICES.write().insert(virtio_dev_id, virtio_blk);
     info!("VIRTIO0 block initialized");
     Ok(())
 }

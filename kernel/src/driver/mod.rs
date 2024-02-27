@@ -15,9 +15,21 @@ use crate::mm::allocator::IdAllocator;
 use crate::result::MosResult;
 use crate::sync::mutex::{Mutex, RwLock};
 
-pub static BLOCK_DEVICES: RwLock<BTreeMap<usize, Arc<dyn BlockDevice>>> = RwLock::new(BTreeMap::new());
+pub static DEVICES: RwLock<BTreeMap<usize, Device>> = RwLock::new(BTreeMap::new());
 
 static DEV_ID_ALLOCATOR: Mutex<IdAllocator> = Mutex::new(IdAllocator::new());
+
+pub enum Device {
+    Block(Arc<dyn BlockDevice>),
+}
+
+impl Device {
+    pub fn metadata(&self) -> &DeviceMeta {
+        match self {
+            Device::Block(dev) => dev.metadata(),
+        }
+    }
+}
 
 pub struct DeviceMeta {
     pub dev_id: usize,

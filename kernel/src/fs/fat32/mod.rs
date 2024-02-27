@@ -2,7 +2,8 @@ use alloc::sync::Arc;
 use log::info;
 use crate::driver::BlockDevice;
 use crate::fs::fat32::fat::FAT32Meta;
-use crate::fs::file_system::{FileSystem, FileSystemMeta};
+use crate::fs::ffi::VfsFlags;
+use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::Inode;
 use crate::result::{MosResult, SyscallResult};
 
@@ -16,31 +17,28 @@ const BOOT_SECTOR_ID: usize = 0;
 
 pub struct FAT32FileSystem {
     device: Arc<dyn BlockDevice>,
-    metadata: FileSystemMeta,
+    vfsmeta: FileSystemMeta,
     fat32meta: FAT32Meta,
 }
 
 impl FAT32FileSystem {
     pub async fn new(
         device: Arc<dyn BlockDevice>,
-        metadata: FileSystemMeta,
+        flags: VfsFlags,
     ) -> MosResult<Self> {
         let mut boot_sector = [0; PRELOAD_SECTOR_SIZE];
         device.read_block(BOOT_SECTOR_ID, &mut boot_sector).await?;
+        let vfsmeta = FileSystemMeta::new(FileSystemType::FAT32, flags);
         let fat32meta = FAT32Meta::new(&boot_sector)?;
         info!("FAT32 metadata: {:?}", fat32meta);
-        let fs = FAT32FileSystem {
-            device,
-            metadata,
-            fat32meta,
-        };
+        let fs = FAT32FileSystem { device, vfsmeta, fat32meta };
         Ok(fs)
     }
 }
 
 impl FileSystem for FAT32FileSystem {
     fn metadata(&self) -> &FileSystemMeta {
-        &self.metadata
+        &self.vfsmeta
     }
 
     fn root(&self) -> SyscallResult<Arc<dyn Inode>> {
