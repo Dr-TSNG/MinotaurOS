@@ -7,12 +7,12 @@ use core::pin::Pin;
 use crate::arch::{PhysPageNum, VirtAddr};
 
 pub type MosResult<T = ()> = Result<T, MosError>;
-pub type SyscallResult<T = isize> = Result<T, SyscallErrorCode>;
+pub type SyscallResult<T = isize> = Result<T, Errno>;
 
 #[derive(Debug)]
 pub enum MosError {
     OutOfMemory,
-    CrossPageBoundary,
+    CrossBoundary,
     BadAddress(VirtAddr),
     PageAlreadyMapped(PhysPageNum),
     PageNotMapped(PhysPageNum),
@@ -22,7 +22,7 @@ pub enum MosError {
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
-pub enum SyscallErrorCode {
+pub enum Errno {
     EUNDEF = 0,
     EPERM = 1,
     ENOENT = 2,

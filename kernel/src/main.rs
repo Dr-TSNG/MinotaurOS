@@ -8,6 +8,7 @@
 #![feature(inline_const)]
 #![feature(naked_functions)]
 #![feature(never_type)]
+#![feature(option_take_if)]
 #![feature(panic_info_message)]
 #![feature(stmt_expr_attributes)]
 #![feature(sync_unsafe_cell)]

@@ -1,9 +1,10 @@
 use core::cell::UnsafeCell;
-use core::future::Future;
+use core::future::poll_fn;
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
-use futures_core::task::__internal::AtomicWaker;
+use core::task::{Context, Poll};
+use futures::task::AtomicWaker;
 use crate::sync::mutex::MutexStrategy;
 
 pub struct AsyncMutex<T: ?Sized, S: MutexStrategy> {
@@ -18,13 +19,21 @@ pub struct AsyncMutexGuard<'a, T: ?Sized, S: MutexStrategy> {
     guard: S::GuardData,
 }
 
+unsafe impl<T: ?Sized + Send, S: MutexStrategy> Sync for AsyncMutex<T, S> {}
+
+unsafe impl<T: ?Sized + Send, S: MutexStrategy> Send for AsyncMutex<T, S> {}
+
+unsafe impl<'a, T: ?Sized + Send, S: MutexStrategy> Sync for AsyncMutexGuard<'a, T, S> {}
+
+unsafe impl<'a, T: ?Sized + Send, S: MutexStrategy> Send for AsyncMutexGuard<'a, T, S> {}
+
 impl<T, S: MutexStrategy> AsyncMutex<T, S> {
     pub const fn new(data: T) -> Self {
         AsyncMutex {
             _marker: PhantomData,
             lock: AtomicBool::new(false),
-            data: UnsafeCell::new(data),
             waker: AtomicWaker::new(),
+            data: UnsafeCell::new(data),
         }
     }
 
@@ -36,25 +45,34 @@ impl<T, S: MutexStrategy> AsyncMutex<T, S> {
     #[inline(always)]
     pub async fn lock(&self) -> AsyncMutexGuard<T, S> {
         let guard = S::new_guard();
-        let mut fut = self.lock_fut();
-        while self
-            .lock
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err() {
-            fut.await;
-            fut = self.lock_fut();
-        }
+        poll_fn(|cx| self.poll_lock(cx)).await;
         AsyncMutexGuard {
             mutex: self,
             guard,
         }
     }
 
-    fn lock_fut(&self) -> impl Future<Output = ()> {
-        let waker = self.waker.clone();
-        async move {
-            waker.await;
+    fn poll_lock(&self, cx: &mut Context<'_>) -> Poll<()> {
+        if self
+            .lock
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err() {
+            self.waker.register(cx.waker());
+            if self.is_locked() {
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        } else {
+            Poll::Ready(())
         }
+    }
+}
+
+
+impl<T: ?Sized + Default, S: MutexStrategy> Default for AsyncMutex<T, S> {
+    fn default() -> Self {
+        Self::new(Default::default())
     }
 }
 

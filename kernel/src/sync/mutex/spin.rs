@@ -51,6 +51,12 @@ impl<T, S: MutexStrategy> SpinMutex<T, S> {
     }
 }
 
+impl<T: ?Sized + Default, S: MutexStrategy> Default for SpinMutex<T, S> {
+    fn default() -> Self {
+        Self::new(Default::default())
+    }
+}
+
 impl<'a, T: ?Sized, S: MutexStrategy> Deref for SpinMutexGuard<'a, T, S> {
     type Target = T;
     #[inline(always)]

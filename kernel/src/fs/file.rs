@@ -1,7 +1,8 @@
+use alloc::boxed::Box;
 use alloc::sync::Arc;
+use async_trait::async_trait;
 use crate::fs::inode::Inode;
-use crate::result::SyscallResult;
-use crate::result::SyscallErrorCode::EINVAL;
+use crate::result::{Errno, SyscallResult};
 use crate::sync::block_on;
 use crate::sync::mutex::{AsyncMutex, Mutex};
 
@@ -25,6 +26,7 @@ pub enum Seek {
     End(isize),
 }
 
+#[async_trait]
 pub trait File: Send + Sync {
     fn metadata(&self) -> &FileMeta;
 
@@ -64,7 +66,7 @@ pub trait File: Send + Sync {
         inner.pos = match seek {
             Seek::Set(offset) => {
                 if offset < 0 {
-                    return Err(EINVAL);
+                    return Err(Errno::EINVAL);
                 }
                 offset
             }
@@ -73,7 +75,7 @@ pub trait File: Send + Sync {
                     let new_pos = inner.pos + offset;
                 if new_pos < 0 {
                     // TODO: EOVERFLOW
-                    return Err(EINVAL);
+                    return Err(Errno::EINVAL);
                 }
                 new_pos
             }
@@ -83,7 +85,7 @@ pub trait File: Send + Sync {
                     let new_pos = size + offset;
                 if new_pos < 0 {
                     // TODO: EOVERFLOW
-                    return Err(EINVAL);
+                    return Err(Errno::EINVAL);
                 }
                 new_pos
             }
