@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use async_trait::async_trait;
-use crate::driver::{BlockDevice, Device, DeviceMeta, VirtioHal};
+use crate::driver::{BlockDevice, DeviceMeta, VirtioHal};
 use crate::sync::mutex::IrqMutex;
 use virtio_drivers::device::blk::VirtIOBlk;
 use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
@@ -16,16 +16,15 @@ pub struct VirtIOBlock {
 }
 
 unsafe impl Send for VirtIOBlock {}
-unsafe impl Sync for VirtIOBlock {}
 
-impl Device for VirtIOBlock {
-    fn metadata(&self) -> &DeviceMeta {
-        &self.metadata
-    }
-}
+unsafe impl Sync for VirtIOBlock {}
 
 #[async_trait]
 impl BlockDevice for VirtIOBlock {
+    fn metadata(&self) -> &DeviceMeta {
+        &self.metadata
+    }
+
     async fn read_block(&self, block_id: usize, buf: &mut [u8]) -> MosResult {
         self.block
             .lock()

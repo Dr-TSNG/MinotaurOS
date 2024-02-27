@@ -11,6 +11,7 @@
 #![feature(option_take_if)]
 #![feature(panic_info_message)]
 #![feature(stmt_expr_attributes)]
+#![feature(strict_provenance)]
 #![feature(sync_unsafe_cell)]
 
 extern crate alloc;
@@ -62,6 +63,7 @@ fn start_main_hart() -> MosResult {
     trap::init();
     let _addrs = boot::init_root_task_address_space()?;
     driver::init()?;
+    fs::init()?;
 
     Ok(())
 }

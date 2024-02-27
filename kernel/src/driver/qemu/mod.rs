@@ -3,8 +3,8 @@ use alloc::sync::Arc;
 use core::ptr::NonNull;
 use log::info;
 use virtio_drivers::{BufferDirection, Hal};
-use crate::arch::{paddr_to_kvaddr, PhysAddr, PhysPageNum};
-use crate::driver::Device;
+use crate::arch::{kvaddr_to_paddr, paddr_to_kvaddr, PhysAddr, PhysPageNum, VirtAddr};
+use crate::driver::BlockDevice;
 use crate::driver::virtio::VirtIOBlock;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::result::MosResult;
@@ -49,25 +49,23 @@ unsafe impl Hal for VirtioHal {
     }
 
     unsafe fn share(
-        _buffer: NonNull<[u8]>,
+        buffer: NonNull<[u8]>,
         _direction: BufferDirection,
     ) -> virtio_drivers::PhysAddr {
-        todo!()
+        kvaddr_to_paddr(VirtAddr(buffer.as_ptr().addr())).0
     }
 
     unsafe fn unshare(
         _paddr: virtio_drivers::PhysAddr,
         _buffer: NonNull<[u8]>,
         _direction: BufferDirection,
-    ) {
-        todo!()
-    }
+    ) {}
 }
 
 pub fn init_board() -> MosResult {
     let virtio_blk = Arc::new(VirtIOBlock::new()?);
     let virtio_dev_id = virtio_blk.metadata().dev_id;
-    super::DEVICES.write().insert(virtio_dev_id, virtio_blk);
+    super::BLOCK_DEVICES.write().insert(virtio_dev_id, virtio_blk);
     info!("VIRTIO0 block initialized");
     Ok(())
 }

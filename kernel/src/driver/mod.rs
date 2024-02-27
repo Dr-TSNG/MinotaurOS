@@ -15,7 +15,7 @@ use crate::mm::allocator::IdAllocator;
 use crate::result::MosResult;
 use crate::sync::mutex::{Mutex, RwLock};
 
-pub static DEVICES: RwLock<BTreeMap<usize, Arc<dyn Device>>> = RwLock::new(BTreeMap::new());
+pub static BLOCK_DEVICES: RwLock<BTreeMap<usize, Arc<dyn BlockDevice>>> = RwLock::new(BTreeMap::new());
 
 static DEV_ID_ALLOCATOR: Mutex<IdAllocator> = Mutex::new(IdAllocator::new());
 
@@ -33,13 +33,12 @@ impl DeviceMeta {
     }
 }
 
-pub trait Device: Send + Sync {
-    fn metadata(&self) -> &DeviceMeta;
-}
-
 /// 块设备
 #[async_trait]
-pub trait BlockDevice: Device {
+pub trait BlockDevice: Send + Sync {
+    /// 块元数据
+    fn metadata(&self) -> &DeviceMeta;
+    
     /// 从块设备读取数据
     async fn read_block(&self, block_id: usize, buf: &mut [u8]) -> MosResult;
 
