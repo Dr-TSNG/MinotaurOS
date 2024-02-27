@@ -8,7 +8,7 @@ use crate::sync::mutex::AsyncMutex;
 ///
 /// B: 块字节数
 pub struct BlockCache<const B: usize> {
-    device: Arc<BlockDevice>,
+    device: Arc<dyn BlockDevice>,
     cache: AsyncMutex<LruCache<usize, CacheValue<B>>>,
 }
 
@@ -35,7 +35,7 @@ impl<const B: usize> CacheValue<B> {
 }
 
 impl<const B: usize> BlockCache<B> {
-    pub fn new(device: Arc<BlockDevice>) -> Self {
+    pub fn new(device: Arc<dyn BlockDevice>) -> Self {
         Self {
             device,
             cache: AsyncMutex::new(LruCache::new(B.try_into().unwrap())),
@@ -58,7 +58,7 @@ impl<const B: usize> BlockCache<B> {
 
         // 缓存不命中
         let mut data = [0; B];
-        self.device.interface.read_block(block_id, &mut data).await?;
+        self.device.read_block(block_id, &mut data).await?;
         buf.copy_from_slice(&data[offset..copy_end]);
         let mut cache = self.cache.lock().await;
         let write_back = cache.push(block_id, CacheValue::new(false, data));
@@ -88,7 +88,7 @@ impl<const B: usize> BlockCache<B> {
 
         // 缓存不命中
         let mut data = [0; B];
-        self.device.interface.read_block(block_id, &mut data).await?;
+        self.device.read_block(block_id, &mut data).await?;
         data[offset..copy_end].copy_from_slice(buf);
         let mut cache = self.cache.lock().await;
         let write_back = cache.push(block_id, CacheValue::new(true, data));
@@ -111,7 +111,7 @@ impl<const B: usize> BlockCache<B> {
 
     async fn sync(&self, block_id: usize, cache: CacheValue<B>) -> MosResult {
         if cache.dirty {
-            self.device.interface.write_block(block_id, &cache.data).await?;
+            self.device.write_block(block_id, &cache.data).await?;
         }
         Ok(())
     }

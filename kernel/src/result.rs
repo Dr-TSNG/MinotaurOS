@@ -19,6 +19,7 @@ pub enum MosError {
     PageNoncopyable,
     InvalidExecutable(&'static str),
     BlockDeviceError(String),
+    UnsupportedFileSystem(&'static str),
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]

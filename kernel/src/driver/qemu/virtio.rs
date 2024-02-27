@@ -1,5 +1,7 @@
+use alloc::boxed::Box;
 use alloc::string::ToString;
-use crate::driver::{BlockDevice, VirtioHal};
+use async_trait::async_trait;
+use crate::driver::{BlockDevice, Device, DeviceMeta, VirtioHal};
 use crate::sync::mutex::IrqMutex;
 use virtio_drivers::device::blk::VirtIOBlk;
 use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
@@ -7,21 +9,32 @@ use crate::board::GLOBAL_MAPPINGS;
 use crate::result::MosError::BlockDeviceError;
 use crate::result::MosResult;
 
-pub struct VirtIOBlock(IrqMutex<VirtIOBlk<VirtioHal, MmioTransport>>);
+// TODO: Real async support
+pub struct VirtIOBlock {
+    metadata: DeviceMeta,
+    block: IrqMutex<VirtIOBlk<VirtioHal, MmioTransport>>,
+}
 
 unsafe impl Send for VirtIOBlock {}
-
 unsafe impl Sync for VirtIOBlock {}
 
+impl Device for VirtIOBlock {
+    fn metadata(&self) -> &DeviceMeta {
+        &self.metadata
+    }
+}
+
+#[async_trait]
 impl BlockDevice for VirtIOBlock {
-    fn read_block(&self, block_id: usize, buf: &mut [u8]) -> MosResult {
-        self.0
+    async fn read_block(&self, block_id: usize, buf: &mut [u8]) -> MosResult {
+        self.block
             .lock()
             .read_blocks(block_id, buf)
             .map_err(|e| BlockDeviceError(e.to_string()))
     }
-    fn write_block(&self, block_id: usize, buf: &[u8]) -> MosResult {
-        self.0
+
+    async fn write_block(&self, block_id: usize, buf: &[u8]) -> MosResult {
+        self.block
             .lock()
             .write_blocks(block_id, buf)
             .map_err(|e| BlockDeviceError(e.to_string()))
@@ -36,9 +49,13 @@ impl VirtIOBlock {
             let header = &mut *(map.virt_start.0 as *mut VirtIOHeader);
             let transport = MmioTransport::new(header.into())
                 .map_err(|e| BlockDeviceError(e.to_string()))?;
-            let blk = VirtIOBlk::<VirtioHal, MmioTransport>::new(transport)
+            let block = VirtIOBlk::<VirtioHal, MmioTransport>::new(transport)
                 .map_err(|e| BlockDeviceError(e.to_string()))?;
-            Ok(Self(IrqMutex::new(blk)))
+            let block = Self {
+                metadata: DeviceMeta::new("VIRTIO0".to_string()),
+                block: IrqMutex::new(block),
+            };
+            Ok(block)
         }
     }
 }
