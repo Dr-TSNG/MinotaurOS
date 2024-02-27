@@ -35,17 +35,17 @@ impl<const B: usize> CacheValue<B> {
 }
 
 impl<const B: usize> BlockCache<B> {
-    pub fn new(device: Arc<dyn BlockDevice>) -> Self {
+    pub fn new(device: Arc<dyn BlockDevice>, cap: usize) -> Self {
         Self {
             device,
-            cache: AsyncMutex::new(LruCache::new(B.try_into().unwrap())),
+            cache: AsyncMutex::new(LruCache::new(cap.try_into().unwrap())),
         }
     }
 
     pub async fn read_block(&self, block_id: usize, buf: &mut [u8], offset: usize) -> MosResult {
         // 越界检查
         let copy_end = buf.len().checked_add(offset)
-            .take_if(|v| *v > B)
+            .take_if(|v| *v <= B)
             .ok_or(MosError::CrossBoundary)?;
 
         // 缓存命中
@@ -74,7 +74,7 @@ impl<const B: usize> BlockCache<B> {
     pub async fn write_block(&self, block_id: usize, buf: &[u8], offset: usize) -> MosResult {
         // 越界检查
         let copy_end = buf.len().checked_add(offset)
-            .take_if(|v| *v > B)
+            .take_if(|v| *v <= B)
             .ok_or(MosError::CrossBoundary)?;
 
         // 缓存命中

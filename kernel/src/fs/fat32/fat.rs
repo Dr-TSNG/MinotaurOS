@@ -1,4 +1,4 @@
-use crate::fs::fat32::boot_sector::BPBOffset;
+use crate::fs::fat32::bpb::BPBOffset;
 use crate::result::MosError::UnsupportedFileSystem;
 use crate::result::MosResult;
 
@@ -16,6 +16,28 @@ pub struct FAT32Meta {
     pub bytes_per_sector: usize,
     /// 每簇的扇区数
     pub sectors_per_cluster: usize,
+}
+
+pub enum FATEnt {
+    /// 空簇
+    EMPTY,
+    /// 簇链结束
+    EOF,
+    /// 坏簇
+    BAD,
+    /// 下个簇号
+    NEXT(u32),
+}
+
+impl FATEnt {
+    fn from(ent: u32) -> Self {
+        match ent {
+            0 => FATEnt::EMPTY,
+            0x0FFFFFF7 => FATEnt::BAD,
+            0x0FFFFFF8.. => FATEnt::EOF,
+            _ => FATEnt::NEXT(ent),
+        }
+    }
 }
 
 impl FAT32Meta {
@@ -44,5 +66,13 @@ impl FAT32Meta {
             sectors_per_cluster,
         };
         Ok(metadata)
+    }
+
+    pub fn sector_for_cluster(&self, cluster: usize) -> usize {
+        self.fat_offset + cluster * 4 / self.bytes_per_sector
+    }
+
+    pub fn ent_offset_for_cluster(&self, cluster: usize) -> usize {
+        cluster * 4 % self.bytes_per_sector
     }
 }

@@ -1,11 +1,5 @@
 use alloc::string::String;
 
-macro_rules! section {
-    ($buf:ident, $start:ident, $end:ident) => {
-        Self::split($buf, Self::$start, Self::$end).try_into().unwrap()
-    }
-}
-
 /// Boot Sector 偏移
 pub enum BootSectorOffset {
     /// 此项忽略
