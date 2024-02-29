@@ -1,50 +1,86 @@
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use log::trace;
 use crate::arch::{PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum};
 use crate::mm::addr_space::ASPerms;
-use crate::mm::allocator::{alloc_user_frames, UserFrameTracker};
+use crate::mm::allocator::{alloc_kernel_frames, alloc_user_frames, HeapFrameTracker, UserFrameTracker};
 use crate::mm::page_table::{PageTable, SlotType};
-use crate::mm::vmo::direct::VMObjectDirect;
-use crate::mm::vmo::{MapInfo, VMObject};
+use crate::mm::region::{ASRegion, ASRegionMeta};
 use crate::result::{MosError, MosResult};
 
-pub struct VMObjectLazy {
-    map_info: MapInfo,
-    perms: ASPerms,
+pub struct LazyRegion {
+    metadata: ASRegionMeta,
     pages: Vec<PageState>,
 }
 
+/// 虚拟页状态
 enum PageState {
+    /// 页面为空，未分配物理页帧
     Free,
+    /// 页面已映射
     Framed(UserFrameTracker),
-    CopyOnWrite(Arc<UserFrameTracker>),
+    /// 写时复制
+    CopyOnWrite(Arc<UserFrameTracker>)
 }
 
-impl VMObjectLazy {
-    pub fn new_free(map_info: MapInfo, perms: ASPerms) -> Self {
-        assert_eq!(map_info.level, 2);
-        let mut pages = vec![];
-        for _ in 0..map_info.pages {
-            pages.push(PageState::Free);
-        }
-        Self { map_info, perms, pages }
+impl ASRegion for LazyRegion {
+    fn metadata(&self) -> &ASRegionMeta {
+        &self.metadata
     }
 
-    pub fn new_framed(map_info: MapInfo, perms: ASPerms) -> MosResult<Self> {
-        assert_eq!(map_info.level, 2);
+    fn map(&self, root_pt: PageTable) -> MosResult<Vec<HeapFrameTracker>> {
+        let mut dirs = vec![];
+        let mut vpn = self.metadata.start;
+        for page in self.pages.iter() {
+            dirs.extend(self.map_one(root_pt, page, vpn)?);
+            vpn = vpn + 1;
+        }
+        Ok(dirs)
+    }
+
+    fn unmap(&self, root_pt: PageTable) -> MosResult {
+        let mut vpn = self.metadata.start;
+        for _ in self.pages.iter() {
+            self.unmap_one(root_pt, vpn)?;
+            vpn = vpn + 1;
+        }
+        Ok(())
+    }
+
+    fn copy(&self) -> MosResult<Box<dyn ASRegion>> {
+        todo!()
+    }
+
+    fn fault_handler(&mut self, vpn: VirtPageNum, perform: ASPerms) -> MosResult<bool> {
+        todo!()
+    }
+}
+
+impl LazyRegion {
+    pub fn new_free(metadata: ASRegionMeta) -> Box<Self> {
         let mut pages = vec![];
-        for _ in 0..map_info.pages {
+        for _ in 0..metadata.pages {
+            pages.push(PageState::Free);
+        }
+        let region = Self { metadata, pages };
+        Box::new(region)
+    }
+
+    pub fn new_framed(metadata: ASRegionMeta) -> MosResult<Box<Self>> {
+        let mut pages = vec![];
+        for _ in 0..metadata.pages {
             let page = alloc_user_frames(1)?;
             pages.push(PageState::Framed(page));
         }
-        let obj = Self { map_info, perms, pages };
-        Ok(obj)
+        let region = Self { metadata, pages };
+        Ok(Box::new(region))
     }
+}
 
-    fn map_one(&self, page: &PageState, vpn: VirtPageNum) -> MosResult<Vec<VMObjectDirect>> {
-        let mut pt = self.map_info.root_pt;
+impl LazyRegion {
+    fn map_one(&self, mut pt: PageTable, page: &PageState, vpn: VirtPageNum) -> MosResult<Vec<HeapFrameTracker>> {
         let mut dirs = vec![];
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
@@ -56,16 +92,16 @@ impl VMObjectLazy {
                     PageState::Free => (PhysPageNum(0), PTEFlags::empty()),
                     PageState::Framed(ref tracker) => {
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
-                        if self.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
-                        if self.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
-                        if self.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
+                        if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
+                        if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
+                        if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
                         (tracker.ppn, flags)
                     }
                     PageState::CopyOnWrite(ref tracker) => {
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
-                        if self.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
+                        if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
                         // No W
-                        if self.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
+                        if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
                         (tracker.ppn, flags)
                     }
                 };
@@ -80,7 +116,7 @@ impl VMObjectLazy {
                     SlotType::Directory(next) => pt = next,
                     SlotType::Page(_) => return Err(MosError::PageAlreadyMapped(pte.ppn())),
                     SlotType::Invalid => {
-                        let dir = VMObjectDirect::new_page_dir()?;
+                        let dir = alloc_kernel_frames(1)?;
                         trace!(
                             "LazyMap: create dir at lv{}pt {:?} slot {} -> {:?}",
                             i, pt.ppn, idx, dir.ppn,
@@ -95,8 +131,7 @@ impl VMObjectLazy {
         Ok(dirs)
     }
 
-    fn unmap_one(&self, vpn: VirtPageNum) -> MosResult {
-        let mut pt = self.map_info.root_pt;
+    fn unmap_one(&self, mut pt: PageTable, vpn: VirtPageNum) -> MosResult {
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == 2 {
@@ -117,34 +152,5 @@ impl VMObjectLazy {
             }
         }
         Ok(())
-    }
-}
-
-impl VMObject for VMObjectLazy {
-    fn set_perms(&mut self, perms: ASPerms) -> MosResult {
-        todo!()
-    }
-
-    fn map(&self) -> MosResult<Vec<VMObjectDirect>> {
-        let mut dirs = vec![];
-        let mut vpn = self.map_info.start;
-        for page in self.pages.iter() {
-            dirs.extend(self.map_one(page, vpn)?);
-            vpn = vpn + 1;
-        }
-        Ok(dirs)
-    }
-
-    fn unmap(&self) -> MosResult {
-        let mut vpn = self.map_info.start;
-        for _ in self.pages.iter() {
-            self.unmap_one(vpn)?;
-            vpn = vpn + 1;
-        }
-        Ok(())
-    }
-
-    fn fault_handler(&mut self, mut pt: PageTable, vpn: VirtPageNum, perform: ASPerms) -> MosResult {
-        todo!()
     }
 }

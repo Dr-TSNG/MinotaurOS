@@ -1,22 +1,21 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::arch::asm;
-use core::cmp::Ordering;
 use bitflags::bitflags;
-use downcast_rs::Downcast;
 use log::{debug, info, trace};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
-use crate::arch::{PAGE_SIZE, PhysPageNum, PTE_SLOTS, VirtAddr, VirtPageNum};
+use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::board::GLOBAL_MAPPINGS;
 use crate::config::{USER_HEAP_SIZE, USER_STACK_SIZE};
+use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::page_table::PageTable;
-use crate::mm::vmo::direct::VMObjectDirect;
-use crate::mm::vmo::{CopyableVMObject, MapInfo, VMObject};
-use crate::mm::vmo::lazy::VMObjectLazy;
+use crate::mm::region::{ASRegion, ASRegionMeta};
+use crate::mm::region::direct::DirectRegion;
+use crate::mm::region::lazy::LazyRegion;
 use crate::process::aux::{self, Aux};
 use crate::result::{MosError, MosResult};
 use crate::result::MosError::InvalidExecutable;
@@ -28,63 +27,6 @@ bitflags! {
         const W = 1 << 1;
         const X = 1 << 2;
         const U = 1 << 3;
-    }
-}
-
-pub struct ASRegion {
-    /// 区域映射信息
-    pub map_info: MapInfo,
-    /// 区域权限
-    pub perms: ASPerms,
-    /// 区域名称
-    pub name: Option<String>,
-    /// 区域的 VM 实现
-    pub vmo: Box<dyn VMObject>,
-}
-
-impl PartialEq<Self> for ASRegion {
-    fn eq(&self, other: &Self) -> bool {
-        self.map_info.start == other.map_info.start && self.map_info.pages == other.map_info.pages
-    }
-}
-
-impl PartialOrd<Self> for ASRegion {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.map_info.start.partial_cmp(&other.map_info.start)
-    }
-}
-
-impl Eq for ASRegion {}
-
-impl Ord for ASRegion {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.map_info.start.cmp(&other.map_info.start)
-    }
-}
-
-impl ASRegion {
-    pub fn new(
-        map_info: MapInfo,
-        perms: ASPerms,
-        name: Option<String>,
-        vmo: Box<dyn VMObject>,
-    ) -> ASRegion {
-        ASRegion { map_info, perms, name, vmo }
-    }
-
-    pub fn copy(&self) -> MosResult<ASRegion> {
-        let vmo = match self.vmo.as_any().downcast_ref::<Box<dyn CopyableVMObject>>() {
-            Some(vmo) => vmo,
-            None => return Err(MosError::PageNoncopyable),
-        };
-        let copy = vmo.copy()?;
-        let region = ASRegion::new(
-            self.map_info.clone(),
-            self.perms,
-            self.name.clone(),
-            copy,
-        );
-        Ok(region)
     }
 }
 
@@ -101,14 +43,14 @@ struct AddressSpaceInner {
     /// 与地址空间关联的 ASID
     asid: ASID,
     /// 地址空间中的区域
-    regions: BTreeSet<ASRegion>,
+    regions: BTreeSet<Box<dyn ASRegion>>,
     /// 该地址空间关联的页表帧
-    pt_dirs: Vec<VMObjectDirect>,
+    pt_dirs: Vec<HeapFrameTracker>,
 }
 
 impl AddressSpace {
     pub fn new_bare() -> MosResult<Self> {
-        let root_pt_page = VMObjectDirect::new_page_dir()?;
+        let root_pt_page = alloc_kernel_frames(1)?;
         debug!("AddressSpace: create root page table {:?}", root_pt_page.ppn);
         let root_pt = PageTable::new(root_pt_page.ppn);
         let mut inner = AddressSpaceInner {
@@ -123,9 +65,9 @@ impl AddressSpace {
         };
         addrs.copy_global_mappings()?;
         for region in addrs.inner.read().regions.iter() {
-            let start = region.map_info.start;
-            let end = start + region.map_info.pages;
-            trace!("AddressSpace: {:?} {:x?} - {:x?}", region.name, start, end)
+            let start = region.metadata().start;
+            let end = start + region.metadata().pages;
+            trace!("AddressSpace: {:?} {:x?} - {:x?}", region.metadata().name, start, end)
         }
         Ok(addrs)
     }
@@ -142,7 +84,7 @@ impl AddressSpace {
     }
 
     pub fn from_elf(data: &[u8]) -> MosResult<(Self, usize, usize, Vec<Aux>)> {
-        let mut addrs = Self::new_bare()?;
+        let addrs = Self::new_bare()?;
         let elf = ElfFile::new(data).map_err(InvalidExecutable)?;
         let mut auxv: Vec<Aux> = Vec::with_capacity(64);
 
@@ -176,21 +118,13 @@ impl AddressSpace {
                 if ph_flags.is_execute() {
                     perms |= ASPerms::X;
                 }
-
-                let map_info = MapInfo::new(
-                    addrs.root_pt,
-                    2,
-                    (end_vpn - start_vpn).0,
-                    start_vpn,
-                );
-                let vmo = VMObjectLazy::new_framed(map_info.clone(), perms)?;
-                let region = ASRegion::new(
-                    map_info,
+                let region = LazyRegion::new_framed(ASRegionMeta {
+                    name: None,
                     perms,
-                    None, // TODO: Elf name
-                    Box::new(vmo),
-                );
-                max_end_vpn = region.map_info.end();
+                    start: start_vpn,
+                    pages: (end_vpn - start_vpn).0,
+                })?;
+                max_end_vpn = region.metadata().end();
                 addrs.map_region(region)?;
             }
         }
@@ -199,38 +133,24 @@ impl AddressSpace {
         let ustack_bottom_vpn = max_end_vpn + 1; // Guard page
         let ustack_top_vpn = ustack_bottom_vpn + USER_STACK_SIZE / PAGE_SIZE;
         let ustack_top = VirtAddr::from(ustack_top_vpn).0;
-        let map_info = MapInfo::new(
-            addrs.root_pt,
-            2,
-            (ustack_top_vpn - ustack_bottom_vpn).0,
-            ustack_bottom_vpn,
-        );
-        let vmo = VMObjectLazy::new_free(map_info.clone(), ASPerms::U | ASPerms::R | ASPerms::W);
-        let region = ASRegion::new(
-            map_info,
-            ASPerms::U | ASPerms::R | ASPerms::W,
-            Some("[stack]".to_string()),
-            Box::new(vmo),
-        );
+        let region = LazyRegion::new_free(ASRegionMeta {
+            name: Some("[stack]".to_string()),
+            perms: ASPerms::U | ASPerms::R | ASPerms::W,
+            start: ustack_bottom_vpn,
+            pages: (ustack_top_vpn - ustack_bottom_vpn).0,
+        });
         addrs.map_region(region)?;
         info!("[from_elf] map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
 
         // 映射用户堆
         let uheap_bottom_vpn = ustack_top_vpn + 1;
         let uheap_top_vpn = uheap_bottom_vpn + USER_HEAP_SIZE / PAGE_SIZE;
-        let map_info = MapInfo::new(
-            addrs.root_pt,
-            2,
-            (uheap_top_vpn - uheap_bottom_vpn).0,
-            uheap_bottom_vpn,
-        );
-        let vmo = VMObjectLazy::new_free(map_info.clone(), ASPerms::U | ASPerms::R | ASPerms::W);
-        let region = ASRegion::new(
-            map_info,
-            ASPerms::U | ASPerms::R | ASPerms::W,
-            Some("[heap]".to_string()),
-            Box::new(vmo),
-        );
+        let region = LazyRegion::new_free(ASRegionMeta {
+            name: Some("[heap]".to_string()),
+            perms: ASPerms::U | ASPerms::R | ASPerms::W,
+            start: uheap_bottom_vpn,
+            pages: (uheap_top_vpn - uheap_bottom_vpn).0,
+        });
         addrs.map_region(region)?;
         info!("[from_elf] Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
 
@@ -261,44 +181,34 @@ impl AddressSpace {
             let ppn_start = PhysPageNum::from(map.phys_start);
             let vpn_start = VirtPageNum::from(map.virt_start);
             let vpn_end = VirtPageNum::from(map.virt_end);
-            let mut cur = vpn_start;
-            while cur < vpn_end {
-                let next_lv1 = cur.step_lv1();
-                let (level, pages, next) = match cur.index(2) == 0 && next_lv1 <= vpn_end {
-                    true => (1, PTE_SLOTS, next_lv1),
-                    false => (2, 1, cur + 1),
-                };
-                let map_info = MapInfo::new(self.root_pt, level, pages, cur);
-                let ppn = ppn_start + (cur - vpn_start).0;
-                let vmo = VMObjectDirect::new_global(map_info.clone(), ppn, map.perms);
-                let region = ASRegion::new(
-                    map_info,
-                    map.perms,
-                    Some(map.name.to_string()),
-                    Box::new(vmo),
-                );
-                cur = next;
-                self.map_region(region)?;
-            }
+            
+            let metadata = ASRegionMeta {
+                name: Some(map.name.to_string()),
+                perms: map.perms,
+                start: vpn_start,
+                pages: (vpn_end - vpn_start).0,
+            };
+            let region = DirectRegion::new(metadata, ppn_start);
+            self.map_region(region)?;
         }
         Ok(())
     }
 
-    pub fn map_region(&mut self, region: ASRegion) -> MosResult {
-        let dirs = region.vmo.map()?;
+    pub fn map_region(&self, region: Box<dyn ASRegion>) -> MosResult {
+        let dirs = region.map(self.root_pt)?;
         let mut inner = self.inner.write();
         inner.regions.insert(region);
         inner.pt_dirs.extend(dirs);
         Ok(())
     }
 
-    pub fn unmap_region(&mut self, start: VirtPageNum) -> MosResult<ASRegion> {
+    pub fn unmap_region(&self, start: VirtPageNum) -> MosResult<Box<dyn ASRegion>> {
         let mut inner = self.inner.write();
         let region = inner.regions
-            .extract_if(|region| region.map_info.start == start)
+            .extract_if(|region| region.metadata().start == start)
             .next()
             .ok_or(MosError::BadAddress(VirtAddr::from(start)))?;
-        region.vmo.unmap()?;
+        region.unmap(self.root_pt)?;
         Ok(region)
     }
 }
