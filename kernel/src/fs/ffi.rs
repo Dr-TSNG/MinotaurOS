@@ -1,10 +1,16 @@
 use bitflags::bitflags;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct TimeSpec {
-    pub sec: usize,
-    pub nsec: usize,
+    pub sec: i64,
+    pub nsec: i64,
+}
+
+impl TimeSpec {
+    pub fn new(sec: i64, nsec: i64) -> Self {
+        Self { sec, nsec }
+    }
 }
 
 bitflags! {
@@ -60,4 +66,23 @@ bitflags! {
         /// Do not follow symlinks
         const ST_NOSYMFOLLOW = 1 << 13;
     }
+}
+
+/// Inode 类型
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum InodeMode {
+    /// socket
+    IFSOCK = 0xC000,
+    /// 符号链接
+    IFLNK = 0xA000,
+    /// 一般文件
+    IFREG = 0x8000,
+    /// 块设备
+    IFBLK = 0x6000,
+    /// 目录
+    DIR = 0x4000,
+    /// 字符设备
+    CHR = 0x2000,
+    /// FIFO
+    FileFIFO = 0x1000,
 }

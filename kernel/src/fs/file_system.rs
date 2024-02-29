@@ -30,7 +30,7 @@ pub struct FileSystemMeta {
 }
 
 /// 文件系统
-pub trait FileSystem {
+pub trait FileSystem: Send + Sync {
     /// 文件系统元数据
     fn metadata(&self) -> &FileSystemMeta;
 
@@ -111,6 +111,6 @@ impl MountNamespace {
             .extract_if(|node| Arc::ptr_eq(node, &mount_point))
             .next()
             .ok_or(Errno::ENOENT)?;
-        Ok(0)
+        Ok(())
     }
 }

@@ -7,7 +7,7 @@ use core::pin::Pin;
 use crate::arch::{PhysPageNum, VirtAddr};
 
 pub type MosResult<T = ()> = Result<T, MosError>;
-pub type SyscallResult<T = isize> = Result<T, Errno>;
+pub type SyscallResult<T = ()> = Result<T, Errno>;
 
 #[derive(Debug)]
 pub enum MosError {

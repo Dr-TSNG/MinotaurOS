@@ -16,26 +16,42 @@ pub struct FAT32Meta {
     pub bytes_per_sector: usize,
     /// 每簇的扇区数
     pub sectors_per_cluster: usize,
+    /// 每簇的字节数
+    pub bytes_per_cluster: usize,
+    /// 根目录所在的簇号
+    pub root_cluster: usize,
 }
 
+#[derive(Copy, Clone, Debug)]
 pub enum FATEnt {
     /// 空簇
     EMPTY,
-    /// 簇链结束
-    EOF,
     /// 坏簇
     BAD,
+    /// 簇链结束
+    EOF,
     /// 下个簇号
     NEXT(u32),
 }
 
-impl FATEnt {
-    fn from(ent: u32) -> Self {
-        match ent {
+impl From<u32> for FATEnt {
+    fn from(value: u32) -> Self {
+        match value {
             0 => FATEnt::EMPTY,
             0x0FFFFFF7 => FATEnt::BAD,
             0x0FFFFFF8.. => FATEnt::EOF,
-            _ => FATEnt::NEXT(ent),
+            _ => FATEnt::NEXT(value),
+        }
+    }
+}
+
+impl From<FATEnt> for u32 {
+    fn from(value: FATEnt) -> Self {
+        match value {
+            FATEnt::EMPTY => 0,
+            FATEnt::BAD => 0x0FFFFFF7,
+            FATEnt::EOF => 0x0FFFFFF8,
+            FATEnt::NEXT(v) => v,
         }
     }
 }
@@ -54,6 +70,8 @@ impl FAT32Meta {
         let total_sectors = BPBOffset::total_sectors(boot_sector) as usize;
         let bytes_per_sector = BPBOffset::bytes_per_sector(boot_sector) as usize;
         let sectors_per_cluster = BPBOffset::sector_per_cluster(boot_sector) as usize;
+        let bytes_per_cluster = bytes_per_sector * sectors_per_cluster;
+        let root_cluster = BPBOffset::root_cluster(boot_sector) as usize;
         if total_sectors / sectors_per_cluster < 65525 {
             return Err(UnsupportedFileSystem("Not a FAT32 file system"));
         }
@@ -64,15 +82,24 @@ impl FAT32Meta {
             total_sectors,
             bytes_per_sector,
             sectors_per_cluster,
+            bytes_per_cluster,
+            root_cluster,
         };
         Ok(metadata)
     }
 
-    pub fn sector_for_cluster(&self, cluster: usize) -> usize {
+    /// 根据簇号获取 FAT 表项的扇区号
+    pub fn ent_sector_for_cluster(&self, cluster: usize) -> usize {
         self.fat_offset + cluster * 4 / self.bytes_per_sector
     }
 
+    /// 根据簇号获取 FAT 表项的扇区偏移
     pub fn ent_offset_for_cluster(&self, cluster: usize) -> usize {
         cluster * 4 % self.bytes_per_sector
+    }
+    
+    /// 根据簇号获取数据的起始扇区号
+    pub fn data_sector_for_cluster(&self, cluster: usize) -> usize {
+        self.data_offset + (cluster - 2) * self.sectors_per_cluster
     }
 }

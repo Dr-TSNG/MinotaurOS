@@ -1,8 +1,10 @@
 use alloc::boxed::Box;
-use alloc::sync::Arc;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use async_trait::async_trait;
-use crate::fs::ffi::{OpenFlags, TimeSpec};
+use crate::fs::ffi::{InodeMode, OpenFlags, TimeSpec};
 use crate::fs::file::File;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
@@ -12,13 +14,15 @@ pub struct InodeMeta {
     pub ino: usize,
     /// 结点设备
     pub dev: usize,
-    /// 结点回环设备
-    pub udev: usize,
+    /// 结点类型
+    pub mode: InodeMode,
     /// 可变数据
     pub inner: Mutex<InodeMetaInner>,
 }
 
 pub struct InodeMetaInner {
+    /// 文件名
+    pub name: String,
     /// uid
     pub uid: usize,
     /// gid
@@ -33,8 +37,11 @@ pub struct InodeMetaInner {
     pub ctime: TimeSpec,
     /// 文件大小
     pub size: isize,
+    /// 父目录
+    pub parent: Option<Weak<dyn Inode>>,
+    /// 子目录项
+    pub children: BTreeMap<String, Arc<dyn Inode>>,
 }
-
 
 #[async_trait]
 pub trait Inode: Send + Sync {
@@ -45,14 +52,14 @@ pub trait Inode: Send + Sync {
     async fn open(&self) -> SyscallResult<Arc<dyn File>> {
         Err(Errno::EPERM)
     }
-    
+
     /// 从 `offset` 处读取 `buf`
-    async fn read(&self, buf: &mut [u8], offset: isize) -> SyscallResult {
+    async fn read(&self, buf: &mut [u8], offset: usize) -> SyscallResult<isize> {
         Err(Errno::EPERM)
     }
 
     /// 向 `offset` 处写入 `buf`
-    async fn write(&self, buf: &[u8], offset: isize) -> SyscallResult {
+    async fn write(&self, buf: &[u8], offset: usize) -> SyscallResult<isize> {
         Err(Errno::EPERM)
     }
 
@@ -60,7 +67,7 @@ pub trait Inode: Send + Sync {
     async fn lookup(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
-    
+
     /// 列出目录下所有文件
     async fn list(&self) -> SyscallResult<Vec<Arc<dyn Inode>>> {
         Err(Errno::EPERM)
@@ -80,12 +87,12 @@ pub trait Inode: Send + Sync {
     async fn unlink(&self) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
-    
+
     /// 将 Inode 移动到新位置
     async fn moveto(&self, new_dir: Arc<dyn Inode>, new_name: &str) -> SyscallResult {
         Err(Errno::EPERM)
     }
-    
+
     /// 同步修改
     async fn sync(&self) -> SyscallResult {
         Err(Errno::EPERM)

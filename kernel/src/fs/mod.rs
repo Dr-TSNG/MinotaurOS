@@ -20,6 +20,7 @@ pub fn init() -> MosResult {
         _ => return Err(BlockDeviceError("Missing root block device".to_string())),
     };
     let fs = block_on(FAT32FileSystem::new(root_dev, VfsFlags::empty()))?;
+    block_on(fs.read_root_inode())?;
     info!("File systems initialized");
     Ok(())
 }

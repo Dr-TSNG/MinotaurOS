@@ -30,11 +30,11 @@ pub enum Seek {
 pub trait File: Send + Sync {
     fn metadata(&self) -> &FileMeta;
 
-    async fn read(&self, buf: &mut [u8]) -> SyscallResult;
+    async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize>;
 
-    async fn write(&self, buf: &[u8]) -> SyscallResult;
+    async fn write(&self, buf: &[u8]) -> SyscallResult<isize>;
 
-    async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult {
+    async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         let _lock = self.metadata().rw_lock.lock().await;
         let old = self.seek(Seek::Cur(0))?;
         self.seek(Seek::Set(offset))?;
@@ -43,7 +43,7 @@ pub trait File: Send + Sync {
         ret
     }
 
-    async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult {
+    async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
         let _lock = self.metadata().rw_lock.lock().await;
         let old = self.seek(Seek::Cur(0))?;
         self.seek(Seek::Set(offset))?;
@@ -52,15 +52,15 @@ pub trait File: Send + Sync {
         ret
     }
 
-    fn sync_read(&self, buf: &mut [u8]) -> SyscallResult {
+    fn sync_read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         block_on(self.read(buf))
     }
 
-    fn sync_write(&self, buf: &[u8]) -> SyscallResult {
+    fn sync_write(&self, buf: &[u8]) -> SyscallResult<isize> {
         block_on(self.write(buf))
     }
 
-    fn seek(&self, seek: Seek) -> SyscallResult {
+    fn seek(&self, seek: Seek) -> SyscallResult<isize> {
         let metadata = self.metadata();
         let mut inner = metadata.inner.lock();
         inner.pos = match seek {
@@ -71,23 +71,17 @@ pub trait File: Send + Sync {
                 offset
             }
             Seek::Cur(offset) => {
-                #[allow(arithmetic_overflow)]
-                    let new_pos = inner.pos + offset;
-                if new_pos < 0 {
-                    // TODO: EOVERFLOW
-                    return Err(Errno::EINVAL);
+                match inner.pos.checked_add(offset) {
+                    Some(new_pos) => new_pos,
+                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
                 }
-                new_pos
             }
             Seek::End(offset) => {
                 let size = metadata.inode.metadata().inner.lock().size;
-                #[allow(arithmetic_overflow)]
-                    let new_pos = size + offset;
-                if new_pos < 0 {
-                    // TODO: EOVERFLOW
-                    return Err(Errno::EINVAL);
+                match size.checked_add(offset) {
+                    Some(new_pos) => new_pos,
+                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
                 }
-                new_pos
             }
         };
         Ok(inner.pos)
