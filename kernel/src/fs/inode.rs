@@ -2,7 +2,6 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
-use alloc::vec::Vec;
 use async_trait::async_trait;
 use crate::fs::ffi::{InodeMode, OpenFlags, TimeSpec};
 use crate::fs::file::File;
@@ -49,17 +48,17 @@ pub trait Inode: Send + Sync {
     fn metadata(&self) -> &InodeMeta;
 
     /// 打开一个 Inode，返回打开的文件
-    async fn open(&self) -> SyscallResult<Arc<dyn File>> {
+    async fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
         Err(Errno::EPERM)
     }
 
     /// 从 `offset` 处读取 `buf`
-    async fn read(&self, buf: &mut [u8], offset: usize) -> SyscallResult<isize> {
+    async fn read(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         Err(Errno::EPERM)
     }
 
     /// 向 `offset` 处写入 `buf`
-    async fn write(&self, buf: &[u8], offset: usize) -> SyscallResult<isize> {
+    async fn write(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
         Err(Errno::EPERM)
     }
 
@@ -68,8 +67,8 @@ pub trait Inode: Send + Sync {
         Err(Errno::EPERM)
     }
 
-    /// 列出目录下所有文件
-    async fn list(&self) -> SyscallResult<Vec<Arc<dyn Inode>>> {
+    /// 列出目录下编号 `iter` 的文件
+    async fn list(&self, iter: usize) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
 
@@ -83,13 +82,8 @@ pub trait Inode: Send + Sync {
         Err(Errno::EPERM)
     }
 
-    /// 删除 Inode
-    async fn unlink(&self) -> SyscallResult<Arc<dyn Inode>> {
-        Err(Errno::EPERM)
-    }
-
-    /// 将 Inode 移动到新位置
-    async fn moveto(&self, new_dir: Arc<dyn Inode>, new_name: &str) -> SyscallResult {
+    /// 在当前目录下删除文件
+    async fn unlink(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
 

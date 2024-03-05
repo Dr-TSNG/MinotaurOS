@@ -1,9 +1,10 @@
-use alloc::string::ToString;
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
-use log::{debug, info, trace};
+use async_trait::async_trait;
+use log::{info, trace};
 use crate::driver::BlockDevice;
 use crate::fs::block_cache::BlockCache;
 use crate::fs::fat32::dir::FAT32Dirent;
@@ -11,8 +12,8 @@ use crate::fs::fat32::fat::{FAT32Meta, FATEnt};
 use crate::fs::fat32::inode::FAT32Inode;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
-use crate::fs::inode::{Inode, InodeMeta, InodeMetaInner};
-use crate::result::{MosError, MosResult, SyscallResult};
+use crate::fs::inode::Inode;
+use crate::result::{MosError, MosResult};
 
 macro_rules! section {
     ($buf:ident, $start:ident, $end:ident) => {
@@ -128,11 +129,11 @@ impl FAT32FileSystem {
         Ok(())
     }
 
-    pub async fn read_dir(self: Arc<Self>, ent: FATEnt) -> MosResult<Vec<Arc<FAT32Inode>>> {
+    pub async fn read_dir(self: Arc<Self>, clusters: &[usize]) -> MosResult<Vec<Arc<FAT32Inode>>> {
         let mut inodes = vec![];
         let mut dir = FAT32Dirent::default();
-        'outer: for cluster in self.walk_ent(ent).await? {
-            let sector_start = self.fat32meta.data_sector_for_cluster(cluster);
+        'outer: for cluster in clusters {
+            let sector_start = self.fat32meta.data_sector_for_cluster(*cluster);
             let sector_end = sector_start + self.fat32meta.sectors_per_cluster;
             for sector in sector_start..sector_end {
                 let block_start = self.fat32meta.bytes_per_sector / BLOCK_SIZE * sector;
@@ -150,7 +151,7 @@ impl FAT32FileSystem {
                             dir.last(value);
                             let byte_offset = block_id * BLOCK_SIZE + i;
                             trace!("Read FAT32 dirent: {} \tat {:#x} \tattr {:?}", dir.name, byte_offset, dir.attr);
-                            let inode = FAT32Inode::new(self.clone(), dir).await?;
+                            let inode = FAT32Inode::new(&self, dir).await?;
                             inodes.push(inode);
                             dir = FAT32Dirent::default();
                         }
@@ -159,12 +160,6 @@ impl FAT32FileSystem {
             }
         }
         Ok(inodes)
-    }
-
-    pub async fn read_root_inode(self: Arc<Self>) -> MosResult<Arc<FAT32Inode>> {
-        let root_ent = FATEnt::NEXT(self.fat32meta.root_cluster as u32);
-        let inodes = self.read_dir(root_ent).await?;
-        Ok(inodes.into_iter().next().unwrap())
     }
 
     /// 根据簇号计算 FAT 表项所在的块号和块偏移
@@ -186,12 +181,15 @@ impl FAT32FileSystem {
     }
 }
 
+#[async_trait]
 impl FileSystem for FAT32FileSystem {
     fn metadata(&self) -> &FileSystemMeta {
         &self.vfsmeta
     }
 
-    fn root(&self) -> SyscallResult<Arc<dyn Inode>> {
-        todo!()
+    async fn root(self: Arc<Self>) -> MosResult<Arc<dyn Inode>> {
+        let root_cluster = self.fat32meta.root_cluster as u32;
+        let inode = FAT32Inode::root(&self, None, root_cluster).await?;
+        Ok(inode)
     }
 }

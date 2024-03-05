@@ -1,10 +1,12 @@
+use alloc::boxed::Box;
 use alloc::collections::LinkedList;
 use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicUsize, Ordering};
+use async_trait::async_trait;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::inode::Inode;
-use crate::result::{Errno, SyscallResult};
+use crate::result::{Errno, MosResult, SyscallResult};
 use crate::sync::mutex::Mutex;
 
 pub enum FileSystemType {
@@ -30,12 +32,13 @@ pub struct FileSystemMeta {
 }
 
 /// 文件系统
+#[async_trait]
 pub trait FileSystem: Send + Sync {
     /// 文件系统元数据
     fn metadata(&self) -> &FileSystemMeta;
 
     /// 根 Inode
-    fn root(&self) -> SyscallResult<Arc<dyn Inode>>;
+    async fn root(self: Arc<Self>) -> MosResult<Arc<dyn Inode>>;
 }
 
 impl FileSystemMeta {
@@ -48,10 +51,9 @@ impl FileSystemMeta {
     }
 }
 
-
 impl dyn FileSystem {
-    pub fn move_mount(this: Arc<Self>, target: Weak<MountNamespace>, path: &str) -> SyscallResult<MountPoint> {
-        let lock = this.metadata().mount_point.lock();
+    pub fn move_mount(self: Arc<Self>, target: Weak<MountNamespace>, path: &str) -> SyscallResult<MountPoint> {
+        let lock = self.metadata().mount_point.lock();
         if let Some(old_mnt) = lock.upgrade() {
             if let Some(old_ns) = old_mnt.namespace.upgrade() {
                 old_ns.unmount(old_mnt)?;
@@ -59,7 +61,7 @@ impl dyn FileSystem {
         }
         drop(lock);
         let mnt = MountPoint {
-            fs: this,
+            fs: self,
             namespace: target,
             mnt_id: MNT_ID_POOL.fetch_add(1, Ordering::Acquire),
             path: path.to_string(),

@@ -7,6 +7,7 @@ use log::trace;
 
 pub mod executor;
 pub mod mutex;
+pub mod once;
 
 /// A waker that wakes up the current thread when called.
 struct BlockWaker;
