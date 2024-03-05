@@ -1,12 +1,16 @@
 use alloc::collections::VecDeque;
+
 pub struct IdAllocator {
     cur: usize,
     recycled: VecDeque<usize>,
 }
 
 impl IdAllocator {
-    pub const fn new() -> Self {
-        Self { cur: 0, recycled: VecDeque::new() }
+    pub const fn new(start: usize) -> Self {
+        Self {
+            cur: start,
+            recycled: VecDeque::new(),
+        }
     }
 
     pub fn alloc(&mut self) -> usize {

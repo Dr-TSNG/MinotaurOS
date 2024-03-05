@@ -44,12 +44,9 @@ pub fn spawn<F>(future: F) -> (Runnable, Task<F::Output>)
     async_task::spawn(future, WithInfo(schedule))
 }
 
-/// 启动协程
-pub fn start_coroutine() -> usize {
-    let mut switched = 0;
+/// 开始执行任务
+pub fn run_executor() {
     while let Some(task) = TASK_QUEUE.take() {
         task.run();
-        switched += 1;
     }
-    switched
 }

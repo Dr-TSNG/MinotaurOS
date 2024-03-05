@@ -8,8 +8,8 @@ use bitflags::bitflags;
 use log::{debug, info, trace};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
-use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
-use crate::board::GLOBAL_MAPPINGS;
+use crate::arch::{paddr_to_kvaddr, PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
+use crate::board::{GLOBAL_MAPPINGS, PHYS_MEMORY};
 use crate::config::{USER_HEAP_SIZE, USER_STACK_SIZE};
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::page_table::PageTable;
@@ -92,7 +92,7 @@ impl AddressSpace {
                 let start_addr = VirtAddr(phdr.virtual_addr() as usize);
                 let end_addr = VirtAddr((phdr.virtual_addr() + phdr.mem_size()) as usize);
                 let start_vpn = VirtPageNum::from(start_addr);
-                let end_vpn = VirtPageNum::from(end_addr);
+                let end_vpn = end_addr.ceil();
                 if load_base == 0 {
                     load_base = start_addr.0;
                 }
@@ -108,12 +108,17 @@ impl AddressSpace {
                 if ph_flags.is_execute() {
                     perms |= ASPerms::X;
                 }
-                let region = LazyRegion::new_framed(ASRegionMeta {
-                    name: None,
-                    perms,
-                    start: start_vpn,
-                    pages: (end_vpn - start_vpn).0,
-                })?;
+                let buf = &elf
+                    .input[phdr.offset() as usize..(phdr.offset() + phdr.file_size()) as usize];
+                let region = LazyRegion::new_framed(
+                    ASRegionMeta {
+                        name: None,
+                        perms,
+                        start: start_vpn,
+                        pages: (end_vpn - start_vpn).0,
+                    },
+                    Some(buf),
+                )?;
                 max_end_vpn = region.metadata().end();
                 addrs.map_region(region)?;
             }
@@ -174,6 +179,21 @@ impl AddressSpace {
             let metadata = ASRegionMeta {
                 name: Some(map.name.to_string()),
                 perms: map.perms,
+                start: vpn_start,
+                pages: (vpn_end - vpn_start).0,
+            };
+            let region = DirectRegion::new(metadata, ppn_start);
+            self.map_region(region)?;
+        }
+        for (paddr_start, paddr_end) in PHYS_MEMORY.iter() {
+            debug!("Copy global mappings: [physical] from {:?} to {:?}", paddr_start, paddr_end);
+            let ppn_start = PhysPageNum::from(*paddr_start);
+            let vpn_start = VirtPageNum::from(paddr_to_kvaddr(*paddr_start));
+            let vpn_end = VirtPageNum::from(paddr_to_kvaddr(*paddr_end));
+            
+            let metadata = ASRegionMeta {
+                name: Some("[physical]".to_string()),
+                perms: ASPerms::R | ASPerms::W,
                 start: vpn_start,
                 pages: (vpn_end - vpn_start).0,
             };

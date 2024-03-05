@@ -34,8 +34,8 @@ impl Hart {
                 unsafe { task.thread.process.inner.lock().addr_space.activate(); }
             }
         } else {
-            unsafe {
-                KERNEL_SPACE.lock().activate();
+            if self.current_thread().is_some() {
+                unsafe { KERNEL_SPACE.lock().activate(); }
             }
         }
         core::mem::swap(&mut self.ctx, another);

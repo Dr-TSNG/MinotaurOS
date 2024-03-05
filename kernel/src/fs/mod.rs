@@ -22,7 +22,7 @@ pub mod inode;
 pub static ROOT_FS: LateInit<Arc<dyn FileSystem>> = LateInit::new();
 
 pub fn init() -> MosResult {
-    let root_dev = match DEVICES.read().get(&0) {
+    let root_dev = match DEVICES.read().get(&1) {
         Some(Device::Block(blk)) => blk.clone(),
         _ => return Err(BlockDeviceError("Missing root block device".to_string())),
     };

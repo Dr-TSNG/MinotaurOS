@@ -1,5 +1,5 @@
 use log::{Level, LevelFilter, Metadata, Record};
-use crate::println;
+use crate::processor::hart::local_hart;
 
 #[cfg(feature = "error")]
 const LOG_LEVEL: LevelFilter = LevelFilter::Error;
@@ -13,32 +13,39 @@ const LOG_LEVEL: LevelFilter = LevelFilter::Debug;
 const LOG_LEVEL: LevelFilter = LevelFilter::Trace;
 
 struct SimpleLogger;
+
 impl log::Log for SimpleLogger {
     fn enabled(&self, _metadata: &Metadata) -> bool {
         true
     }
     fn log(&self, record: &Record) {
-        // let (pid, tid) = if let Some(task) = current_task() {
-        //     (task.get_pid() as isize, task.get_tid() as isize)
-        // } else {
-        //     (-1, -1)
-        // };
-        let tid = 0;
-
         if self.enabled(record.metadata()) {
-            println!(
-                "\x1b[{}m[{}] [TID {}] {}\x1b[0m",
-                level_color(record.level()),
-                record.level(),
-                tid,
-                record.args()
-            );
+            match local_hart().current_thread() {
+                Some(thread) => {
+                    println!(
+                        "\x1b[{}m[{:5}] tid {} | {}\x1b[0m",
+                        level_color(record.level()),
+                        record.level(),
+                        thread.tid.0,
+                        record.args()
+                    );
+                }
+                None => {
+                    println!(
+                        "\x1b[{}m[{:5}] kernel | {}\x1b[0m",
+                        level_color(record.level()),
+                        record.level(),
+                        record.args(),
+                    );
+                }
+            }
         }
     }
     fn flush(&self) {}
 }
 
 static LOGGER: SimpleLogger = SimpleLogger;
+
 pub fn init() {
     log::set_logger(&LOGGER)
         .map(|()| log::set_max_level(LOG_LEVEL))

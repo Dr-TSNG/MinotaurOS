@@ -25,14 +25,17 @@ pub fn vm_init() -> MosResult {
 
 fn vm_test() -> MosResult {
     let mut kernel_space = KERNEL_SPACE.lock();
-    info!("Start VM Test");
+    info!("Start VM test");
     let start = VirtPageNum(0x100);
-    let region = LazyRegion::new_framed(ASRegionMeta {
-        name: Some("VM Test".to_string()),
-        perms: ASPerms::R | ASPerms::W,
-        start,
-        pages: 4,
-    })?;
+    let region = LazyRegion::new_framed(
+        ASRegionMeta {
+            name: Some("VM test".to_string()),
+            perms: ASPerms::R | ASPerms::W,
+            start,
+            pages: 4,
+        },
+        None,
+    )?;
     kernel_space.map_region(region)?;
     let slice = unsafe {
         let ptr = VirtAddr::from(VirtPageNum::from(start)).0 as *mut u8;
@@ -40,6 +43,6 @@ fn vm_test() -> MosResult {
     };
     unsafe { kernel_space.activate(); }
     slice.fill(0x42);
-    info!("Framed VMObjectLazy test passed");
+    info!("VM test passed");
     Ok(())
 }

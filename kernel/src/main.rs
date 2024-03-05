@@ -19,6 +19,7 @@ extern crate alloc;
 mod arch;
 mod config;
 mod board;
+mod builtin;
 mod debug;
 mod driver;
 mod fs;
@@ -33,12 +34,15 @@ mod sync;
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
-use log::error;
+use log::{error, info};
 use arch::shutdown;
 use config::KERNEL_ADDR_OFFSET;
 use crate::config::{LINKAGE_EBSS, LINKAGE_SBSS};
+use crate::process::Process;
 use crate::processor::hart;
 use crate::result::MosResult;
+use crate::sched::spawn_kernel_thread;
+use crate::sync::executor::run_executor;
 
 global_asm!(include_str!("entry.asm"));
 
@@ -59,10 +63,17 @@ fn start_main_hart() -> MosResult {
     println!("[kernel] Display Logo");
     println!("{}", LOGO);
 
+    builtin::init();
     trap::init();
     mm::vm_init()?;
     driver::init()?;
     fs::init()?;
+
+    spawn_kernel_thread(async {
+        let data = builtin::builtin_app("init").unwrap();
+        info!("Spawn init process");
+        Process::new_initproc(data).unwrap();
+    });
 
     Ok(())
 }
@@ -85,6 +96,7 @@ pub unsafe fn pspace_main(hart_id: usize) {
 #[no_mangle]
 fn main() -> ! {
     start_main_hart().unwrap();
+    run_executor();
     panic!("End of execution")
 }
 

@@ -15,6 +15,7 @@
 
 .section .text
 .align 2
+.globl __trap_from_user
 __trap_from_user:
     # 交换 sp 和 sscratch，切换到内核栈，同时将用户栈保存到 sscratch
     # 将 sp 指向 &TrapContext
@@ -72,6 +73,7 @@ __trap_from_user:
     # 返回内核调用函数
     ret
 
+.globl __restore_to_user
 __restore_to_user:
     # 将内核栈保存到 sscratch
     csrw sscratch, a0
@@ -103,9 +105,9 @@ __restore_to_user:
     ld t0, 64*8(sp)
     ld t1, 65*8(sp)
     ld t2, 66*8(sp)
-    csrr t0, fcsr
-    csrr t1, sstatus
-    csrr t2, sepc
+    csrw fcsr, t0
+    csrw sstatus, t1
+    csrw sepc, t2
 
     # 恢复除 x0/sp 以外的通用寄存器
     ld x1, 1*8(sp)
@@ -128,6 +130,7 @@ __restore_to_user:
     ld sp, 2*8(sp)
     sret
 
+.globl __trap_from_kernel
 __trap_from_kernel:
     addi sp, sp, -16*8
     sd ra, 0*8(sp)

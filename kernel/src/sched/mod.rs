@@ -36,7 +36,7 @@ impl<F: Future<Output=()> + Send + 'static> Future for HartTaskFuture<F> {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // SAFETY：HartContext 中不含有指针，所以可以被 swap
+        // SAFETY: HartContext 中不含有指针，所以可以被 swap
         let this = unsafe { self.get_unchecked_mut() };
         let hart = local_hart();
         hart.switch_ctx(&mut this.ctx);
@@ -44,6 +44,19 @@ impl<F: Future<Output=()> + Send + 'static> Future for HartTaskFuture<F> {
         hart.switch_ctx(&mut this.ctx);
         ret
     }
+}
+
+async fn thread_loop(thread: Arc<Thread>) {
+    thread.inner().waker = Some(take_waker().await);
+    loop {
+        trap_return();
+        trap_from_user().await;
+        if thread.inner().terminated {
+            debug!("Thread {} terminated", current_thread().tid.0);
+            break;
+        }
+    }
+    thread.on_terminate();
 }
 
 pub fn spawn_kernel_thread<F: Future<Output=()> + Send + 'static>(kernel_thread: F) {
@@ -58,17 +71,4 @@ pub fn spawn_user_thread(thread: Arc<Thread>) {
     let (runnable, task) = executor::spawn(future);
     runnable.schedule();
     task.detach();
-}
-
-pub async fn thread_loop(thread: Arc<Thread>) {
-    thread.inner().waker = Some(take_waker().await);
-    loop {
-        trap_return();
-        trap_from_user().await;
-        if thread.inner().terminated {
-            debug!("Thread {} terminated", current_thread().tid.0);
-            break;
-        }
-    }
-    thread.on_terminate();
 }

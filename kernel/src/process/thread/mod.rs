@@ -20,7 +20,6 @@ pub struct ThreadInner {
     pub trap_ctx: TrapContext,
     pub rusage: ResourceUsage,
     pub waker: Option<Waker>,
-    pub ustack_top: usize,
     pub terminated: bool,
 }
 
@@ -31,22 +30,21 @@ impl Thread {
     pub fn new(
         process: Arc<Process>,
         trap_ctx: TrapContext,
-        ustack_top: usize,
         tid: Option<Arc<TidTracker>>,
-    ) -> Self {
+    ) -> Arc<Self> {
         let tid = tid.unwrap_or(Arc::new(TidTracker::new()));
         let inner = ThreadInner {
             trap_ctx,
             rusage: ResourceUsage::new(),
             waker: None,
-            ustack_top,
             terminated: false,
         };
-        Thread {
+        let thread = Thread {
             tid,
             process,
             inner: UnsafeCell::new(inner),
-        }
+        };
+        Arc::new(thread)
     }
     
     /// SAFETY: ThreadInner 中的成员在 spawn 后只应该被本地 hart 访问

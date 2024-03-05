@@ -152,6 +152,9 @@ impl VirtAddr {
     pub fn aligned(&self) -> bool {
         self.page_offset() == 0
     }
+    pub fn as_ptr(&self) -> *mut u8 {
+        self.0 as *mut u8
+    }
 }
 
 //           |<---------  26  --------->|<-- 9 -->|<-- 9 -->|<--  12  -->|
@@ -175,6 +178,10 @@ impl PhysPageNum {
     pub fn step_lv1(&self) -> PhysPageNum {
         PhysPageNum(self.0 + (1 << SV39_VPN_BITS))
     }
+    pub fn byte_array(&self) -> &'static mut [u8] {
+        let vaddr = VirtAddr::from(ppn_to_kvpn(*self)).as_ptr();
+        unsafe { core::slice::from_raw_parts_mut(vaddr, SV39_PAGE_SIZE) }
+    }
 }
 
 impl VirtPageNum {
@@ -196,6 +203,10 @@ impl VirtPageNum {
     }
     pub fn step_lv1(&self) -> VirtPageNum {
         VirtPageNum(self.0 + (1 << SV39_VPN_BITS))
+    }
+    pub fn byte_array(&self) -> &'static mut [u8] {
+        let vaddr = VirtAddr::from(*self).as_ptr();
+        unsafe { core::slice::from_raw_parts_mut(vaddr, SV39_PAGE_SIZE) }
     }
 }
 

@@ -6,9 +6,10 @@ use crate::trap::{__restore_to_user, set_kernel_trap_entry, set_user_trap_entry}
 
 pub fn trap_return() {
     set_user_trap_entry();
+    debug!("Trap return to user");
     unsafe {
         current_thread().inner().rusage.trap_out();
-        __restore_to_user();
+        __restore_to_user(&mut current_thread().inner().trap_ctx);
         current_thread().inner().rusage.trap_in();
     }
 }

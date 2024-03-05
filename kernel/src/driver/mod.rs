@@ -17,7 +17,7 @@ use crate::sync::mutex::{Mutex, RwLock};
 
 pub static DEVICES: RwLock<BTreeMap<usize, Device>> = RwLock::new(BTreeMap::new());
 
-static DEV_ID_ALLOCATOR: Mutex<IdAllocator> = Mutex::new(IdAllocator::new());
+static DEV_ID_ALLOCATOR: Mutex<IdAllocator> = Mutex::new(IdAllocator::new(1));
 
 pub enum Device {
     Block(Arc<dyn BlockDevice>),

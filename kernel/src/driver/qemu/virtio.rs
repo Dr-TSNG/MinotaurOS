@@ -42,7 +42,7 @@ impl BlockDevice for VirtIOBlock {
 
 impl VirtIOBlock {
     pub fn new() -> MosResult<Self> {
-        let map = GLOBAL_MAPPINGS.iter().find(|m| m.name == "VIRTIO0")
+        let map = GLOBAL_MAPPINGS.iter().find(|m| m.name == "[virtio0]")
             .ok_or(BlockDeviceError("No VIRTIO0 device".to_string()))?;
         unsafe {
             let header = &mut *(map.virt_start.0 as *mut VirtIOHeader);

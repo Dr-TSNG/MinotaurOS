@@ -2,7 +2,7 @@ use crate::mm::allocator::IdAllocator;
 use crate::process::Tid;
 use crate::sync::mutex::IrqMutex;
 
-static TID_ALLOCATOR: IrqMutex<IdAllocator> = IrqMutex::new(IdAllocator::new());
+static TID_ALLOCATOR: IrqMutex<IdAllocator> = IrqMutex::new(IdAllocator::new(1));
 
 #[derive(Eq, PartialEq)]
 pub struct TidTracker(pub Tid);

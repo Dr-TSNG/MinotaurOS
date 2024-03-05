@@ -50,11 +50,15 @@ unsafe impl GlobalAlloc for HeapAllocator {
     }
 }
 
+/// 分配连续的内核页帧
+/// 
+/// SAFETY: 保证分配的页已经清零
 pub fn alloc_kernel_frames(pages: usize) -> MosResult<HeapFrameTracker> {
     let vpn = KERNEL_HEAP.0.lock()
         .alloc(Layout::from_size_align(pages * PAGE_SIZE, PAGE_SIZE).unwrap())
         .map(|va| VirtPageNum::from(VirtAddr(va.as_ptr() as usize)))
         .map_err(|_| MosError::OutOfMemory)?;
+    vpn.byte_array().fill(0);
     let tracker = HeapFrameTracker {
         ppn: kvpn_to_ppn(vpn),
         pages,

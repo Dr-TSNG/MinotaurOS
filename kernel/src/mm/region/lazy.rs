@@ -2,8 +2,9 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cmp::min;
 use log::trace;
-use crate::arch::{PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum};
+use crate::arch::{PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_kernel_frames, alloc_user_frames, HeapFrameTracker, UserFrameTracker};
 use crate::mm::page_table::{PageTable, SlotType};
@@ -22,7 +23,7 @@ enum PageState {
     /// 页面已映射
     Framed(UserFrameTracker),
     /// 写时复制
-    CopyOnWrite(Arc<UserFrameTracker>)
+    CopyOnWrite(Arc<UserFrameTracker>),
 }
 
 impl ASRegion for LazyRegion {
@@ -68,10 +69,25 @@ impl LazyRegion {
         Box::new(region)
     }
 
-    pub fn new_framed(metadata: ASRegionMeta) -> MosResult<Box<Self>> {
+    pub fn new_framed(
+        metadata: ASRegionMeta,
+        buf: Option<&[u8]>,
+    ) -> MosResult<Box<Self>> {
+        if buf.is_some_and(|buf| buf.len() > metadata.pages * PAGE_SIZE) {
+            return Err(MosError::CrossBoundary);
+        }
         let mut pages = vec![];
-        for _ in 0..metadata.pages {
+        for i in 0..metadata.pages {
             let page = alloc_user_frames(1)?;
+            if let Some(buf) = buf {
+                let copy_start = i * PAGE_SIZE;
+                if copy_start < buf.len() {
+                    let copy_cnt = min(PAGE_SIZE, buf.len() - copy_start);
+                    page.ppn
+                        .byte_array()[0..copy_cnt]
+                        .copy_from_slice(&buf[copy_start..copy_start + copy_cnt]);
+                }
+            }
             pages.push(PageState::Framed(page));
         }
         let region = Self { metadata, pages };

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use bitvec_rs::BitVec;
 use log::trace;
-use crate::arch::PhysPageNum;
+use crate::arch::{PhysPageNum, ppn_to_kvpn, VirtAddr};
 use crate::board::PHYS_MEMORY;
 use crate::println;
 use crate::result::{MosError, MosResult};
@@ -104,8 +104,12 @@ impl Segment {
 }
 
 /// 分配连续的用户页帧
+/// 
+/// SAFETY: 保证分配的页已经清零
 pub fn alloc_user_frames(pages: usize) -> MosResult<UserFrameTracker> {
-    USER_ALLOCATOR.lock().alloc(pages)
+    let tracker = USER_ALLOCATOR.lock().alloc(pages)?;
+    tracker.ppn.byte_array().fill(0);
+    Ok(tracker)
 }
 
 pub fn init() {

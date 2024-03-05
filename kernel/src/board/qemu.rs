@@ -14,14 +14,14 @@ lazy_static! {
 
     pub static ref GLOBAL_MAPPINGS: [GlobalMapping; 2] = [
         GlobalMapping::new(
-            "KernelImage",
+            "[kernel]",
             KERNEL_PADDR_BASE,
             KERNEL_VADDR_BASE,
             *LINKAGE_EKERNEL,
             ASPerms::R | ASPerms::W | ASPerms::X,
         ),
         GlobalMapping::new(
-            "VIRTIO0",
+            "[virtio0]",
             PhysAddr(0x1000_1000),
             KERNEL_MMIO_BASE,
             KERNEL_MMIO_BASE + PAGE_SIZE,
