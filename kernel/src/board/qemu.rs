@@ -1,10 +1,8 @@
-use core::fmt::Write;
 use lazy_static::lazy_static;
 use virtio_drivers::PAGE_SIZE;
-use crate::arch::{kvaddr_to_paddr, PhysAddr, sbi};
+use crate::arch::{kvaddr_to_paddr, PhysAddr};
 use crate::board::GlobalMapping;
 use crate::config::{KERNEL_MMIO_BASE, KERNEL_PADDR_BASE, KERNEL_VADDR_BASE, LINKAGE_EKERNEL};
-use crate::debug::console::Console;
 use crate::mm::addr_space::ASPerms;
 
 lazy_static! {
@@ -29,14 +27,3 @@ lazy_static! {
         ),
     ];
 }
-
-pub struct ConsoleImpl;
-
-impl Write for ConsoleImpl {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let _ = sbi::console_write(s);
-        Ok(())
-    }
-}
-
-impl Console for ConsoleImpl {}

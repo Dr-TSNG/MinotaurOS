@@ -1,24 +1,12 @@
-use core::fmt::{Arguments, Write};
-use crate::board;
-use crate::sync::mutex::Mutex;
-
-pub trait Console: Write {
-    fn try_init() {}
-    fn try_init_late() {}
-}
-
-static CONSOLE: Mutex<board::ConsoleImpl> = Mutex::new(board::ConsoleImpl);
-
-pub fn try_init() {
-    board::ConsoleImpl::try_init();
-}
-
-pub fn try_init_late() {
-    board::ConsoleImpl::try_init_late();
-}
+use alloc::fmt;
+use core::fmt::Arguments;
+use crate::fs::devfs::tty::TTY;
+use crate::fs::file::File;
+use crate::sync::block_on;
 
 pub fn print(args: Arguments) {
-    CONSOLE.lock().write_fmt(args).unwrap();
+    let fmt = fmt::format(args);
+    let _ = block_on(TTY.write(fmt.as_bytes()));
 }
 
 #[macro_export]

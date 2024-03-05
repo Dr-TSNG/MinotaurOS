@@ -19,6 +19,7 @@ pub struct InodeMeta {
     pub inner: Mutex<InodeMetaInner>,
 }
 
+#[derive(Default)]
 pub struct InodeMetaInner {
     /// 文件名
     pub name: String,
