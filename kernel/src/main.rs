@@ -17,8 +17,7 @@
 extern crate alloc;
 
 mod arch;
-mod boot;
-pub mod config;
+mod config;
 mod board;
 mod debug;
 mod driver;
@@ -29,6 +28,7 @@ mod processor;
 mod result;
 mod trap;
 mod utils;
+mod sched;
 mod sync;
 
 use core::arch::{asm, global_asm};
@@ -53,15 +53,14 @@ fn clear_bss() {
 
 fn start_main_hart() -> MosResult {
     clear_bss();
-    hart::init(0);
-    debug::console::try_init();
-
-    println!("{}", LOGO);
-
     mm::allocator::init();
     debug::logger::init();
+    hart::init(0);
+    println!("[kernel] Display Logo");
+    println!("{}", LOGO);
+
     trap::init();
-    let _addrs = boot::init_root_task_address_space()?;
+    mm::vm_init()?;
     driver::init()?;
     fs::init()?;
 

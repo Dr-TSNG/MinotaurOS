@@ -7,11 +7,12 @@ pub use rv64::address::SV39_PAGE_SIZE as PAGE_SIZE;
 pub use rv64::address::SV39_VPN_BITS as VPN_BITS;
 pub use rv64::pte::{PTE_SLOTS, PageTableEntry, PTEFlags, PTEType};
 pub use rv64::sbi;
+pub use rv64::hardware_ts;
 
 pub fn set_timer(timer: usize) {
     rv64::sbi::set_timer(timer).unwrap();
 }
 
 pub fn shutdown() -> ! {
-    sbi::shutdown().unwrap();
+    sbi::shutdown().unwrap()
 }

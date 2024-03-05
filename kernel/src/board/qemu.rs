@@ -5,6 +5,8 @@ use crate::board::GlobalMapping;
 use crate::config::{KERNEL_MMIO_BASE, KERNEL_PADDR_BASE, KERNEL_VADDR_BASE, LINKAGE_EKERNEL};
 use crate::mm::addr_space::ASPerms;
 
+pub const CLOCK_FREQ: usize = 10000000;
+
 lazy_static! {
     pub static ref PHYS_MEMORY: [(PhysAddr, PhysAddr); 1] = [
         (kvaddr_to_paddr(*LINKAGE_EKERNEL), PhysAddr(0x8800_0000)),

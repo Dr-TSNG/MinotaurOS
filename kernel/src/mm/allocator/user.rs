@@ -111,7 +111,7 @@ pub fn alloc_user_frames(pages: usize) -> MosResult<UserFrameTracker> {
 pub fn init() {
     let mut allocator = USER_ALLOCATOR.lock();
     PHYS_MEMORY.iter().for_each(|&(start, end)| {
-        println!("[kernel] Initialize user memory: {:?} - {:?}", start, end);
         allocator.add_to_heap(start.into(), end.into());
+        println!("[kernel] Initialize user memory: {:?} - {:?}", start, end);
     });
 }

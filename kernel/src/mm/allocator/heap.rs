@@ -74,7 +74,7 @@ pub fn init() {
     unsafe {
         let start = HEAP_SPACE.as_ptr();
         let end = start.add(KERNEL_HEAP_SIZE);
-        println!("[kernel] Initialize kernel heap: {:?} - {:?}", start, end);
         KERNEL_HEAP.0.lock().add_to_heap(start as usize, end as usize);
+        println!("[kernel] Initialize kernel heap: {:?} - {:?}", start, end);
     }
 }

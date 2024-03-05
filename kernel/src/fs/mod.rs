@@ -13,6 +13,7 @@ use crate::sync::once::LateInit;
 pub mod block_cache;
 pub mod devfs;
 pub mod fat32;
+pub mod fd;
 pub mod ffi;
 pub mod file;
 pub mod file_system;

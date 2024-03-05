@@ -35,11 +35,8 @@ bitflags! {
 pub type ASID = u16;
 
 pub struct AddressSpace {
+    /// 根页表
     pub root_pt: PageTable,
-    inner: RwLock<AddressSpaceInner>,
-}
-
-struct AddressSpaceInner {
     /// 与地址空间关联的 ASID
     asid: ASID,
     /// 地址空间中的区域
@@ -52,19 +49,15 @@ impl AddressSpace {
     pub fn new_bare() -> MosResult<Self> {
         let root_pt_page = alloc_kernel_frames(1)?;
         debug!("AddressSpace: create root page table {:?}", root_pt_page.ppn);
-        let root_pt = PageTable::new(root_pt_page.ppn);
-        let mut inner = AddressSpaceInner {
+        let mut addrs = AddressSpace {
+            root_pt: PageTable::new(root_pt_page.ppn),
             asid: 0,
             regions: BTreeSet::new(),
             pt_dirs: vec![],
         };
-        inner.pt_dirs.push(root_pt_page);
-        let mut addrs = AddressSpace {
-            root_pt,
-            inner: RwLock::new(inner),
-        };
+        addrs.pt_dirs.push(root_pt_page);
         addrs.copy_global_mappings()?;
-        for region in addrs.inner.read().regions.iter() {
+        for region in addrs.regions.iter() {
             let start = region.metadata().start;
             let end = start + region.metadata().pages;
             trace!("AddressSpace: {:?} {:x?} - {:x?}", region.metadata().name, start, end)
@@ -73,18 +66,15 @@ impl AddressSpace {
     }
 
     pub fn from(another: &Self) -> MosResult<AddressSpace> {
-        let addrs = Self::new_bare()?;
-        let mut inner = addrs.inner.write();
-        let another_inner = another.inner.read();
-        for region in another_inner.regions.iter() {
-            inner.regions.insert(region.copy()?);
+        let mut addrs = Self::new_bare()?;
+        for region in another.regions.iter() {
+            addrs.regions.insert(region.copy()?);
         }
-        drop(inner);
         Ok(addrs)
     }
 
     pub fn from_elf(data: &[u8]) -> MosResult<(Self, usize, usize, Vec<Aux>)> {
-        let addrs = Self::new_bare()?;
+        let mut addrs = Self::new_bare()?;
         let elf = ElfFile::new(data).map_err(InvalidExecutable)?;
         let mut auxv: Vec<Aux> = Vec::with_capacity(64);
 
@@ -170,8 +160,7 @@ impl AddressSpace {
     }
 
     pub unsafe fn activate(&self) {
-        let asid = self.inner.read().asid;
-        satp::set(satp::Mode::Sv39, asid as usize, self.root_pt.ppn.0);
+        satp::set(satp::Mode::Sv39, self.asid as usize, self.root_pt.ppn.0);
         asm!("sfence.vma");
     }
 
@@ -181,7 +170,7 @@ impl AddressSpace {
             let ppn_start = PhysPageNum::from(map.phys_start);
             let vpn_start = VirtPageNum::from(map.virt_start);
             let vpn_end = VirtPageNum::from(map.virt_end);
-            
+
             let metadata = ASRegionMeta {
                 name: Some(map.name.to_string()),
                 perms: map.perms,
@@ -194,17 +183,15 @@ impl AddressSpace {
         Ok(())
     }
 
-    pub fn map_region(&self, region: Box<dyn ASRegion>) -> MosResult {
+    pub fn map_region(&mut self, region: Box<dyn ASRegion>) -> MosResult {
         let dirs = region.map(self.root_pt)?;
-        let mut inner = self.inner.write();
-        inner.regions.insert(region);
-        inner.pt_dirs.extend(dirs);
+        self.regions.insert(region);
+        self.pt_dirs.extend(dirs);
         Ok(())
     }
 
-    pub fn unmap_region(&self, start: VirtPageNum) -> MosResult<Box<dyn ASRegion>> {
-        let mut inner = self.inner.write();
-        let region = inner.regions
+    pub fn unmap_region(&mut self, start: VirtPageNum) -> MosResult<Box<dyn ASRegion>> {
+        let region = self.regions
             .extract_if(|region| region.metadata().start == start)
             .next()
             .ok_or(MosError::BadAddress(VirtAddr::from(start)))?;

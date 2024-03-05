@@ -2,14 +2,14 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::task::Wake;
 use core::future::Future;
-use core::task::{Context, Poll};
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
 use log::trace;
 
 pub mod executor;
 pub mod mutex;
 pub mod once;
 
-/// A waker that wakes up the current thread when called.
 struct BlockWaker;
 
 impl Wake for BlockWaker {
@@ -18,21 +18,36 @@ impl Wake for BlockWaker {
     }
 }
 
-/// Run a future to completion on the current thread.
-/// Note that since this function is used in kernel mode,
-/// we won't switch thread when the inner future pending.
-/// Instead, we just poll the inner future again and again.
+struct TakeWakerFuture;
+
+impl Future for TakeWakerFuture {
+    type Output = Waker;
+
+    #[inline(always)]
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Ready(cx.waker().clone())
+    }
+}
+
+/// 阻塞当前线程直到 future 执行完成
+/// 
+/// future 不会被调度，而是一直被轮询直到返回 Ready
 pub fn block_on<T>(fut: impl Future<Output = T>) -> T {
     let mut fut = Box::pin(fut);
 
     let waker = Arc::new(BlockWaker).into();
     let mut ctx = Context::from_waker(&waker);
 
-    // Run the future to completion.
     loop {
         match fut.as_mut().poll(&mut ctx) {
             Poll::Ready(res) => return res,
             Poll::Pending => continue,
         }
     }
+}
+
+/// 获取当前 async 上下文的 waker
+#[inline(always)]
+pub async fn take_waker() -> Waker {
+    TakeWakerFuture.await
 }

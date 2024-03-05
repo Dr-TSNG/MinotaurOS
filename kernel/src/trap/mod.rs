@@ -1,9 +1,9 @@
 pub mod context;
+pub mod user;
+mod kernel;
 
 use core::arch::global_asm;
-use log::debug;
-use riscv::register::{scause, sepc, stval, stvec};
-use riscv::register::scause::{Exception, Trap};
+use riscv::register::stvec;
 use riscv::register::stvec::TrapMode;
 
 global_asm!(include_str!("trap.asm"));
@@ -11,6 +11,7 @@ global_asm!(include_str!("trap.asm"));
 extern {
     fn __trap_from_kernel();
     fn __trap_from_user();
+    fn __restore_to_user();
 }
 
 pub fn init() {
@@ -26,21 +27,5 @@ fn set_kernel_trap_entry() {
 fn set_user_trap_entry() {
     unsafe {
         stvec::write(__trap_from_user as usize, TrapMode::Direct);
-    }
-}
-
-#[no_mangle]
-pub fn trap_from_kernel() {
-    let stval = stval::read();
-    let sepc = sepc::read();
-    let trap = scause::read().cause();
-    debug!("Trap {:?} from kernel at {:#x} for {:#x}", trap, sepc, stval);
-    match trap {
-        Trap::Exception(Exception::StoreFault) => {
-            todo!("page fault handler")
-        }
-        _ => {
-            panic!("Fatal");
-        }
     }
 }
