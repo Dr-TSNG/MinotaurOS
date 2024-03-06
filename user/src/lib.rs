@@ -1,10 +1,13 @@
 #![no_std]
 #![feature(linkage)]
 
+pub mod syscall;
+
 extern crate alloc;
 
 use alloc::vec::Vec;
 use buddy_system_allocator::LockedHeap;
+use crate::syscall::sys_exit;
 
 const USER_HEAP_SIZE: usize = 32768;
 
@@ -15,26 +18,25 @@ static HEAP: LockedHeap<32> = LockedHeap::<32>::empty();
 
 #[no_mangle]
 #[link_section = ".text.entry"]
-pub extern "C" fn _start(argc: usize, argv: usize) -> ! {
+pub extern "C" fn _start(argc: usize, argv: usize) {
     unsafe {
         HEAP.lock().init(HEAP_SPACE.as_ptr() as usize, USER_HEAP_SIZE);
     }
     let mut v: Vec<&'static str> = Vec::new();
     for i in 0..argc {
-        let str_start = unsafe {
-            ((argv + i * core::mem::size_of::<usize>()) as *const usize).read_volatile()
-        };
+        let str_start =
+            unsafe { ((argv + i * core::mem::size_of::<usize>()) as *const usize).read_volatile() };
         let len = (0usize..)
             .find(|i| unsafe { ((str_start + *i) as *const u8).read_volatile() == 0 })
             .unwrap();
         v.push(
             core::str::from_utf8(unsafe {
                 core::slice::from_raw_parts(str_start as *const u8, len)
-            })
-                .unwrap(),
+            }).unwrap(),
         );
     }
-    main(argc, v.as_slice());
+    let exit_code = main(argc, v.as_slice());
+    sys_exit(exit_code);
     loop {}
 }
 

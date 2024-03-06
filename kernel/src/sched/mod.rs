@@ -9,7 +9,7 @@ use crate::process::thread::Thread;
 use crate::processor::context::{HartContext, UserTask};
 use crate::processor::current_thread;
 use crate::processor::hart::local_hart;
-use crate::sync::{executor, take_waker};
+use crate::sync::executor;
 use crate::trap::user::{trap_from_user, trap_return};
 
 struct HartTaskFuture<F: Future<Output=()> + Send + 'static> {
@@ -46,17 +46,35 @@ impl<F: Future<Output=()> + Send + 'static> Future for HartTaskFuture<F> {
     }
 }
 
+struct YieldFuture(bool);
+
+impl Future for YieldFuture {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        if self.0 {
+            return Poll::Ready(());
+        }
+        self.0 = true;
+        cx.waker().wake_by_ref();
+        Poll::Pending
+    }
+}
+
 async fn thread_loop(thread: Arc<Thread>) {
-    thread.inner().waker = Some(take_waker().await);
     loop {
         trap_return();
         trap_from_user().await;
-        if thread.inner().terminated {
-            debug!("Thread {} terminated", current_thread().tid.0);
+        if let Some(code) = thread.inner().exit_code {
+            debug!("Thread {} terminated with code {}", current_thread().tid.0, code);
             break;
         }
     }
     thread.on_terminate();
+}
+
+pub async fn yield_now() {
+    YieldFuture(false).await;
 }
 
 pub fn spawn_kernel_thread<F: Future<Output=()> + Send + 'static>(kernel_thread: F) {

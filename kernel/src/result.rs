@@ -4,7 +4,7 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use core::future::Future;
 use core::pin::Pin;
-use crate::arch::{PhysPageNum, VirtAddr};
+use crate::arch::{PhysPageNum, VirtAddr, VirtPageNum};
 
 pub type MosResult<T = ()> = Result<T, MosError>;
 pub type SyscallResult<T = ()> = Result<T, Errno>;
@@ -14,9 +14,8 @@ pub enum MosError {
     OutOfMemory,
     CrossBoundary,
     BadAddress(VirtAddr),
+    PageAccessDenied(VirtPageNum),
     PageAlreadyMapped(PhysPageNum),
-    PageNotMapped(PhysPageNum),
-    PageNoncopyable,
     InvalidExecutable(&'static str),
     BlockDeviceError(String),
     UnsupportedFileSystem(&'static str),

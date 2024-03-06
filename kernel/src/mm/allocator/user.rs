@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use bitvec_rs::BitVec;
 use log::trace;
-use crate::arch::{PhysPageNum, ppn_to_kvpn, VirtAddr};
+use crate::arch::PhysPageNum;
 use crate::board::PHYS_MEMORY;
 use crate::println;
 use crate::result::{MosError, MosResult};

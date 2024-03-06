@@ -9,7 +9,7 @@ use crate::arch::VirtPageNum;
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::HeapFrameTracker;
 use crate::mm::page_table::PageTable;
-use crate::result::MosResult;
+use crate::result::{MosError, MosResult};
 
 /// 地址空间区域
 ///
@@ -27,8 +27,8 @@ pub trait ASRegion: Send + Sync {
     fn copy(&self) -> MosResult<Box<dyn ASRegion>>;
 
     /// 错误处理
-    fn fault_handler(&mut self, vpn: VirtPageNum, perform: ASPerms) -> MosResult<bool> {
-        Ok(false)
+    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> MosResult {
+        Err(MosError::PageAccessDenied(vpn.into()))
     }
 }
 

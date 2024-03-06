@@ -35,7 +35,7 @@ impl ASRegion for LazyRegion {
         let mut dirs = vec![];
         let mut vpn = self.metadata.start;
         for page in self.pages.iter() {
-            dirs.extend(self.map_one(root_pt, page, vpn)?);
+            dirs.extend(self.map_one(root_pt, page, vpn, false)?);
             vpn = vpn + 1;
         }
         Ok(dirs)
@@ -54,8 +54,28 @@ impl ASRegion for LazyRegion {
         todo!()
     }
 
-    fn fault_handler(&mut self, vpn: VirtPageNum, perform: ASPerms) -> MosResult<bool> {
-        todo!()
+    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> MosResult<()> {
+        let id = vpn - self.metadata.start;
+        let mut temp = PageState::Free;
+        core::mem::swap(&mut temp, &mut self.pages[id.0]);
+        match temp {
+            PageState::Free => {
+                temp = PageState::Framed(alloc_user_frames(1)?);
+            },
+            PageState::CopyOnWrite(tracker) => {
+                self.unmap_one(root_pt, vpn)?;
+                let new_tracker = alloc_user_frames(1)?;
+                new_tracker.ppn.byte_array().copy_from_slice(tracker.ppn.byte_array());
+                temp = PageState::Framed(new_tracker);
+            }
+            PageState::Framed(_) => {
+                panic!("This should not happen?");
+                // TODO: 如果两个线程先后访问同一个页面，会发生什么？
+            }
+        }
+        self.map_one(root_pt, &temp, vpn, true)?;
+        core::mem::swap(&mut temp, &mut self.pages[id.0]);
+        Ok(())
     }
 }
 
@@ -96,12 +116,18 @@ impl LazyRegion {
 }
 
 impl LazyRegion {
-    fn map_one(&self, mut pt: PageTable, page: &PageState, vpn: VirtPageNum) -> MosResult<Vec<HeapFrameTracker>> {
+    fn map_one(
+        &self,
+        mut pt: PageTable,
+        page: &PageState,
+        vpn: VirtPageNum, 
+        remap: bool,
+    ) -> MosResult<Vec<HeapFrameTracker>> {
         let mut dirs = vec![];
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == 2 {
-                if pte.valid() {
+                if !remap && pte.valid() {
                     return Err(MosError::PageAlreadyMapped(pte.ppn()));
                 }
                 let (ppn, flags) = match page {

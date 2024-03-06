@@ -35,7 +35,7 @@ pub struct ProcessInner {
     /// 进程组
     pub pgid: Gid,
     /// 进程的线程组
-    pub threads: BTreeMap<Tid, Arc<Thread>>,
+    pub threads: BTreeMap<Tid, Weak<Thread>>,
     /// 地址空间
     pub addr_space: AddressSpace,
     /// 文件描述符表
@@ -67,7 +67,7 @@ impl Process {
         let process = Arc::new(process);
         let trap_ctx = TrapContext::new(entry_point, ustack_top);
         let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()));
-        process.inner.lock().threads.insert(pid.0, thread.clone());
+        process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
         PROCESS_MONITOR.add(pid.0, Arc::downgrade(&process));
         spawn_user_thread(thread);
         info!("Init process created, pid: {}", pid.0);

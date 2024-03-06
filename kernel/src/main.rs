@@ -17,9 +17,9 @@
 extern crate alloc;
 
 mod arch;
-mod config;
 mod board;
 mod builtin;
+mod config;
 mod debug;
 mod driver;
 mod fs;
@@ -27,10 +27,11 @@ mod mm;
 mod process;
 mod processor;
 mod result;
-mod trap;
-mod utils;
 mod sched;
 mod sync;
+mod syscall;
+mod trap;
+mod utils;
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
@@ -69,12 +70,11 @@ fn start_main_hart() -> MosResult {
     driver::init()?;
     fs::init()?;
 
-    spawn_kernel_thread(async {
-        let data = builtin::builtin_app("init").unwrap();
-        info!("Spawn init process");
-        Process::new_initproc(data).unwrap();
-    });
+    let data = builtin::builtin_app("init").unwrap();
+    info!("Spawn init process");
+    Process::new_initproc(data).unwrap();
 
+    sched::time::set_next_trigger();
     Ok(())
 }
 
@@ -97,7 +97,8 @@ pub unsafe fn pspace_main(hart_id: usize) {
 fn main() -> ! {
     start_main_hart().unwrap();
     run_executor();
-    panic!("End of execution")
+    info!("All task finished, shutdown");
+    shutdown()
 }
 
 #[panic_handler]

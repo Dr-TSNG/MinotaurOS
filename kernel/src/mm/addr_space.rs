@@ -5,7 +5,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::arch::asm;
 use bitflags::bitflags;
-use log::{debug, info, trace};
+use log::{debug, trace};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
 use crate::arch::{paddr_to_kvaddr, PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
@@ -19,7 +19,6 @@ use crate::mm::region::lazy::LazyRegion;
 use crate::process::aux::{self, Aux};
 use crate::result::{MosError, MosResult};
 use crate::result::MosError::InvalidExecutable;
-use crate::sync::mutex::RwLock;
 
 bitflags! {
     pub struct ASPerms: u8 {
@@ -121,6 +120,7 @@ impl AddressSpace {
                 )?;
                 max_end_vpn = region.metadata().end();
                 addrs.map_region(region)?;
+                debug!("Map elf section: {:?} - {:?}", start_vpn, end_vpn);
             }
         }
 
@@ -135,7 +135,7 @@ impl AddressSpace {
             pages: (ustack_top_vpn - ustack_bottom_vpn).0,
         });
         addrs.map_region(region)?;
-        info!("[from_elf] map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
+        debug!("Map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
 
         // 映射用户堆
         let uheap_bottom_vpn = ustack_top_vpn + 1;
@@ -147,7 +147,7 @@ impl AddressSpace {
             pages: (uheap_top_vpn - uheap_bottom_vpn).0,
         });
         addrs.map_region(region)?;
-        info!("[from_elf] Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
+        debug!("Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
 
         auxv.push(Aux::new(aux::AT_PHDR, load_base + elf.header.pt2.ph_offset() as usize));
         auxv.push(Aux::new(aux::AT_PHENT, elf.header.pt2.ph_entry_size() as usize));
@@ -217,5 +217,21 @@ impl AddressSpace {
             .ok_or(MosError::BadAddress(VirtAddr::from(start)))?;
         region.unmap(self.root_pt)?;
         Ok(region)
+    }
+    
+    pub fn handle_page_fault(&mut self, addr: VirtAddr, perform: ASPerms) -> MosResult {
+        let vpn = addr.floor();
+        let mut region = self.regions
+            .extract_if(|region| region.metadata().start <= vpn && region.metadata().end() > vpn)
+            .next()
+            .ok_or(MosError::BadAddress(addr))?;
+        
+        let result = if region.metadata().perms.contains(perform) {
+            region.fault_handler(self.root_pt, vpn)
+        } else {
+            Err(MosError::PageAccessDenied(addr.into()))
+        };
+        self.regions.insert(region);
+        result
     }
 }

@@ -11,14 +11,14 @@ pub fn print(args: Arguments) {
 
 #[macro_export]
 macro_rules! print {
-    ($fmt: literal $(, $($arg: tt)+)?) => {
+    ($fmt: expr $(, $($arg: tt)+)?) => {
         $crate::debug::console::print(format_args!($fmt $(, $($arg)+)?));
     }
 }
 
 #[macro_export]
 macro_rules! println {
-    ($fmt: literal $(, $($arg: tt)+)?) => {
+    ($fmt: expr $(, $($arg: tt)+)?) => {
         $crate::debug::console::print(format_args!(concat!($fmt, "\n") $(, $($arg)+)?));
     }
 }

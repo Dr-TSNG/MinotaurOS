@@ -15,7 +15,7 @@ pub enum Debug {
 
 #[derive(Parser)]
 pub struct AttachConfig {
-    #[clap(long, default_value_t = true)]
+    #[clap(long)]
     pub release: bool,
 }
 

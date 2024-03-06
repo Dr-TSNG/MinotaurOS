@@ -23,8 +23,4 @@ SECTIONS
         *(.bss .bss.*)
         *(.sbss .sbss.*)
     }
-    /DISCARD/ : {
-        *(.eh_frame)
-        *(.debug*)
-    }
 }

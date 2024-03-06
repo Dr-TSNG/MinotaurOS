@@ -1,7 +1,12 @@
-use log::debug;
+use log::{debug, error};
 use riscv::register::{scause, sepc, stval};
-use riscv::register::scause::{Exception, Trap};
-use crate::processor::current_thread;
+use riscv::register::scause::{Exception, Interrupt, Trap};
+use crate::arch::VirtAddr;
+use crate::mm::addr_space::ASPerms;
+use crate::processor::{current_process, current_thread, current_trap_ctx};
+use crate::sched::time::set_next_trigger;
+use crate::sched::yield_now;
+use crate::syscall::syscall;
 use crate::trap::{__restore_to_user, set_kernel_trap_entry, set_user_trap_entry};
 
 pub fn trap_return() {
@@ -9,7 +14,7 @@ pub fn trap_return() {
     debug!("Trap return to user");
     unsafe {
         current_thread().inner().rusage.trap_out();
-        __restore_to_user(&mut current_thread().inner().trap_ctx);
+        __restore_to_user(current_trap_ctx());
         current_thread().inner().rusage.trap_in();
     }
 }
@@ -21,11 +26,60 @@ pub async fn trap_from_user() {
     let trap = scause::read().cause();
     debug!("Trap {:?} from user at {:#x} for {:#x}", trap, sepc, stval);
     match trap {
-        Trap::Exception(Exception::StoreFault) => {
-            todo!("page fault handler")
+        Trap::Exception(Exception::UserEnvCall) => {
+            let mut ctx = current_trap_ctx();
+            // syscall 完成后，需要跳转到下一条指令
+            ctx.sepc += 4;
+            let result = syscall(
+                ctx.user_x[17],
+                [
+                    ctx.user_x[10],
+                    ctx.user_x[11],
+                    ctx.user_x[12],
+                    ctx.user_x[13],
+                    ctx.user_x[14],
+                    ctx.user_x[15],
+                ],
+            ).await;
+            // exec 会改变当前线程，所以需要重新获取
+            ctx = current_trap_ctx();
+            ctx.user_x[10] = match result { 
+                Ok(ret) => ret as usize,
+                Err(err) => -(err as isize) as usize,
+            }
+        }
+        | Trap::Exception(Exception::LoadFault)
+        | Trap::Exception(Exception::LoadPageFault) => {
+            handle_page_fault(VirtAddr(stval), ASPerms::R);
+        }
+        Trap::Exception(Exception::StoreFault)
+        | Trap::Exception(Exception::StorePageFault) => {
+            handle_page_fault(VirtAddr(stval), ASPerms::W);
+        }
+        Trap::Exception(Exception::InstructionFault)
+        | Trap::Exception(Exception::InstructionPageFault) => {
+            handle_page_fault(VirtAddr(sepc), ASPerms::X);
+        }
+        Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            debug!("Timer interrupt");
+            set_next_trigger();
+            yield_now().await;
         }
         _ => {
             panic!("Fatal");
+        }
+    }
+}
+
+fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
+    debug!("User page fault at {:?} for {:?}", addr, perform);
+    let mut inner = current_process().inner.lock();
+    match inner.addr_space.handle_page_fault(addr, perform) {
+        Ok(()) => debug!("Page fault resolved"),
+        Err(e) => {
+            error!("Fatal page fault failed, send SIGSEGV: {:?}", e);
+            // current_process().signal(SIGSEGV);
+            todo!()
         }
     }
 }

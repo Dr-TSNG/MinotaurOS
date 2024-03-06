@@ -1,5 +1,6 @@
 use log::{Level, LevelFilter, Metadata, Record};
 use crate::processor::hart::local_hart;
+use crate::sched::time::current_time;
 
 #[cfg(feature = "error")]
 const LOG_LEVEL: LevelFilter = LevelFilter::Error;
@@ -23,8 +24,9 @@ impl log::Log for SimpleLogger {
             match local_hart().current_thread() {
                 Some(thread) => {
                     println!(
-                        "\x1b[{}m[{:5}] tid {} | {}\x1b[0m",
+                        "\x1b[{}m[{:6?}] [{:5}] tid {} | {}\x1b[0m",
                         level_color(record.level()),
+                        current_time(),
                         record.level(),
                         thread.tid.0,
                         record.args()
@@ -32,8 +34,9 @@ impl log::Log for SimpleLogger {
                 }
                 None => {
                     println!(
-                        "\x1b[{}m[{:5}] kernel | {}\x1b[0m",
+                        "\x1b[{}m[{:6?}] [{:5}] kernel | {}\x1b[0m",
                         level_color(record.level()),
+                        current_time(),
                         record.level(),
                         record.args(),
                     );
@@ -60,4 +63,34 @@ fn level_color(level: Level) -> u8 {
         Level::Debug => 32,
         Level::Trace => 90,
     }
+}
+
+#[allow(unused)]
+pub const STRACE_COLOR_CODE: u8 = 35; // Purple
+
+#[macro_export]
+#[cfg(feature = "strace")]
+macro_rules! strace {
+    ($fmt: literal $(, $($arg: tt)+)?) => {
+        use crate::{
+            debug::logger::STRACE_COLOR_CODE,
+            println,
+            processor::hart::local_hart,
+            sched::time::current_time,
+        };
+        let thread = local_hart().current_thread().unwrap();
+        println!(
+            concat!("\x1b[{}m[{:6?}] [SCALL] tid {} | ", $fmt ,"\x1b[0m"),
+            STRACE_COLOR_CODE,
+            current_time(),
+            thread.tid.0
+            $(, $($arg)+)?,
+        );
+    }
+}
+
+#[macro_export]
+#[cfg(not(feature = "strace"))]
+macro_rules! strace {
+    ($fmt: literal $(, $($arg: tt)+)?) => {};
 }

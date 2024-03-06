@@ -15,7 +15,7 @@ pub enum Build {
 pub struct BuildConfig {
     #[clap(long, default_value_t = false)]
     pub offline: bool,
-    #[clap(long, default_value_t = true)]
+    #[clap(long)]
     pub release: bool,
     #[clap(long, default_value = "info")]
     pub log_level: String,
@@ -72,7 +72,6 @@ fn build_kernel(config: &BuildConfig) -> Result<()> {
         .arg("build")
         .offline(config.offline)
         .release(config.release)
-        .arg("--no-default-features")
         .arg("--features")
         .arg(format!("board_{}", config.board))
         .log_level(&config.log_level)?
@@ -97,17 +96,5 @@ fn build_user(config: &BuildConfig) -> Result<()> {
         .release(config.release)
         .spawn()?.wait()?
         .exit_ok()?;
-    let build  = |proc: &str| -> Result<()> {
-        Command::new("rust-objcopy")
-            .arg("--binary-architecture=riscv64")
-            .arg(build_dir_file(proc, config.release)?)
-            .arg("--strip-all")
-            .arg("-O").arg("binary")
-            .arg(build_dir_file(&format!("{proc}.bin"), config.release)?)
-            .spawn()?.wait()?
-            .exit_ok()?;
-        Ok(())
-    };
-    build("init")?;
     Ok(())
 }
