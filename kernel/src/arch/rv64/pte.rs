@@ -46,15 +46,6 @@ impl PageTableEntry {
     pub fn valid(&self) -> bool {
         self.flags().contains(PTEFlags::V)
     }
-    pub fn readable(&self) -> bool {
-        self.flags().contains(PTEFlags::R)
-    }
-    pub fn writable(&self) -> bool {
-        self.flags().contains(PTEFlags::W)
-    }
-    pub fn executable(&self) -> bool {
-        self.flags().contains(PTEFlags::X)
-    }
     pub fn kind(&self) -> PTEType {
         let flags = self.flags();
         if !flags.contains(PTEFlags::V) {

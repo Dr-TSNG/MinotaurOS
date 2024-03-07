@@ -24,16 +24,24 @@ impl Hart {
     }
 
     pub fn switch_ctx(&mut self, another: &mut HartContext) {
-        if let Some(task) = &another.user_task {
-            let switch_pt = match self.current_thread() {
-                Some(t) => t.tid != task.thread.tid,
+        let (thread_now, thread_next) = (
+            self.current_thread(),
+            another.user_task.as_ref().map(|t| &t.thread),
+        );
+        if let Some(now) = thread_now {
+            now.inner().rusage.sched_out();
+        }
+        if let Some(next) = thread_next {
+            next.inner().rusage.sched_in();
+            let switch_pt = match thread_now {
+                Some(now) => now.tid != next.tid,
                 None => true,
             };
             if switch_pt {
-                unsafe { task.thread.process.inner.lock().addr_space.activate(); }
+                unsafe { next.process.inner.lock().addr_space.activate(); }
             }
         } else {
-            if self.current_thread().is_some() {
+            if thread_now.is_some() {
                 unsafe { KERNEL_SPACE.lock().activate(); }
             }
         }

@@ -31,7 +31,6 @@ mod sched;
 mod sync;
 mod syscall;
 mod trap;
-mod utils;
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
@@ -63,7 +62,6 @@ fn start_main_hart() -> MosResult {
     println!("[kernel] Display Logo");
     println!("{}", LOGO);
 
-    builtin::init();
     trap::init();
     mm::vm_init()?;
     driver::init()?;

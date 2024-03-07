@@ -27,7 +27,7 @@ pub trait ASRegion: Send + Sync {
     fn copy(&self) -> MosResult<Box<dyn ASRegion>>;
 
     /// 错误处理
-    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> MosResult {
+    fn fault_handler(&mut self, _root_pt: PageTable, vpn: VirtPageNum) -> MosResult {
         Err(MosError::PageAccessDenied(vpn.into()))
     }
 }
