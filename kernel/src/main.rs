@@ -67,6 +67,7 @@ fn start_main_hart() -> MosResult {
     driver::init()?;
     fs::init()?;
 
+    builtin::init();
     let data = builtin::builtin_app("init").unwrap();
     info!("Spawn init process");
     Process::new_initproc(data).unwrap();
