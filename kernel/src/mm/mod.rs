@@ -38,7 +38,7 @@ fn vm_test() -> MosResult {
     )?;
     kernel_space.map_region(region)?;
     let slice = unsafe {
-        let ptr = VirtAddr::from(VirtPageNum::from(start)).0 as *mut u8;
+        let ptr = VirtAddr::from(VirtPageNum::from(start)).as_ptr();
         core::slice::from_raw_parts_mut(ptr, 4 * PAGE_SIZE)
     };
     unsafe { kernel_space.activate(); }

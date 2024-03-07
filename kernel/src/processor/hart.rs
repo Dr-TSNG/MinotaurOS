@@ -3,7 +3,6 @@ use core::arch::asm;
 use riscv::register::sstatus;
 use crate::config::MAX_HARTS;
 use crate::mm::KERNEL_SPACE;
-use crate::println;
 use crate::process::thread::Thread;
 use crate::processor::context::HartContext;
 
@@ -61,5 +60,4 @@ pub fn init(hart_id: usize) {
         // 允许内核访问用户态地址空间
         sstatus::set_sum();
     };
-    println!("[kernel] Hart {} initialized", local_hart().id);
 }

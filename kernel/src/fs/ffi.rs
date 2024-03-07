@@ -37,6 +37,16 @@ bitflags! {
     }
 }
 
+impl OpenFlags {
+    pub fn readable(&self) -> bool {
+        self.contains(OpenFlags::O_RDONLY) || self.contains(OpenFlags::O_RDWR)
+    }
+    
+    pub fn writable(&self) -> bool {
+        self.contains(OpenFlags::O_WRONLY) || self.contains(OpenFlags::O_RDWR)
+    }
+}
+
 bitflags! {
     pub struct VfsFlags: u32 {
         /// Mount read-only
@@ -86,3 +96,5 @@ pub enum InodeMode {
     /// FIFO
     FileFIFO = 0x1000,
 }
+
+pub const PATH_MAX: usize = 260;

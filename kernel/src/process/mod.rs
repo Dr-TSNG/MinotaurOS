@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 use log::info;
 use crate::fs::fd::FdTable;
 use crate::mm::addr_space::AddressSpace;
+use crate::mm::page_table::PageTable;
 use crate::process::monitor::PROCESS_MONITOR;
 use crate::process::thread::Thread;
 use crate::process::thread::tid::TidTracker;
@@ -24,6 +25,9 @@ type Gid = usize;
 pub struct Process {
     /// 进程的 pid
     pub pid: Arc<TidTracker>,
+    /// 进程的根页表
+    pub root_pt: PageTable,
+    /// 可变数据
     pub inner: IrqMutex<ProcessInner>,
 }
 
@@ -62,6 +66,7 @@ impl Process {
         };
         let process = Process {
             pid: pid.clone(),
+            root_pt: inner.addr_space.root_pt,
             inner: IrqMutex::new(inner),
         };
         let process = Arc::new(process);

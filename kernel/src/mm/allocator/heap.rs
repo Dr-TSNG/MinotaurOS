@@ -42,7 +42,7 @@ impl HeapAllocator {
 unsafe impl GlobalAlloc for HeapAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         self.0.lock().alloc(layout)
-            .map_or(0 as *mut u8, |va| va.as_ptr())
+            .map_or(VirtAddr(0).as_ptr(), |va| va.as_ptr())
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -58,17 +58,15 @@ pub fn alloc_kernel_frames(pages: usize) -> MosResult<HeapFrameTracker> {
         .alloc(Layout::from_size_align(pages * PAGE_SIZE, PAGE_SIZE).unwrap())
         .map(|va| VirtPageNum::from(VirtAddr(va.as_ptr() as usize)))
         .map_err(|_| MosError::OutOfMemory)?;
-    vpn.byte_array().fill(0);
-    let tracker = HeapFrameTracker {
-        ppn: kvpn_to_ppn(vpn),
-        pages,
-    };
+    let ppn = kvpn_to_ppn(vpn);
+    ppn.byte_array().fill(0);
+    let tracker = HeapFrameTracker { ppn, pages };
     Ok(tracker)
 }
 
 fn dealloc_kernel_pages(tracker: &HeapFrameTracker) {
     let vpn = ppn_to_kvpn(tracker.ppn);
-    let ptr = VirtAddr::from(vpn).0 as *mut u8;
+    let ptr = unsafe { VirtAddr::from(vpn).as_ptr() };
     let ptr = NonNull::new(ptr).unwrap();
     KERNEL_HEAP.0.lock()
         .dealloc(ptr, Layout::from_size_align(tracker.pages * PAGE_SIZE, PAGE_SIZE).unwrap());

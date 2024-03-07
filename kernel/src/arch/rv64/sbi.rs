@@ -7,6 +7,7 @@ use sbi_spec::time::{EID_TIME, SET_TIMER};
 
 pub use sbi_spec::binary::Error as SBIError;
 use crate::arch::{kvaddr_to_paddr, VirtAddr};
+use crate::processor::hart::local_hart;
 
 #[inline(always)]
 fn sbi_call(eid: usize, fid: usize, arg0: usize, arg1: usize, arg2: usize) -> Result<usize, SBIError> {
@@ -36,7 +37,11 @@ pub fn console_read(buffer: &mut [u8]) -> Result<usize, SBIError> {
 
 pub fn console_write(content: &str) -> Result<usize, SBIError> {
     let content = content.as_bytes();
-    let paddr = kvaddr_to_paddr(VirtAddr(content.as_ptr() as usize));
+    let vaddr = VirtAddr(content.as_ptr() as usize);
+    let paddr = match &local_hart().ctx.user_task {
+        Some(task) => task.thread.process.root_pt.translate(vaddr),
+        None => kvaddr_to_paddr(vaddr),
+    };
     sbi_call(EID_DBCN, CONSOLE_WRITE, content.len(), paddr.0, 0)
 }
 

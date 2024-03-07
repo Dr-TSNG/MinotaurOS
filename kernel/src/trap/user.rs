@@ -43,10 +43,7 @@ pub async fn trap_from_user() {
             ).await;
             // exec 会改变当前线程，所以需要重新获取
             ctx = current_trap_ctx();
-            ctx.user_x[10] = match result { 
-                Ok(ret) => ret as usize,
-                Err(err) => -(err as isize) as usize,
-            }
+            ctx.user_x[10] = result.unwrap_or_else(|err| -(err as isize) as usize)
         }
         | Trap::Exception(Exception::LoadFault)
         | Trap::Exception(Exception::LoadPageFault) => {

@@ -1,0 +1,68 @@
+use crate::arch::VirtAddr;
+use crate::fs::ffi::{OpenFlags, PATH_MAX};
+use crate::processor::current_process;
+use crate::result::{Errno, SyscallResult};
+
+pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
+    if buf == 0 || size == 0 {
+        return Err(Errno::EINVAL);
+    }
+    if size > PATH_MAX {
+        return Err(Errno::ENAMETOOLONG);
+    }
+    let proc_inner = current_process().inner.lock();
+    let cwd = proc_inner.cwd.as_str();
+    if cwd.len() + 1 > size {
+        return Err(Errno::ERANGE);
+    }
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size)?;
+    user_buf[..cwd.len()].copy_from_slice(cwd.as_bytes());
+    user_buf[cwd.len()] = b'\0';
+    Ok(buf)
+}
+
+pub fn sys_dup(fd: usize) -> SyscallResult<usize> {
+    let mut proc_inner = current_process().inner.lock();
+    let fd_impl = proc_inner.fd_table.get(fd).ok_or(Errno::EBADF)?.dup(false);
+    proc_inner.fd_table.put(fd_impl)
+}
+
+pub fn sys_dup3(old_fd: usize, new_fd: usize, flags: u32) -> SyscallResult<usize> {
+    if old_fd == new_fd {
+        return Err(Errno::EINVAL);
+    }
+    let cloexec = OpenFlags::from_bits(flags).and_then(|flags| {
+        const EMPTY: OpenFlags = OpenFlags::empty();
+        match flags {
+            EMPTY => Some(false),
+            OpenFlags::O_CLOEXEC => Some(true),
+            _ => None,
+        }
+    }).ok_or(Errno::EINVAL)?;
+    let mut proc_inner = current_process().inner.lock();
+    let fd_impl = proc_inner.fd_table.get(old_fd).ok_or(Errno::EBADF)?.dup(cloexec);
+    proc_inner.fd_table.insert(new_fd, fd_impl)?;
+    Ok(new_fd)
+}
+
+pub async fn read(fd: usize, buf: usize, len: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let fd_impl = proc_inner.fd_table.get(fd).ok_or(Errno::EBADF)?;
+    if !fd_impl.flags.readable() {
+        return Err(Errno::EPERM);
+    }
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), len)?;
+    let ret = fd_impl.file.read(user_buf).await?;
+    Ok(ret as usize)
+}
+
+pub async fn write(fd: usize, buf: usize, len: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let fd_impl = proc_inner.fd_table.get(fd).ok_or(Errno::EBADF)?;
+    if !fd_impl.flags.writable() {
+        return Err(Errno::EPERM);
+    }
+    let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(buf), len)?;
+    let ret = fd_impl.file.write(user_buf).await?;
+    Ok(ret as usize)
+}

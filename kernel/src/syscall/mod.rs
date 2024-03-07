@@ -1,35 +1,40 @@
 mod fs;
 mod process;
 
+use fs::*;
+use process::*;
+
 use log::warn;
 use num_enum::FromPrimitive;
 use crate::result::{Errno, SyscallResult};
 use crate::strace;
-use crate::syscall::process::{sys_exit, sys_yield};
 
-macro_rules! sys_handler {
-    ($handler: ident, $args: tt) => {
+macro_rules! syscall {
+    ($handler: ident $(, $args:expr)*) => {
         {
             use crate::processor::current_trap_ctx;
             strace!(
                 "{}, args: {:?}, sepc: {:#x}",
                 stringify!($handler),
-                $args,
+                ($($args,)*),
                 current_trap_ctx().sepc
             );
-            $handler$args
+            $handler($($args,)*)
         }
     };
-    ($handler: ident, $args: tt, $await: tt) => {
+}
+
+macro_rules! async_syscall {
+    ($handler: ident $(, $args:expr)*) => {
         {
             use crate::processor::current_trap_ctx;
             strace!(
                 "{}, args: {:?}, sepc: {:#x}",
                 stringify!($handler),
-                $args,
+                ($($args,)*),
                 current_trap_ctx().sepc
             );
-            $handler$args.$await
+            $handler($($args,)*).await
         }
     };
 }
@@ -121,11 +126,88 @@ pub enum SyscallCode {
     Unknown,
 }
 
-pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<isize> {
+pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
     let code = SyscallCode::from(code);
     match code {
-        SyscallCode::Exit => sys_handler!(sys_exit, (args[0] as i8)),
-        SyscallCode::SchedYield => sys_handler!(sys_yield, (), await),
+        SyscallCode::Getcwd => syscall!(sys_getcwd, args[0], args[1]),
+        SyscallCode::Dup => syscall!(sys_dup, args[0]),
+        SyscallCode::Dup3 => syscall!(sys_dup3, args[0], args[1], args[2] as u32),
+        // SyscallCode::Fcntl
+        // SyscallCode::Ioctl
+        // SyscallCode::Mkdirat
+        // SyscallCode::Unlinkat
+        // SyscallCode::Umount2
+        // SyscallCode::Mount
+        // SyscallCode::Statfs
+        // SyscallCode::Ftruncate
+        // SyscallCode::Faccessat
+        // SyscallCode::Chdir
+        // SyscallCode::Openat
+        // SyscallCode::Close
+        // SyscallCode::Pipe2
+        // SyscallCode::Getdents64
+        // SyscallCode::Lseek
+        SyscallCode::Read => async_syscall!(read, args[0], args[1], args[2]),
+        SyscallCode::Write => async_syscall!(write, args[0], args[1], args[2]),
+        // SyscallCode::Readv
+        // SyscallCode::Writev
+        // SyscallCode::Pread64
+        // SyscallCode::Pwrite64
+        // SyscallCode::Sendfile
+        // SyscallCode::Pselect6
+        // SyscallCode::Ppoll
+        // SyscallCode::Readlinkat
+        // SyscallCode::Newfstatat
+        // SyscallCode::Fstat
+        // SyscallCode::Sync
+        // SyscallCode::Fsync
+        // SyscallCode::Utimensat
+        SyscallCode::Exit => syscall!(sys_exit, args[0] as i8),
+        // SyscallCode::ExitGroup
+        // SyscallCode::SetTidAddress
+        // SyscallCode::Futex
+        // SyscallCode::Nanosleep
+        // SyscallCode::Setitimer
+        // SyscallCode::ClockGettime
+        // SyscallCode::Syslog
+        SyscallCode::SchedYield => async_syscall!(sys_yield),
+        // SyscallCode::Kill
+        // SyscallCode::Tkill
+        // SyscallCode::RtSigsupend
+        // SyscallCode::RtSigaction
+        // SyscallCode::RtSigprocmask
+        // SyscallCode::RtSigtimedwait
+        // SyscallCode::RtSigreturn
+        // SyscallCode::Times
+        // SyscallCode::Uname
+        // SyscallCode::Getrusage
+        // SyscallCode::Umask
+        // SyscallCode::GetTimeOfDay
+        // SyscallCode::Getpid
+        // SyscallCode::Getppid
+        // SyscallCode::Getuid
+        // SyscallCode::Geteuid
+        // SyscallCode::Getegid
+        // SyscallCode::Gettid
+        // SyscallCode::Sysinfo
+        // SyscallCode::Shmget
+        // SyscallCode::Shmctl
+        // SyscallCode::Shmat
+        // SyscallCode::Brk
+        // SyscallCode::Munmap
+        // SyscallCode::Clone
+        // SyscallCode::Execve
+        // SyscallCode::Mmap
+        // SyscallCode::Mprotect
+        // SyscallCode::Madvise
+        // SyscallCode::Wait4
+        // SyscallCode::Prlimit
+        // SyscallCode::Renameat2
+        // SyscallCode::Seccomp
+        // SyscallCode::Getrandom
+        // SyscallCode::MemfdCreate
+        // SyscallCode::Membarrier
+        // SyscallCode::CopyFileRange
         _ => {
             warn!("Unsupported syscall: {:?}", code);
             Err(Errno::ENOSYS)

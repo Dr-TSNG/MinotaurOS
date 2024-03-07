@@ -1,11 +1,13 @@
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use crate::config::MAX_FD_NUM;
 use crate::fs::devfs::tty::TTY;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::File;
+use crate::result::{Errno, SyscallResult};
 
-pub type Fd = usize;
+pub type FdNum = usize;
 
 pub struct FdTable {
     table: Vec<Option<FileDescriptor>>,
@@ -21,6 +23,18 @@ impl FileDescriptor {
     pub fn new(file: Arc<dyn File>, flags: OpenFlags) -> Self {
         Self { file, flags }
     }
+    
+    pub fn dup(&self, cloexec: bool) -> Self {
+        let flags = if cloexec {
+            self.flags | OpenFlags::O_CLOEXEC
+        } else {
+            self.flags & !OpenFlags::O_CLOEXEC
+        };
+        Self {
+            file: self.file.clone(),
+            flags,
+        }
+    }
 }
 
 impl FdTable {
@@ -33,5 +47,52 @@ impl FdTable {
         table.push(Some(stdout));
         table.push(Some(stderr));
         FdTable { table }
+    }
+    
+    /// 获取指定位置的文件描述符的可变引用
+    pub fn get(&self, fd: FdNum) -> Option<&FileDescriptor> {
+        self.table.get(fd).and_then(|fd| fd.as_ref())
+    }
+    
+    /// 插入一个文件描述符，返回位置
+    pub fn put(&mut self, fd_impl: FileDescriptor) -> SyscallResult<FdNum> {
+        let fd = self.find_slot();
+        if fd > MAX_FD_NUM {
+            return Err(Errno::EMFILE);
+        }
+        self.table[fd] = Some(fd_impl);
+        Ok(fd)
+    }
+    
+    /// 在指定位置插入一个文件描述符，如果位置已经占用，则替换
+    pub fn insert(&mut self, fd: FdNum, fd_impl: FileDescriptor) -> SyscallResult {
+        if fd > MAX_FD_NUM {
+            return Err(Errno::EBADF);
+        }
+        if fd >= self.table.len() {
+            self.table.resize(fd + 1, None);
+        }
+        self.table[fd] = Some(fd_impl);
+        Ok(())
+    }
+    
+    /// 删除一个文件描述符
+    pub fn remove(&mut self, fd: FdNum) -> SyscallResult {
+        if fd >= self.table.len() {
+            return Err(Errno::EBADF);
+        }
+        self.table[fd] = None;
+        Ok(())
+    }
+}
+
+impl FdTable {
+    fn find_slot(&self) -> FdNum {
+        for (i, fd) in self.table.iter().enumerate() {
+            if fd.is_none() {
+                return i;
+            }
+        }
+        self.table.len()
     }
 }

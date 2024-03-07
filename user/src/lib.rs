@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(linkage)]
 
+pub mod console;
 pub mod syscall;
 
 extern crate alloc;

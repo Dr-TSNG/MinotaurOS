@@ -42,7 +42,6 @@ use crate::config::{LINKAGE_EBSS, LINKAGE_SBSS};
 use crate::process::Process;
 use crate::processor::hart;
 use crate::result::MosResult;
-use crate::sched::spawn_kernel_thread;
 use crate::sync::executor::run_executor;
 
 global_asm!(include_str!("entry.asm"));
@@ -52,15 +51,15 @@ const LOGO: &str = include_str!("../../logo.txt");
 fn clear_bss() {
     unsafe {
         let len = LINKAGE_EBSS.0 - LINKAGE_SBSS.0;
-        core::slice::from_raw_parts_mut(LINKAGE_SBSS.0 as *mut u8, len).fill(0);
+        core::slice::from_raw_parts_mut(LINKAGE_SBSS.as_ptr(), len).fill(0);
     }
 }
 
 fn start_main_hart() -> MosResult {
     clear_bss();
+    hart::init(0);
     mm::allocator::init();
     debug::logger::init();
-    hart::init(0);
     println!("[kernel] Display Logo");
     println!("{}", LOGO);
 
@@ -75,6 +74,7 @@ fn start_main_hart() -> MosResult {
     Process::new_initproc(data).unwrap();
 
     sched::time::set_next_trigger();
+    arch::enable_timer_interrupt();
     Ok(())
 }
 

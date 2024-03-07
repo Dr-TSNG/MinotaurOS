@@ -26,7 +26,7 @@ unsafe impl Hal for VirtioHal {
         VIRTIO_FRAMES.lock().insert(base_ppn, tracker);
         let paddr = PhysAddr::from(base_ppn);
         let vaddr = unsafe {
-            NonNull::new_unchecked(paddr_to_kvaddr(paddr).0 as *mut u8)
+            NonNull::new_unchecked(paddr_to_kvaddr(paddr).as_ptr())
         };
         (paddr.0, vaddr)
     }
@@ -45,7 +45,7 @@ unsafe impl Hal for VirtioHal {
         paddr: virtio_drivers::PhysAddr,
         _size: usize,
     ) -> NonNull<u8> {
-        NonNull::new_unchecked(paddr_to_kvaddr(PhysAddr::from(paddr)).0 as *mut u8)
+        NonNull::new_unchecked(paddr_to_kvaddr(PhysAddr::from(paddr)).as_ptr())
     }
 
     unsafe fn share(

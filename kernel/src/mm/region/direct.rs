@@ -87,7 +87,7 @@ impl DirectRegion {
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    SlotType::Page(_) => return Err(MosError::PageAlreadyMapped(pte.ppn())),
+                    SlotType::Page(ppn) => return Err(MosError::PageAlreadyMapped(ppn)),
                     SlotType::Invalid => {
                         let dir = alloc_kernel_frames(1)?;
                         trace!(

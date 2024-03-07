@@ -1,4 +1,4 @@
-use crate::arch::{paddr_to_kvaddr, PageTableEntry, PhysAddr, PhysPageNum, PTE_SLOTS, PTEType, VirtAddr};
+use crate::arch::{paddr_to_kvaddr, PageTableEntry, PhysAddr, PhysPageNum, PTE_SLOTS, PTEType, VirtAddr, VirtPageNum};
 
 #[derive(Copy, Clone, Debug)]
 pub struct PageTable {
@@ -8,14 +8,10 @@ pub struct PageTable {
 pub enum SlotType {
     Invalid,
     Directory(PageTable),
-    Page(VirtAddr),
+    Page(PhysPageNum),
 }
 
 impl PageTable {
-    pub const fn empty() -> Self {
-        Self { ppn: PhysPageNum(0) }
-    }
-
     pub const fn new(ppn: PhysPageNum) -> Self {
         Self { ppn }
     }
@@ -43,10 +39,20 @@ impl PageTable {
         match pte.kind() {
             PTEType::Invalid => SlotType::Invalid,
             PTEType::Directory => SlotType::Directory(Self::new(pte.ppn())),
-            PTEType::Page => {
-                let addr = paddr_to_kvaddr(PhysAddr::from(pte.ppn()));
-                SlotType::Page(addr)
+            PTEType::Page => SlotType::Page(pte.ppn()),
+        }
+    }
+    
+    pub fn translate(&self, vaddr: VirtAddr) -> PhysAddr {
+        let mut pt = *self;
+        let vpn = VirtPageNum::from(vaddr.floor());
+        for (i, idx) in vpn.indexes().iter().enumerate() {
+            match pt.slot_type(*idx) {
+                SlotType::Invalid => panic!("Page table translate failed"),
+                SlotType::Directory(next) => pt = next,
+                SlotType::Page(ppn) => return PhysAddr::from(ppn) + vaddr.page_offset(i),
             }
         }
+        panic!("Should not reach here")
     }
 }

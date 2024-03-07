@@ -141,6 +141,14 @@ pub fn sys_exit(exit_code: i32) -> isize {
     syscall!(Exit, exit_code)
 }
 
+pub fn sys_read(fd: usize, buf: &mut [u8]) -> isize {
+    syscall!(Read, fd, buf.as_ptr() as usize, buf.len())
+}
+
+pub fn sys_write(fd: usize, buf: &[u8]) -> isize {
+    syscall!(Write, fd, buf.as_ptr() as usize, buf.len())
+}
+
 pub fn sys_yield() -> isize {
     syscall!(SchedYield)
 }

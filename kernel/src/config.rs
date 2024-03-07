@@ -16,6 +16,8 @@ pub const KERNEL_TLS_SIZE: usize = PAGE_SIZE * 64 * MAX_HARTS; // 64 KB for each
 pub const USER_STACK_SIZE: usize = PAGE_SIZE * 64; // 64 KB
 pub const USER_HEAP_SIZE: usize = PAGE_SIZE * 4096; // 4 MB
 
+pub const MAX_FD_NUM: usize = 1024;
+
 extern {
     fn sbss();
     fn ebss();

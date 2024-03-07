@@ -17,7 +17,7 @@ use crate::mm::region::{ASRegion, ASRegionMeta};
 use crate::mm::region::direct::DirectRegion;
 use crate::mm::region::lazy::LazyRegion;
 use crate::process::aux::{self, Aux};
-use crate::result::{MosError, MosResult};
+use crate::result::{Errno, MosError, MosResult, SyscallResult};
 use crate::result::MosError::InvalidExecutable;
 
 bitflags! {
@@ -233,5 +233,45 @@ impl AddressSpace {
         };
         self.regions.insert(region);
         result
+    }
+    
+    pub fn check_addr_valid(&self, start: VirtAddr, end: VirtAddr, perms: ASPerms) -> SyscallResult<()> {
+        let vpn_start = start.floor();
+        let vpn_end = end.floor();
+        let mut cur = vpn_start;
+        for region in self.regions.iter() {
+            let metadata = region.metadata();
+            if metadata.start > cur {
+                return Err(Errno::EFAULT);
+            } else if cur < metadata.end() {
+                if metadata.perms.contains(perms) {
+                    cur = metadata.end();
+                    if cur >= vpn_end {
+                        return Ok(());
+                    }
+                } else {
+                    return Err(Errno::EACCES);
+                }
+            }
+        }
+        Err(Errno::EFAULT)
+    }
+
+    pub fn user_slice_r(&self, addr: VirtAddr, len: usize) -> SyscallResult<&'static [u8]> {
+        self.check_addr_valid(addr, addr + len, ASPerms::R | ASPerms::U)?;
+        let data = unsafe { core::slice::from_raw_parts(addr.as_ptr(), len) };
+        Ok(data)
+    }
+
+    pub fn user_slice_w(&self, addr: VirtAddr, len: usize) -> SyscallResult<&'static mut [u8]> {
+        self.check_addr_valid(addr, addr + len, ASPerms::W | ASPerms::U)?;
+        let data = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), len) };
+        Ok(data)
+    }
+    
+    pub fn user_slice_rw(&self, addr: VirtAddr, len: usize) -> SyscallResult<&'static mut [u8]> {
+        self.check_addr_valid(addr, addr + len, ASPerms::R | ASPerms::W | ASPerms::U)?;
+        let data = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), len) };
+        Ok(data)
     }
 }
