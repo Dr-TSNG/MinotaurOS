@@ -33,7 +33,7 @@ pub struct Process {
 
 pub struct ProcessInner {
     /// 父进程
-    pub parent: Option<Weak<Process>>,
+    pub parent: Weak<Process>,
     /// 子进程
     pub children: Vec<Arc<Process>>,
     /// 进程组
@@ -55,7 +55,7 @@ impl Process {
         let (addr_space, entry_point, ustack_top, auxv) = AddressSpace::from_elf(elf_data)?;
         let pid = Arc::new(TidTracker::new());
         let inner = ProcessInner {
-            parent: None,
+            parent: Weak::new(),
             children: Vec::new(),
             pgid: pid.0,
             threads: BTreeMap::new(),
@@ -72,7 +72,10 @@ impl Process {
         let process = Arc::new(process);
         let trap_ctx = TrapContext::new(entry_point, ustack_top);
         let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()));
-        process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
+        process.inner.lock().apply_mut(|inner| {
+            inner.parent = Arc::downgrade(&process);
+            inner.threads.insert(pid.0, Arc::downgrade(&thread));
+        });
         PROCESS_MONITOR.add(pid.0, Arc::downgrade(&process));
         spawn_user_thread(thread);
         info!("Init process created, pid: {}", pid.0);

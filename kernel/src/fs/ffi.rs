@@ -1,4 +1,5 @@
 use bitflags::bitflags;
+use time::Duration;
 
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
@@ -9,6 +10,18 @@ pub struct TimeSpec {
 
 impl TimeSpec {
     pub fn new(sec: i64, nsec: i64) -> Self {
+        Self { sec, nsec }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        bytemuck::bytes_of(&self)
+    }
+}
+
+impl From<Duration> for TimeSpec {
+    fn from(d: Duration) -> Self {
+        let sec = d.whole_seconds();
+        let nsec = d.subsec_nanoseconds() as i64;
         Self { sec, nsec }
     }
 }
@@ -41,7 +54,7 @@ impl OpenFlags {
     pub fn readable(&self) -> bool {
         self.contains(OpenFlags::O_RDONLY) || self.contains(OpenFlags::O_RDWR)
     }
-    
+
     pub fn writable(&self) -> bool {
         self.contains(OpenFlags::O_WRONLY) || self.contains(OpenFlags::O_RDWR)
     }
@@ -98,3 +111,46 @@ pub enum InodeMode {
 }
 
 pub const PATH_MAX: usize = 260;
+
+const SYSNAME: &str = "Linux";
+const NODENAME: &str = "Linux";
+const RELEASE: &str = "5.19.0-42-generic";
+const VERSION: &str = "#43~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Apr 21 16:51:08 UTC 2";
+const MACHINE: &str = "RISC-V SiFive Freedom U740 SoC";
+const DOMAINNAME: &str = "";
+
+#[repr(C)]
+pub struct UtsName {
+    pub sysname: [u8; 65],
+    pub nodename: [u8; 65],
+    pub release: [u8; 65],
+    pub version: [u8; 65],
+    pub machine: [u8; 65],
+    pub domainname: [u8; 65],
+}
+
+impl UtsName {
+    const fn new() -> Self {
+        let mut this: Self = unsafe { core::mem::zeroed() };
+        Self::copy_bytes(&mut this.sysname, SYSNAME);
+        Self::copy_bytes(&mut this.nodename, NODENAME);
+        Self::copy_bytes(&mut this.release, RELEASE);
+        Self::copy_bytes(&mut this.version, VERSION);
+        Self::copy_bytes(&mut this.machine, MACHINE);
+        Self::copy_bytes(&mut this.domainname, DOMAINNAME);
+        this
+    }
+
+    const fn copy_bytes(buf: &mut [u8; 65], s: &str) {
+        let bytes = s.as_bytes();
+        for (i, &c) in bytes.iter().enumerate() {
+            buf[i] = c;
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        bytemuck::bytes_of(&self)
+    }
+}
+
+pub static UTS_NAME: UtsName = UtsName::new();

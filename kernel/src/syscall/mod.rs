@@ -1,8 +1,12 @@
 mod fs;
 mod process;
+mod system;
+mod time;
 
 use fs::*;
 use process::*;
+use system::*;
+use time::*;
 
 use log::warn;
 use num_enum::FromPrimitive;
@@ -129,6 +133,7 @@ pub enum SyscallCode {
 pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
     let code = SyscallCode::from(code);
     match code {
+        SyscallCode::Shutdown => syscall!(sys_shutdown),
         SyscallCode::Getcwd => syscall!(sys_getcwd, args[0], args[1]),
         SyscallCode::Dup => syscall!(sys_dup, args[0]),
         SyscallCode::Dup3 => syscall!(sys_dup3, args[0], args[1], args[2] as u32),
@@ -179,16 +184,16 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::RtSigtimedwait
         // SyscallCode::RtSigreturn
         // SyscallCode::Times
-        // SyscallCode::Uname
+        SyscallCode::Uname => syscall!(sys_uname, args[0]),
         // SyscallCode::Getrusage
         // SyscallCode::Umask
-        // SyscallCode::GetTimeOfDay
-        // SyscallCode::Getpid
-        // SyscallCode::Getppid
-        // SyscallCode::Getuid
-        // SyscallCode::Geteuid
-        // SyscallCode::Getegid
-        // SyscallCode::Gettid
+        SyscallCode::GetTimeOfDay => syscall!(sys_gettimeofday, args[0], args[1]),
+        SyscallCode::Getpid => syscall!(sys_getpid),
+        SyscallCode::Getppid => syscall!(sys_getppid),
+        SyscallCode::Getuid => syscall!(sys_getuid),
+        SyscallCode::Geteuid => syscall!(sys_geteuid),
+        SyscallCode::Getegid => syscall!(sys_getegid),
+        SyscallCode::Gettid => syscall!(sys_gettid),
         // SyscallCode::Sysinfo
         // SyscallCode::Shmget
         // SyscallCode::Shmctl

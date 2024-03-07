@@ -49,7 +49,7 @@ pub async fn read(fd: usize, buf: usize, len: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd).ok_or(Errno::EBADF)?;
     if !fd_impl.flags.readable() {
-        return Err(Errno::EPERM);
+        return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), len)?;
     let ret = fd_impl.file.read(user_buf).await?;
@@ -60,7 +60,7 @@ pub async fn write(fd: usize, buf: usize, len: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd).ok_or(Errno::EBADF)?;
     if !fd_impl.flags.writable() {
-        return Err(Errno::EPERM);
+        return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(buf), len)?;
     let ret = fd_impl.file.write(user_buf).await?;

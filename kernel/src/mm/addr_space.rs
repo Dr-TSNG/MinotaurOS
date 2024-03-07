@@ -250,7 +250,7 @@ impl AddressSpace {
                         return Ok(());
                     }
                 } else {
-                    return Err(Errno::EACCES);
+                    return Err(Errno::EFAULT);
                 }
             }
         }
