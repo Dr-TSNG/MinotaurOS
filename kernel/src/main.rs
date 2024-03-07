@@ -114,6 +114,5 @@ fn panic(info: &PanicInfo) -> ! {
     } else {
         error!("Panicked: {}", info.message().unwrap());
     }
-    // debug::unwind::print_stack_trace();
     shutdown()
 }

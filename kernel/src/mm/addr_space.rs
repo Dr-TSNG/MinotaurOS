@@ -234,7 +234,7 @@ impl AddressSpace {
         self.regions.insert(region);
         result
     }
-    
+
     pub fn check_addr_valid(&self, start: VirtAddr, end: VirtAddr, perms: ASPerms) -> SyscallResult<()> {
         let vpn_start = start.floor();
         let vpn_end = end.floor();
@@ -268,7 +268,7 @@ impl AddressSpace {
         let data = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), len) };
         Ok(data)
     }
-    
+
     pub fn user_slice_rw(&self, addr: VirtAddr, len: usize) -> SyscallResult<&'static mut [u8]> {
         self.check_addr_valid(addr, addr + len, ASPerms::R | ASPerms::W | ASPerms::U)?;
         let data = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), len) };

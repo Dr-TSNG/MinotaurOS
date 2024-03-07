@@ -17,10 +17,9 @@ lazy_static = { version = "1.4", features = ["spin_no_std"] }
 log = "0.4"
 lru = "0.12"
 num_enum = { version = "0.7.2", default-features = false }
-time = { version = "0.3", default-features = false }
 sbi-spec = "0.0.6"
 spin = "0.9"
-unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
+time = { version = "0.3", default-features = false }
 xmas-elf = "0.7.0"
 virtio-drivers = "0.6.0"
 

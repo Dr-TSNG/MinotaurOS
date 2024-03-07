@@ -13,7 +13,7 @@ SECTIONS
     }
 
     . = ALIGN(4K);
-    __etext = .;
+    etext = .;
     .rodata : {
         *(.rodata .rodata.*)
         *(.srodata .srodata.*)
@@ -38,8 +38,6 @@ SECTIONS
 
     . = ALIGN(4K);
     ebss = .;
-    PROVIDE(__eh_frame = .);
-    .eh_frame : { KEEP (*(.eh_frame)) *(.eh_frame.*) }
 
     . = ALIGN(2M);
     ekernel = .;
