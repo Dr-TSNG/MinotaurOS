@@ -22,6 +22,7 @@ spin = "0.9"
 time = { version = "0.3", default-features = false }
 xmas-elf = "0.7.0"
 virtio-drivers = "0.6.0"
+zerocopy = { version = "0.7", features = ["derive"] }
 
 [features]
 board_qemu = []

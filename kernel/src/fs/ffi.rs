@@ -1,7 +1,9 @@
+use core::time::Duration;
 use bitflags::bitflags;
-use time::Duration;
+use lazy_static::lazy_static;
+use zerocopy::{AsBytes, FromZeroes};
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, AsBytes)]
 #[repr(C)]
 pub struct TimeSpec {
     pub sec: i64,
@@ -12,16 +14,12 @@ impl TimeSpec {
     pub fn new(sec: i64, nsec: i64) -> Self {
         Self { sec, nsec }
     }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(&self)
-    }
 }
 
 impl From<Duration> for TimeSpec {
     fn from(d: Duration) -> Self {
-        let sec = d.whole_seconds();
-        let nsec = d.subsec_nanoseconds() as i64;
+        let sec = d.as_secs() as i64;
+        let nsec = d.subsec_nanos() as i64;
         Self { sec, nsec }
     }
 }
@@ -119,6 +117,7 @@ const VERSION: &str = "#43~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Apr 21 16:51:0
 const MACHINE: &str = "RISC-V SiFive Freedom U740 SoC";
 const DOMAINNAME: &str = "";
 
+#[derive(AsBytes, FromZeroes)]
 #[repr(C)]
 pub struct UtsName {
     pub sysname: [u8; 65],
@@ -130,8 +129,8 @@ pub struct UtsName {
 }
 
 impl UtsName {
-    const fn new() -> Self {
-        let mut this: Self = unsafe { core::mem::zeroed() };
+    fn new() -> Self {
+        let mut this = Self::new_zeroed();
         Self::copy_bytes(&mut this.sysname, SYSNAME);
         Self::copy_bytes(&mut this.nodename, NODENAME);
         Self::copy_bytes(&mut this.release, RELEASE);
@@ -141,16 +140,14 @@ impl UtsName {
         this
     }
 
-    const fn copy_bytes(buf: &mut [u8; 65], s: &str) {
+    fn copy_bytes(buf: &mut [u8; 65], s: &str) {
         let bytes = s.as_bytes();
-        for (i, &c) in bytes.iter().enumerate() {
-            buf[i] = c;
+        for i in 0..bytes.len() {
+            buf[i] = bytes[i];
         }
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        bytemuck::bytes_of(&self)
     }
 }
 
-pub static UTS_NAME: UtsName = UtsName::new();
+lazy_static! {
+    pub static ref UTS_NAME: UtsName = UtsName::new();
+}
