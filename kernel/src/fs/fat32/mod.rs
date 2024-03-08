@@ -129,7 +129,7 @@ impl FAT32FileSystem {
         Ok(())
     }
 
-    pub async fn read_dir(self: Arc<Self>, clusters: &[usize]) -> MosResult<Vec<Arc<FAT32Inode>>> {
+    pub async fn read_dir(self: Arc<Self>, parent: Arc<dyn Inode>, clusters: &[usize]) -> MosResult<Vec<Arc<FAT32Inode>>> {
         let mut inodes = vec![];
         let mut dir = FAT32Dirent::default();
         'outer: for cluster in clusters {
@@ -151,7 +151,7 @@ impl FAT32FileSystem {
                             dir.last(value);
                             let byte_offset = block_id * BLOCK_SIZE + i;
                             trace!("Read FAT32 dirent: {} \tat {:#x} \tattr {:?}", dir.name, byte_offset, dir.attr);
-                            let inode = FAT32Inode::new(&self, dir).await?;
+                            let inode = FAT32Inode::new(&self, &parent, dir).await?;
                             inodes.push(inode);
                             dir = FAT32Dirent::default();
                         }

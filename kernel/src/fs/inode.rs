@@ -15,14 +15,16 @@ pub struct InodeMeta {
     pub dev: usize,
     /// 结点类型
     pub mode: InodeMode,
+    /// 文件名
+    pub name: String,
+    /// 文件系统路径
+    pub path: String,
     /// 可变数据
     pub inner: Mutex<InodeMetaInner>,
 }
 
 #[derive(Default)]
 pub struct InodeMetaInner {
-    /// 文件名
-    pub name: String,
     /// uid
     pub uid: usize,
     /// gid
@@ -39,8 +41,42 @@ pub struct InodeMetaInner {
     pub size: isize,
     /// 父目录
     pub parent: Option<Weak<dyn Inode>>,
-    /// 子目录项
-    pub children: BTreeMap<String, Arc<dyn Inode>>,
+    /// 挂载点
+    pub mounts: BTreeMap<String, Arc<dyn Inode>>,
+}
+
+impl InodeMeta {
+    pub fn new(
+        ino: usize,
+        dev: usize,
+        mode: InodeMode,
+        name: String,
+        path: String,
+        atime: TimeSpec,
+        mtime: TimeSpec,
+        ctime: TimeSpec,
+        size: isize,
+        parent: Option<Weak<dyn Inode>>,
+    ) -> Self {
+        Self {
+            ino,
+            dev,
+            mode,
+            name,
+            path,
+            inner: Mutex::new(InodeMetaInner {
+                uid: 0,
+                gid: 0,
+                nlink: 1,
+                atime,
+                mtime,
+                ctime,
+                size,
+                parent,
+                mounts: BTreeMap::new(),
+            }),
+        }
+    }
 }
 
 #[async_trait]
@@ -64,12 +100,12 @@ pub trait Inode: Send + Sync {
     }
 
     /// 在当前目录下查找文件
-    async fn lookup(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    async fn lookup(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
 
     /// 列出目录下编号 `iter` 的文件
-    async fn list(&self, iter: usize) -> SyscallResult<Arc<dyn Inode>> {
+    async fn list(self: Arc<Self>, iter: usize) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
 

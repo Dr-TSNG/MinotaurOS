@@ -8,6 +8,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use log::info;
 use crate::fs::fd::FdTable;
+use crate::fs::file_system::MountNamespace;
 use crate::mm::addr_space::AddressSpace;
 use crate::mm::page_table::PageTable;
 use crate::process::monitor::PROCESS_MONITOR;
@@ -42,6 +43,8 @@ pub struct ProcessInner {
     pub threads: BTreeMap<Tid, Weak<Thread>>,
     /// 地址空间
     pub addr_space: AddressSpace,
+    /// 挂载命名空间
+    pub mnt_ns: Arc<MountNamespace>,
     /// 文件描述符表
     pub fd_table: FdTable,
     /// 工作目录
@@ -51,7 +54,7 @@ pub struct ProcessInner {
 }
 
 impl Process {
-    pub fn new_initproc(elf_data: &[u8]) -> MosResult<Arc<Self>> {
+    pub fn new_initproc(mnt_ns: Arc<MountNamespace>, elf_data: &[u8]) -> MosResult<Arc<Self>> {
         let (addr_space, entry_point, ustack_top, auxv) = AddressSpace::from_elf(elf_data)?;
         let pid = Arc::new(TidTracker::new());
         let inner = ProcessInner {
@@ -60,6 +63,7 @@ impl Process {
             pgid: pid.0,
             threads: BTreeMap::new(),
             addr_space,
+            mnt_ns,
             fd_table: FdTable::new(),
             cwd: String::from("/"),
             terminated: false,

@@ -65,12 +65,12 @@ fn start_main_hart() -> MosResult {
     trap::init();
     mm::vm_init()?;
     driver::init()?;
-    fs::init()?;
+    let mnt_ns = fs::init()?;
 
     builtin::init();
     let data = builtin::builtin_app("init").unwrap();
     info!("Spawn init process");
-    Process::new_initproc(data).unwrap();
+    Process::new_initproc(mnt_ns, data).unwrap();
 
     sched::time::set_next_trigger();
     arch::enable_timer_interrupt();
