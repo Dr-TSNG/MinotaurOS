@@ -10,7 +10,7 @@ use log::{debug, error, trace};
 use crate::fs::fat32::dir::{FAT32Dirent, FileAttr};
 use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::fat32::fat::FATEnt;
-use crate::fs::ffi::{InodeMode, OpenFlags, TimeSpec};
+use crate::fs::ffi::{InodeMode, TimeSpec};
 use crate::fs::file::{File, FileMeta, RegularFile};
 use crate::fs::inode::{Inode, InodeMeta};
 use crate::result::{Errno, MosResult, SyscallResult};
@@ -98,7 +98,7 @@ impl Inode for FAT32Inode {
         &self.metadata
     }
 
-    async fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
+    fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
         Ok(Arc::new(RegularFile::new(FileMeta::new(self))))
     }
 
@@ -113,13 +113,13 @@ impl Inode for FAT32Inode {
 
         let inner = self.inner.lock().await;
         let mut cur = 0;
-        'outer: for id in &inner.clusters {
+        'outer: for cluster in &inner.clusters {
             if offset >= fs.fat32meta.bytes_per_cluster {
                 offset -= fs.fat32meta.bytes_per_cluster;
                 continue;
             }
             let next = min(fs.fat32meta.bytes_per_cluster - offset, buf.len() - cur);
-            if let Err(e) = fs.read_data(inner.clusters[*id], &mut buf[cur..next], offset).await {
+            if let Err(e) = fs.read_data(*cluster, &mut buf[cur..next], offset).await {
                 error!("IO Error: {:?}", e);
                 return Err(Errno::EIO);
             }
@@ -176,11 +176,11 @@ impl Inode for FAT32Inode {
         }
     }
 
-    async fn create(&self, name: &str, mode: OpenFlags) -> SyscallResult<Arc<dyn Inode>> {
+    async fn create(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         todo!()
     }
 
-    async fn mkdir(&self, name: &str, mode: OpenFlags) -> SyscallResult<Arc<dyn Inode>> {
+    async fn mkdir(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         todo!()
     }
 

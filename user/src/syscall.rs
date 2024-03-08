@@ -1,4 +1,6 @@
+use alloc::ffi::CString;
 use core::arch::asm;
+use bitflags::bitflags;
 use crate::syscall::SyscallCode::*;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -86,6 +88,32 @@ pub enum SyscallCode {
     CopyFileRange = 285,
 }
 
+bitflags! {
+    pub struct OpenFlags: u32 {
+        const O_RDONLY    =        00;
+        const O_WRONLY    =        01;
+        const O_RDWR      =        02;
+        const O_CREAT     =      0100;
+        const O_EXCL      =      0200;
+        const O_NOCTTY    =      0400;
+        const O_TRUNC     =     01000;
+        const O_APPEND    =     02000;
+        const O_NONBLOCK  =     04000;
+        const O_DSYNC     =    010000;
+        const O_ASYNC     =    020000;
+        const O_DIRECT    =    040000;
+        const O_LARGEFILE =   0100000;
+        const O_DIRECTORY =   0200000;
+        const O_NOFOLLOW  =   0400000;
+        const O_NOATIME   =  01000000;
+        const O_CLOEXEC   =  02000000;
+        const O_SYNC      =  04010000;
+        const O_PATH      = 010000000;
+    }
+}
+
+pub static AT_FDCWD: i32 = -100;
+
 macro_rules! syscall {
     ($code:expr $(, $args:expr)*) => {
         unsafe {
@@ -141,12 +169,17 @@ pub fn sys_exit(exit_code: i32) -> isize {
     syscall!(Exit, exit_code)
 }
 
-pub fn sys_read(fd: usize, buf: &mut [u8]) -> isize {
-    syscall!(Read, fd, buf.as_ptr() as usize, buf.len())
+pub fn sys_open(path: &str, flags: OpenFlags) -> i32 {
+    let path = CString::new(path).unwrap();
+    syscall!(Openat, AT_FDCWD as usize, path.as_ptr() as usize, flags.bits, 0) as i32
 }
 
-pub fn sys_write(fd: usize, buf: &[u8]) -> isize {
-    syscall!(Write, fd, buf.as_ptr() as usize, buf.len())
+pub fn sys_read(fd: i32, buf: &mut [u8]) -> isize {
+    syscall!(Read, fd as usize, buf.as_ptr() as usize, buf.len())
+}
+
+pub fn sys_write(fd: i32, buf: &[u8]) -> isize {
+    syscall!(Write, fd as usize, buf.as_ptr() as usize, buf.len())
 }
 
 pub fn sys_yield() -> isize {

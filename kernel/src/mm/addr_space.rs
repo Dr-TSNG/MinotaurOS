@@ -4,6 +4,8 @@ use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::arch::asm;
+use core::cmp::min;
+use core::ffi::CStr;
 use bitflags::bitflags;
 use log::{debug, trace};
 use riscv::register::satp;
@@ -269,9 +271,15 @@ impl AddressSpace {
         Ok(data)
     }
 
-    pub fn user_slice_rw(&self, addr: VirtAddr, len: usize) -> SyscallResult<&'static mut [u8]> {
-        self.check_addr_valid(addr, addr + len, ASPerms::R | ASPerms::W | ASPerms::U)?;
-        let data = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), len) };
-        Ok(data)
+    pub fn user_slice_str(&self, addr: VirtAddr, max_len: usize) -> SyscallResult<&'static str> {
+        let mut cur_len = min(max_len, PAGE_SIZE - addr.page_offset(2));
+        while cur_len <= max_len {
+            let data = self.user_slice_r(addr, cur_len)?;
+            if let Ok(cstr) = CStr::from_bytes_until_nul(data) {
+                return Ok(cstr.to_str().map_err(|_| Errno::EINVAL)?);
+            }
+            cur_len = min(cur_len + PAGE_SIZE, max_len);
+        }
+        Err(Errno::EINVAL)
     }
 }

@@ -7,7 +7,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::inode::Inode;
-use crate::result::{Errno, MosResult, SyscallResult};
+use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
 pub enum FileSystemType {
@@ -34,12 +34,25 @@ pub trait FileSystem: Send + Sync {
     fn metadata(&self) -> &FileSystemMeta;
 
     /// 根 Inode
-    async fn root(self: Arc<Self>) -> MosResult<Arc<dyn Inode>>;
+    async fn root(self: Arc<Self>) -> SyscallResult<Arc<dyn Inode>>;
 }
 
 impl FileSystemMeta {
     pub fn new(fstype: FileSystemType, flags: VfsFlags) -> Self {
         Self { fstype, flags }
+    }
+}
+
+impl dyn FileSystem {
+    pub async fn lookup_from_root(self: Arc<Self>, absolute_path: &str) -> SyscallResult<Arc<dyn Inode>> {
+        let mut inode = self.root().await?;
+        if absolute_path == "/" {
+            return Ok(inode);
+        }
+        for name in absolute_path.split('/') {
+            inode = inode.lookup(name).await?;
+        }
+        Ok(inode)
     }
 }
 
@@ -49,15 +62,15 @@ static MNT_NS_ID_POOL: AtomicUsize = AtomicUsize::new(1);
 /// 挂载命名空间
 pub struct MountNamespace {
     pub mnt_ns_id: usize,
-    pub tree: Mutex<MountTree>,
+    tree: Mutex<MountTree>,
 }
 
 /// 挂载树
-pub struct MountTree {
-    pub mnt_id: usize,
-    pub fs: Arc<dyn FileSystem>,
+struct MountTree {
+    mnt_id: usize,
+    fs: Arc<dyn FileSystem>,
     /// 子挂载树，`key` 为挂载路径，以 `/` 开头
-    pub sub_trees: BTreeMap<String, MountTree>,
+    sub_trees: BTreeMap<String, MountTree>,
 }
 
 impl MountTree {

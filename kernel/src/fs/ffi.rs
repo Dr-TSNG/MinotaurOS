@@ -108,7 +108,7 @@ pub enum InodeMode {
     FileFIFO = 0x1000,
 }
 
-pub const AT_FDCWD: isize = -100;
+pub const AT_FDCWD: i32 = -100;
 pub const PATH_MAX: usize = 260;
 
 const SYSNAME: &str = "Linux";

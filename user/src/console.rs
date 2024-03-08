@@ -1,20 +1,12 @@
-use core::fmt::{self, Write};
+use core::fmt::{self};
 use crate::syscall::{sys_read, sys_write};
 
-const STDIN: usize = 0;
-const STDOUT: usize = 1;
-
-struct Stdout;
-
-impl Write for Stdout {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        sys_write(STDOUT, s.as_bytes());
-        Ok(())
-    }
-}
+const STDIN: i32 = 0;
+const STDOUT: i32 = 1;
 
 pub fn print(args: fmt::Arguments) {
-    Stdout.write_fmt(args).unwrap();
+    let fmt = alloc::fmt::format(args);
+    sys_write(STDOUT, fmt.as_bytes());
 }
 
 #[macro_export]

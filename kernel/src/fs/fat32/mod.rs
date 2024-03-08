@@ -4,7 +4,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
 use async_trait::async_trait;
-use log::{info, trace};
+use log::{error, info, trace};
 use crate::driver::BlockDevice;
 use crate::fs::block_cache::BlockCache;
 use crate::fs::fat32::dir::FAT32Dirent;
@@ -13,7 +13,7 @@ use crate::fs::fat32::inode::FAT32Inode;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::Inode;
-use crate::result::{MosError, MosResult};
+use crate::result::{Errno, MosError, MosResult, SyscallResult};
 
 macro_rules! section {
     ($buf:ident, $start:ident, $end:ident) => {
@@ -72,7 +72,7 @@ impl FAT32FileSystem {
     /// 根据簇号和偏移读取数据
     pub async fn read_data(&self, cluster: usize, buf: &mut [u8], mut offset: usize) -> MosResult {
         buf.len().checked_add(offset)
-            .take_if(|v| *v <= self.fat32meta.sectors_per_cluster)
+            .take_if(|v| *v <= self.fat32meta.bytes_per_cluster)
             .ok_or(MosError::CrossBoundary)?;
 
         let mut cur = 0;
@@ -187,9 +187,14 @@ impl FileSystem for FAT32FileSystem {
         &self.vfsmeta
     }
 
-    async fn root(self: Arc<Self>) -> MosResult<Arc<dyn Inode>> {
+    async fn root(self: Arc<Self>) -> SyscallResult<Arc<dyn Inode>> {
         let root_cluster = self.fat32meta.root_cluster as u32;
-        let inode = FAT32Inode::root(&self, None, root_cluster).await?;
-        Ok(inode)
+        match FAT32Inode::root(&self, None, root_cluster).await {
+            Ok(inode) => Ok(inode),
+            Err(e) => { 
+                error!("IO Error: {:?}", e);
+                Err(Errno::EIO)
+            }
+        }
     }
 }

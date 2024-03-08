@@ -60,6 +60,9 @@ impl FdTable {
         if fd > MAX_FD_NUM {
             return Err(Errno::EMFILE);
         }
+        if fd >= self.table.len() {
+            self.table.resize(fd + 1, None);
+        }
         self.table[fd] = Some(fd_impl);
         Ok(fd)
     }

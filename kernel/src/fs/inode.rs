@@ -3,7 +3,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use async_trait::async_trait;
-use crate::fs::ffi::{InodeMode, OpenFlags, TimeSpec};
+use crate::fs::ffi::{InodeMode, TimeSpec};
 use crate::fs::file::File;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
@@ -85,7 +85,7 @@ pub trait Inode: Send + Sync {
     fn metadata(&self) -> &InodeMeta;
 
     /// 打开一个 Inode，返回打开的文件
-    async fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
+    fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
         Err(Errno::EPERM)
     }
 
@@ -110,12 +110,12 @@ pub trait Inode: Send + Sync {
     }
 
     /// 在当前目录下创建文件
-    async fn create(&self, name: &str, mode: OpenFlags) -> SyscallResult<Arc<dyn Inode>> {
+    async fn create(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
 
     /// 在当前目录下创建目录
-    async fn mkdir(&self, name: &str, mode: OpenFlags) -> SyscallResult<Arc<dyn Inode>> {
+    async fn mkdir(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
 
