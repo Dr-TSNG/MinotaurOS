@@ -141,8 +141,8 @@ impl Process {
             *sp -= *sp % size_of::<usize>();
             Ok(store)
         }
-        let argv = write_args(envs, &mut user_sp)?;
-        let envp = write_args(args, &mut user_sp)?;
+        let envp = write_args(envs, &mut user_sp)?;
+        let argv = write_args(args, &mut user_sp)?;
 
         // 写入 `platform`
         let platform = CString::new("RISC-V64").unwrap();

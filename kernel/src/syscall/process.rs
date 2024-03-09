@@ -85,6 +85,11 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     };
     push_args(&mut args_vec, args)?;
     push_args(&mut envs_vec, envs)?;
+    if args_vec.is_empty() {
+        args_vec.push(CString::new(path).unwrap());
+    }
+    envs_vec.push(CString::new("PATH=/").unwrap());
+    envs_vec.push(CString::new("LD_LIBRARY_PATH=/").unwrap());
 
     let inode = resolve_path(&proc_inner, AT_FDCWD, path).await?;
     if inode.metadata().mode == InodeMode::DIR {

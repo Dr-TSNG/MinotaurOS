@@ -14,6 +14,7 @@ use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::Inode;
 use crate::result::{Errno, MosError, MosResult, SyscallResult};
+use crate::sync::mutex::Mutex;
 
 macro_rules! section {
     ($buf:ident, $start:ident, $end:ident) => {
@@ -37,6 +38,7 @@ pub struct FAT32FileSystem {
     vfsmeta: FileSystemMeta,
     fat32meta: FAT32Meta,
     cache: BlockCache<BLOCK_SIZE>,
+    root: Mutex<Option<Arc<FAT32Inode>>>,
 }
 
 impl FAT32FileSystem {
@@ -49,7 +51,7 @@ impl FAT32FileSystem {
         let vfsmeta = FileSystemMeta::new(FileSystemType::FAT32, flags);
         let fat32meta = FAT32Meta::new(&boot_sector)?;
         let cache = BlockCache::new(device.clone(), BLOCK_CACHE_CAP);
-        let fs = FAT32FileSystem { device, vfsmeta, fat32meta, cache };
+        let fs = FAT32FileSystem { device, vfsmeta, fat32meta, cache, root: Mutex::default() };
         info!("FAT32 metadata: {:?}", fs.fat32meta);
         Ok(Arc::new(fs))
     }
@@ -188,12 +190,20 @@ impl FileSystem for FAT32FileSystem {
     }
 
     async fn root(self: Arc<Self>) -> SyscallResult<Arc<dyn Inode>> {
-        let root_cluster = self.fat32meta.root_cluster as u32;
-        match FAT32Inode::root(&self, None, root_cluster).await {
-            Ok(inode) => Ok(inode),
-            Err(e) => { 
-                error!("IO Error: {:?}", e);
-                Err(Errno::EIO)
+        let mut root = self.root.lock();
+        match root.clone() {
+            Some(inode) => Ok(inode),
+            None => {
+                let root_cluster = self.fat32meta.root_cluster as u32;
+                let inode = match FAT32Inode::root(&self, None, root_cluster).await {
+                    Ok(inode) => inode,
+                    Err(e) => {
+                        error!("IO Error: {:?}", e);
+                        return Err(Errno::EIO);
+                    }
+                };
+                *root = Some(inode.clone());
+                Ok(inode)
             }
         }
     }

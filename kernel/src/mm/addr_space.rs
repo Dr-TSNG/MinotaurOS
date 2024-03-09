@@ -332,6 +332,7 @@ impl AddressSpace {
                     Some(buf),
                 )?;
                 self.map_region(region)?;
+                debug!("Map linker section: {:?} - {:?}", start_vpn, end_vpn);
             }
         }
         Ok(elf.header.pt2.entry_point() as usize + offset)
