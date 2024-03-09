@@ -98,21 +98,22 @@ impl Process {
         flags: CloneFlags,
         stack: usize,
     ) -> SyscallResult<Pid> {
-        let mut proc_inner = self.inner.lock();
         let new_pid = Arc::new(TidTracker::new());
 
-        let new_inner = ProcessInner {
-            parent: Arc::downgrade(self),
-            children: Vec::new(),
-            pgid: new_pid.0,
-            threads: BTreeMap::new(),
-            addr_space: proc_inner.addr_space.fork().unwrap(),
-            mnt_ns: proc_inner.mnt_ns.clone(),
-            fd_table: proc_inner.fd_table.clone(),
-            cwd: proc_inner.cwd.clone(),
-            terminated: false,
-        };
-        let process = Arc::new(Process {
+        let new_inner = self.inner.lock().apply_mut(|proc_inner| {
+            ProcessInner {
+                parent: Arc::downgrade(self),
+                children: Vec::new(),
+                pgid: new_pid.0,
+                threads: BTreeMap::new(),
+                addr_space: proc_inner.addr_space.fork().unwrap(),
+                mnt_ns: proc_inner.mnt_ns.clone(),
+                fd_table: proc_inner.fd_table.clone(),
+                cwd: proc_inner.cwd.clone(),
+                terminated: false,
+            }
+        });
+        let new_process = Arc::new(Process {
             pid: new_pid.clone(),
             root_pt: new_inner.addr_space.root_pt,
             inner: IrqMutex::new(new_inner),
@@ -122,10 +123,12 @@ impl Process {
         if stack != 0 {
             trap_ctx.set_sp(stack);
         }
-        let new_thread = Thread::new(process.clone(), trap_ctx, Some(new_pid.clone()));
-        proc_inner.threads.insert(new_pid.0, Arc::downgrade(&new_thread));
+        let new_thread = Thread::new(new_process.clone(), trap_ctx, Some(new_pid.clone()));
+        new_process.inner.lock().apply_mut(|inner| {
+            inner.threads.insert(new_pid.0, Arc::downgrade(&new_thread));
+        });
 
-        PROCESS_MONITOR.add(new_pid.0, Arc::downgrade(&process));
+        PROCESS_MONITOR.add(new_pid.0, Arc::downgrade(&new_process));
         spawn_user_thread(new_thread);
         info!(
             "[fork_process] New process (pid = {}) created from parent process (pid = {}, tid = {})",
