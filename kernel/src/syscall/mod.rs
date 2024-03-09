@@ -201,8 +201,8 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Shmat
         // SyscallCode::Brk
         // SyscallCode::Munmap
-        // SyscallCode::Clone
-        // SyscallCode::Execve
+        SyscallCode::Clone => syscall!(sys_clone, args[0] as u32, args[1], args[2], args[3], args[4]),
+        SyscallCode::Execve => async_syscall!(sys_execve, args[0], args[1], args[2]),
         // SyscallCode::Mmap
         // SyscallCode::Mprotect
         // SyscallCode::Madvise

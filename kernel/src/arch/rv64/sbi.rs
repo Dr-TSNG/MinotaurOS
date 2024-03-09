@@ -39,7 +39,7 @@ pub fn console_write(content: &str) -> Result<usize, SBIError> {
     let content = content.as_bytes();
     let vaddr = VirtAddr(content.as_ptr() as usize);
     let paddr = match &local_hart().ctx.user_task {
-        Some(task) => task.thread.process.root_pt.translate(vaddr),
+        Some(task) => task.root_pt.translate(vaddr),
         None => kvaddr_to_paddr(vaddr),
     };
     sbi_call(EID_DBCN, CONSOLE_WRITE, content.len(), paddr.0, 0)

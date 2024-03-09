@@ -24,7 +24,7 @@ impl FileDescriptor {
     pub fn new(file: Arc<dyn File>, flags: OpenFlags) -> Self {
         Self { file, flags }
     }
-    
+
     pub fn dup(&self, cloexec: bool) -> Self {
         let flags = if cloexec {
             self.flags | OpenFlags::O_CLOEXEC
@@ -49,13 +49,23 @@ impl FdTable {
         table.push(Some(stderr));
         FdTable { table }
     }
-    
+
+    pub fn cloexec(&mut self) {
+        for fd in self.table.iter_mut() {
+            if let Some(fd_impl) = fd {
+                if fd_impl.flags.contains(OpenFlags::O_CLOEXEC) {
+                    *fd = None;
+                }
+            }
+        }
+    }
+
     /// 获取指定位置的文件描述符的可变引用
     pub fn get(&self, fd: FdNum) -> SyscallResult<&FileDescriptor> {
         let fd = fd as usize;
         self.table.get(fd).and_then(Option::as_ref).ok_or(Errno::EBADF)
     }
-    
+
     /// 插入一个文件描述符，返回位置
     pub fn put(&mut self, fd_impl: FileDescriptor) -> SyscallResult<FdNum> {
         let fd = self.find_slot();
@@ -68,7 +78,7 @@ impl FdTable {
         self.table[fd] = Some(fd_impl);
         Ok(fd as i32)
     }
-    
+
     /// 在指定位置插入一个文件描述符，如果位置已经占用，则替换
     pub fn insert(&mut self, fd: FdNum, fd_impl: FileDescriptor) -> SyscallResult {
         let fd = fd as usize;
@@ -81,7 +91,7 @@ impl FdTable {
         self.table[fd] = Some(fd_impl);
         Ok(())
     }
-    
+
     /// 删除一个文件描述符
     pub fn remove(&mut self, fd: FdNum) -> SyscallResult {
         let fd = fd as usize;

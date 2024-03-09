@@ -1,4 +1,9 @@
+use alloc::ffi::CString;
+use alloc::vec::Vec;
 use log::debug;
+use crate::arch::VirtAddr;
+use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
+use crate::fs::path::resolve_path;
 use crate::process::ffi::CloneFlags;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
@@ -43,13 +48,7 @@ pub fn sys_gettid() -> SyscallResult<usize> {
     Ok(current_thread().tid.0)
 }
 
-pub fn sys_clone(
-    flags: u32,
-    stack: usize,
-    ptid: usize,
-    tls: usize,
-    ctid: usize,
-) -> SyscallResult<usize> {
+pub fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize) -> SyscallResult<usize> {
     let flags = CloneFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     debug!("[sys_clone] flags: {:?}", flags);
     if flags.contains(CloneFlags::CLONE_VM) {
@@ -57,4 +56,39 @@ pub fn sys_clone(
     } else {
         current_process().fork_process(flags, stack)
     }
+}
+
+pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let mut path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
+    debug!("[sys_execve] path: {:?}", path);
+
+    let mut args_vec: Vec<CString> = Vec::new();
+    let mut envs_vec: Vec<CString> = Vec::new();
+    if path.ends_with(".sh") {
+        path = "/busybox";
+        args_vec.push(CString::new("busybox").unwrap());
+        args_vec.push(CString::new("sh").unwrap());
+    }
+    let push_args = |args_vec: &mut Vec<CString>, mut arg_ptr: usize| -> SyscallResult {
+        loop {
+            let arg = proc_inner.addr_space.user_slice_str(VirtAddr(arg_ptr), PATH_MAX)?;
+            if arg.is_empty() { break; }
+            args_vec.push(CString::new(arg).unwrap());
+            arg_ptr += arg.len() + 1;
+        }
+        Ok(())
+    };
+    push_args(&mut args_vec, args)?;
+    push_args(&mut envs_vec, envs)?;
+
+    let inode = resolve_path(&proc_inner, AT_FDCWD, path).await?;
+    if inode.metadata().mode == InodeMode::DIR {
+        return Err(Errno::EISDIR);
+    }
+    let file = inode.open()?;
+    let elf_data = file.read_all().await?;
+    current_process().execve(&elf_data, &args_vec, &envs_vec)?;
+
+    Ok(0)
 }

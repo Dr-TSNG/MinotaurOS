@@ -26,6 +26,7 @@ impl<F: Future<Output=()> + Send + 'static> HartTaskFuture<F> {
     fn new_user(thread: Arc<Thread>, fut: F) -> Self {
         let task = UserTask {
             thread: thread.clone(),
+            root_pt: thread.process.inner.lock().addr_space.root_pt,
         };
         let ctx = HartContext::new(Some(task));
         Self { ctx, fut }

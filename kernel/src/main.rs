@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(alloc_error_handler)]
 #![feature(asm_const)]
+#![feature(btree_extract_if)]
 #![feature(const_trait_impl)]
 #![feature(inline_const)]
 #![feature(naked_functions)]
