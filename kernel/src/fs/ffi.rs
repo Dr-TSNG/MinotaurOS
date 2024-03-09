@@ -110,6 +110,45 @@ pub enum InodeMode {
 
 pub const AT_FDCWD: i32 = -100;
 pub const PATH_MAX: usize = 260;
+pub const MAX_NAME_LEN: usize = 256;
+pub const DIRENT_SIZE: usize = core::mem::size_of::<LinuxDirent>();
+
+#[repr(C)]
+pub struct LinuxDirent {
+    pub d_ino: u64,
+    pub d_off: i64,
+    pub d_reclen: u16,
+    pub d_type: u8,
+    pub d_name: [u8; MAX_NAME_LEN],
+}
+
+bitflags! {
+    pub struct DirentType: u8 {
+        const DT_UNKNOWN = 0;
+        const DT_FIFO = 1;
+        const DT_CHR = 2;
+        const DT_DIR = 4;
+        const DT_BLK = 6;
+        const DT_REG = 8;
+        const DT_LNK = 10;
+        const DT_SOCK = 12;
+        const DT_WHT = 14;
+    }
+}
+
+impl From<InodeMode> for DirentType {
+    fn from(value: InodeMode) -> Self {
+        match value {
+            InodeMode::FileFIFO => DirentType::DT_FIFO,
+            InodeMode::CHR => DirentType::DT_CHR,
+            InodeMode::DIR => DirentType::DT_DIR,
+            InodeMode::IFBLK => DirentType::DT_BLK,
+            InodeMode::IFREG => DirentType::DT_REG,
+            InodeMode::IFLNK => DirentType::DT_LNK,
+            InodeMode::IFSOCK => DirentType::DT_SOCK,
+        }
+    }
+}
 
 const SYSNAME: &str = "Linux";
 const NODENAME: &str = "Linux";

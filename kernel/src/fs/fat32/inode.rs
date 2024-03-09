@@ -157,23 +157,23 @@ impl Inode for FAT32Inode {
         Err(Errno::ENOENT)
     }
 
-    async fn list(self: Arc<Self>, iter: usize) -> SyscallResult<Arc<dyn Inode>> {
+    async fn list(self: Arc<Self>, index: usize) -> SyscallResult<Vec<Arc<dyn Inode>>> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let mut inner = self.inner.lock().await;
         trace!(
             "[fat32] List from {} ino {} at {}",
             self.metadata().name,
             self.metadata().ino,
-            iter,
+            index,
         );
         if inner.children.is_empty() {
             self.load_children(&mut inner, fs).await?;
         }
-        if iter < inner.children.len() {
-            Ok(inner.children[iter].clone())
-        } else {
-            Err(Errno::ENOENT)
+        let mut ret = vec![];
+        for child in inner.children.iter().skip(index) {
+            ret.push(child.clone());
         }
+        Ok(ret)
     }
 
     async fn create(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {

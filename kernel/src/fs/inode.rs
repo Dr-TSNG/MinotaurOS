@@ -2,6 +2,7 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
+use alloc::vec::Vec;
 use async_trait::async_trait;
 use log::warn;
 use crate::fs::ffi::{InodeMode, TimeSpec};
@@ -105,8 +106,8 @@ pub trait Inode: Send + Sync {
         Err(Errno::EPERM)
     }
 
-    /// 列出目录下编号 `iter` 的文件
-    async fn list(self: Arc<Self>, iter: usize) -> SyscallResult<Arc<dyn Inode>> {
+    /// 列出目录下编号从 `index` 开始的文件
+    async fn list(self: Arc<Self>, index: usize) -> SyscallResult<Vec<Arc<dyn Inode>>> {
         Err(Errno::EPERM)
     }
 

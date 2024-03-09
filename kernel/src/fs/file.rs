@@ -43,6 +43,19 @@ pub enum Seek {
     End(isize),
 }
 
+impl TryFrom<(i32, isize)> for Seek {
+    type Error = Errno;
+
+    fn try_from((whence, offset): (i32, isize)) -> Result<Self, Self::Error> {
+        match whence {
+            0 => Ok(Seek::Set(offset)),
+            1 => Ok(Seek::Cur(offset)),
+            2 => Ok(Seek::End(offset)),
+            _ => Err(Errno::EINVAL),
+        }
+    }
+}
+
 #[async_trait]
 pub trait File: Send + Sync {
     fn metadata(&self) -> &FileMeta;
