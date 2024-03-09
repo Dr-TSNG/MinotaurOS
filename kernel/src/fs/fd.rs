@@ -7,7 +7,7 @@ use crate::fs::ffi::OpenFlags;
 use crate::fs::file::File;
 use crate::result::{Errno, SyscallResult};
 
-pub type FdNum = usize;
+pub type FdNum = i32;
 
 pub struct FdTable {
     table: Vec<Option<FileDescriptor>>,
@@ -50,8 +50,9 @@ impl FdTable {
     }
     
     /// 获取指定位置的文件描述符的可变引用
-    pub fn get(&self, fd: FdNum) -> Option<&FileDescriptor> {
-        self.table.get(fd).and_then(|fd| fd.as_ref())
+    pub fn get(&self, fd: FdNum) -> SyscallResult<&FileDescriptor> {
+        let fd = fd as usize;
+        self.table.get(fd).and_then(Option::as_ref).ok_or(Errno::EBADF)
     }
     
     /// 插入一个文件描述符，返回位置
@@ -64,11 +65,12 @@ impl FdTable {
             self.table.resize(fd + 1, None);
         }
         self.table[fd] = Some(fd_impl);
-        Ok(fd)
+        Ok(fd as i32)
     }
     
     /// 在指定位置插入一个文件描述符，如果位置已经占用，则替换
     pub fn insert(&mut self, fd: FdNum, fd_impl: FileDescriptor) -> SyscallResult {
+        let fd = fd as usize;
         if fd > MAX_FD_NUM {
             return Err(Errno::EBADF);
         }
@@ -81,6 +83,7 @@ impl FdTable {
     
     /// 删除一个文件描述符
     pub fn remove(&mut self, fd: FdNum) -> SyscallResult {
+        let fd = fd as usize;
         if fd >= self.table.len() {
             return Err(Errno::EBADF);
         }
@@ -90,7 +93,7 @@ impl FdTable {
 }
 
 impl FdTable {
-    fn find_slot(&self) -> FdNum {
+    fn find_slot(&self) -> usize {
         for (i, fd) in self.table.iter().enumerate() {
             if fd.is_none() {
                 return i;

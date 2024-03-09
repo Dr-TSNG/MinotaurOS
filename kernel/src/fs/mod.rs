@@ -17,6 +17,7 @@ pub mod ffi;
 pub mod file;
 pub mod file_system;
 pub mod inode;
+pub mod path;
 
 pub fn init() -> MosResult<Arc<MountNamespace>> {
     let root_dev = match DEVICES.read().get(&1) {
@@ -25,6 +26,7 @@ pub fn init() -> MosResult<Arc<MountNamespace>> {
     };
     let mnt_ns = block_on(async_init(root_dev))?;
     info!("File systems initialized");
+    path::path_test();
     Ok(mnt_ns)
 }
 

@@ -10,6 +10,7 @@ use time::*;
 
 use log::warn;
 use num_enum::FromPrimitive;
+use crate::fs::fd::FdNum;
 use crate::result::{Errno, SyscallResult};
 use crate::strace;
 
@@ -135,8 +136,8 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
     match code {
         SyscallCode::Shutdown => syscall!(sys_shutdown),
         SyscallCode::Getcwd => syscall!(sys_getcwd, args[0], args[1]),
-        SyscallCode::Dup => syscall!(sys_dup, args[0]),
-        SyscallCode::Dup3 => syscall!(sys_dup3, args[0], args[1], args[2] as u32),
+        SyscallCode::Dup => syscall!(sys_dup, args[0] as FdNum),
+        SyscallCode::Dup3 => syscall!(sys_dup3, args[0] as FdNum, args[1] as FdNum, args[2] as u32),
         // SyscallCode::Fcntl
         // SyscallCode::Ioctl
         // SyscallCode::Mkdirat
@@ -147,13 +148,13 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Ftruncate
         // SyscallCode::Faccessat
         // SyscallCode::Chdir
-        // SyscallCode::Openat
+        SyscallCode::Openat => async_syscall!(sys_openat, args[0] as i32, args[1], args[2] as u32, args[3] as u32),
         // SyscallCode::Close
         // SyscallCode::Pipe2
         // SyscallCode::Getdents64
         // SyscallCode::Lseek
-        SyscallCode::Read => async_syscall!(read, args[0], args[1], args[2]),
-        SyscallCode::Write => async_syscall!(write, args[0], args[1], args[2]),
+        SyscallCode::Read => async_syscall!(sys_read, args[0] as FdNum, args[1], args[2]),
+        SyscallCode::Write => async_syscall!(sys_write, args[0] as FdNum, args[1], args[2]),
         // SyscallCode::Readv
         // SyscallCode::Writev
         // SyscallCode::Pread64

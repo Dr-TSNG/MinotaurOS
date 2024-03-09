@@ -7,6 +7,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::inode::Inode;
+use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
@@ -44,7 +45,11 @@ impl FileSystemMeta {
 }
 
 impl dyn FileSystem {
+    /// 从根目录开始查找 Inode，忽略挂载点
+    /// 
+    /// 调用此方法时，需保证 `absolute_path` 不含有挂载点，否则应该调用 [Inode::lookup_with_mount]。
     pub async fn lookup_from_root(self: Arc<Self>, absolute_path: &str) -> SyscallResult<Arc<dyn Inode>> {
+        assert!(is_absolute_path(absolute_path));
         let mut inode = self.root().await?;
         if absolute_path == "/" {
             return Ok(inode);
@@ -86,8 +91,9 @@ impl MountNamespace {
         let tree = Mutex::new(MountTree::new(root_fs));
         Self { mnt_ns_id, tree }
     }
-    
+
     pub fn resolve<'a>(&self, absolute_path: &'a str) -> SyscallResult<(Arc<dyn FileSystem>, &'a str)> {
+        assert!(is_absolute_path(absolute_path));
         let tree = self.tree.lock();
         let mut tree = tree.deref();
         let mut path = absolute_path;
@@ -110,15 +116,18 @@ impl MountNamespace {
         }
     }
 
-    pub fn mount(&self, fs: Arc<dyn FileSystem>, path: &str) -> SyscallResult {
+    // TODO: Add to Inode's `mounts` field
+    pub fn mount(&self, fs: Arc<dyn FileSystem>, absolute_path: &str) -> SyscallResult {
+        assert!(is_absolute_path(absolute_path));
         let mut tree = self.tree.lock();
-        Self::do_mount(&mut tree.sub_trees, fs, path)?;
+        Self::do_mount(&mut tree.sub_trees, fs, absolute_path)?;
         Ok(())
     }
 
-    pub fn unmount(&self, path: &str) -> SyscallResult {
+    pub fn unmount(&self, absolute_path: &str) -> SyscallResult {
+        assert!(is_absolute_path(absolute_path));
         let mut tree = self.tree.lock();
-        Self::do_unmount(&mut tree.sub_trees, path)?;
+        Self::do_unmount(&mut tree.sub_trees, absolute_path)?;
         Ok(())
     }
 

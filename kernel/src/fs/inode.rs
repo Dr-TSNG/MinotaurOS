@@ -3,8 +3,10 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use async_trait::async_trait;
+use log::warn;
 use crate::fs::ffi::{InodeMode, TimeSpec};
 use crate::fs::file::File;
+use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
@@ -23,7 +25,6 @@ pub struct InodeMeta {
     pub inner: Mutex<InodeMetaInner>,
 }
 
-#[derive(Default)]
 pub struct InodeMetaInner {
     /// uid
     pub uid: usize,
@@ -40,12 +41,15 @@ pub struct InodeMetaInner {
     /// 文件大小
     pub size: isize,
     /// 父目录
-    pub parent: Option<Weak<dyn Inode>>,
+    pub parent: Weak<dyn Inode>,
     /// 挂载点
     pub mounts: BTreeMap<String, Arc<dyn Inode>>,
 }
 
 impl InodeMeta {
+    /// 创建新的 Inode 元数据
+    /// 
+    /// 若 `parent` 为 `None`，则指向自身
     pub fn new(
         ino: usize,
         dev: usize,
@@ -58,24 +62,21 @@ impl InodeMeta {
         size: isize,
         parent: Option<Weak<dyn Inode>>,
     ) -> Self {
-        Self {
-            ino,
-            dev,
-            mode,
-            name,
-            path,
-            inner: Mutex::new(InodeMetaInner {
-                uid: 0,
-                gid: 0,
-                nlink: 1,
-                atime,
-                mtime,
-                ctime,
-                size,
-                parent,
-                mounts: BTreeMap::new(),
-            }),
+        let mut inner = InodeMetaInner {
+            uid: 0,
+            gid: 0,
+            nlink: 1,
+            atime,
+            mtime,
+            ctime,
+            size,
+            parent: Weak::<FakeInode>::new(),
+            mounts: BTreeMap::new(),
+        };
+        if let Some(parent) = parent {
+            inner.parent = parent;
         }
+        Self { ino, dev, mode, name, path, inner: Mutex::new(inner) }
     }
 }
 
@@ -127,5 +128,49 @@ pub trait Inode: Send + Sync {
     /// 同步修改
     async fn sync(&self) -> SyscallResult {
         Err(Errno::EPERM)
+    }
+}
+
+impl dyn Inode {
+    pub async fn lookup_with_mount(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+        let inode = self.metadata().inner.lock().mounts.get(name).map(Arc::clone);
+        match inode {
+            Some(inode) => Ok(inode),
+            None => self.lookup(name).await,
+        }
+    }
+    
+    pub async fn lookup_relative(self: Arc<Self>, relative_path: &str) -> SyscallResult<Arc<dyn Inode>> {
+        assert!(!is_absolute_path(relative_path));
+        let mut inode = self;
+        for name in relative_path.split('/') {
+            assert!(!name.is_empty());
+            match name {
+                "." => {}
+                ".." => {
+                    let parent = inode.metadata().inner.lock().parent.clone();
+                    inode = match parent.upgrade() {
+                        Some(parent) => parent,
+                        None => {
+                            warn!(
+                                "[lookup_relative] Cannot upgrade parent inode for {}",
+                                inode.metadata().path,
+                            );
+                            return Err(Errno::ENOENT);
+                        }
+                    }
+                }
+                _ => inode = inode.lookup_with_mount(name).await?,
+            }
+        }
+        Ok(inode)
+    }
+}
+
+struct FakeInode;
+
+impl Inode for FakeInode {
+    fn metadata(&self) -> &InodeMeta {
+        unimplemented!("Fake")
     }
 }

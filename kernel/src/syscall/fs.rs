@@ -1,5 +1,8 @@
+use log::trace;
 use crate::arch::VirtAddr;
-use crate::fs::ffi::{OpenFlags, PATH_MAX};
+use crate::fs::fd::{FdNum, FileDescriptor};
+use crate::fs::ffi::{InodeMode, OpenFlags, PATH_MAX};
+use crate::fs::path::resolve_path;
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 
@@ -21,13 +24,13 @@ pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
     Ok(buf)
 }
 
-pub fn sys_dup(fd: usize) -> SyscallResult<usize> {
+pub fn sys_dup(fd: FdNum) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd).ok_or(Errno::EBADF)?.dup(false);
-    proc_inner.fd_table.put(fd_impl)
+    let fd_impl = proc_inner.fd_table.get(fd)?.dup(false);
+    proc_inner.fd_table.put(fd_impl).map(|fd| fd as usize)
 }
 
-pub fn sys_dup3(old_fd: usize, new_fd: usize, flags: u32) -> SyscallResult<usize> {
+pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize> {
     if old_fd == new_fd {
         return Err(Errno::EINVAL);
     }
@@ -40,14 +43,38 @@ pub fn sys_dup3(old_fd: usize, new_fd: usize, flags: u32) -> SyscallResult<usize
         }
     }).ok_or(Errno::EINVAL)?;
     let mut proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(old_fd).ok_or(Errno::EBADF)?.dup(cloexec);
+    let fd_impl = proc_inner.fd_table.get(old_fd)?.dup(cloexec);
     proc_inner.fd_table.insert(new_fd, fd_impl)?;
-    Ok(new_fd)
+    Ok(new_fd as usize)
 }
 
-pub async fn read(fd: usize, buf: usize, len: usize) -> SyscallResult<usize> {
+pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> SyscallResult<usize> {
+    let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
+    let mut proc_inner = current_process().inner.lock();
+    let path = match path {
+        0 => ".",
+        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
+    };
+    trace!("openat: dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
+    let inode = resolve_path(&mut proc_inner, dirfd, path).await?;
+    if flags.contains(OpenFlags::O_DIRECTORY) {
+        if inode.metadata().mode != InodeMode::DIR {
+            return Err(Errno::ENOTDIR);
+        }
+    } else {
+        if inode.metadata().mode == InodeMode::DIR {
+            return Err(Errno::EISDIR);
+        }
+    }
+    let file = inode.open()?;
+    let fd_impl = FileDescriptor::new(file, flags);
+    let fd = proc_inner.fd_table.put(fd_impl)?;
+    Ok(fd as usize)
+}
+
+pub async fn sys_read(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd).ok_or(Errno::EBADF)?;
+    let fd_impl = proc_inner.fd_table.get(fd)?;
     if !fd_impl.flags.readable() {
         return Err(Errno::EBADF);
     }
@@ -56,9 +83,9 @@ pub async fn read(fd: usize, buf: usize, len: usize) -> SyscallResult<usize> {
     Ok(ret as usize)
 }
 
-pub async fn write(fd: usize, buf: usize, len: usize) -> SyscallResult<usize> {
+pub async fn sys_write(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd).ok_or(Errno::EBADF)?;
+    let fd_impl = proc_inner.fd_table.get(fd)?;
     if !fd_impl.flags.writable() {
         return Err(Errno::EBADF);
     }
