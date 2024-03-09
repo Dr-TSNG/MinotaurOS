@@ -18,7 +18,7 @@ _start:
 
 .section .bss.stack
 boot_stack:
-    .space 4096 * 16
+    .space 4096 * 32
 boot_stack_top:
 
 .section .rodata

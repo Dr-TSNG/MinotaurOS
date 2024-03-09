@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use alloc::collections::BTreeSet;
+use alloc::collections::BTreeMap;
 use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -41,7 +41,7 @@ pub struct AddressSpace {
     /// 与地址空间关联的 ASID
     asid: ASID,
     /// 地址空间中的区域
-    regions: BTreeSet<Box<dyn ASRegion>>,
+    regions: BTreeMap<VirtPageNum, Box<dyn ASRegion>>,
     /// 该地址空间关联的页表帧
     pt_dirs: Vec<HeapFrameTracker>,
 }
@@ -53,23 +53,15 @@ impl AddressSpace {
         let mut addrs = AddressSpace {
             root_pt: PageTable::new(root_pt_page.ppn),
             asid: 0,
-            regions: BTreeSet::new(),
+            regions: BTreeMap::new(),
             pt_dirs: vec![],
         };
         addrs.pt_dirs.push(root_pt_page);
         addrs.copy_global_mappings()?;
-        for region in addrs.regions.iter() {
+        for region in addrs.regions.values() {
             let start = region.metadata().start;
             let end = start + region.metadata().pages;
             trace!("AddressSpace: {:?} {:x?} - {:x?}", region.metadata().name, start, end)
-        }
-        Ok(addrs)
-    }
-
-    pub fn from(another: &Self) -> MosResult<AddressSpace> {
-        let mut addrs = Self::new_bare()?;
-        for region in another.regions.iter() {
-            addrs.regions.insert(region.copy()?);
         }
         Ok(addrs)
     }
@@ -166,6 +158,15 @@ impl AddressSpace {
         Ok((addrs, entry_point, ustack_top, auxv))
     }
 
+    pub fn fork(&mut self) -> MosResult<AddressSpace> {
+        let mut forked = Self::new_bare()?;
+        for region in self.regions.values_mut() {
+            let forked_region = region.fork(self.root_pt)?;
+            forked.map_region(forked_region)?;
+        }
+        Ok(forked)
+    }
+
     pub unsafe fn activate(&self) {
         satp::set(satp::Mode::Sv39, self.asid as usize, self.root_pt.ppn.0);
         asm!("sfence.vma");
@@ -207,24 +208,24 @@ impl AddressSpace {
 
     pub fn map_region(&mut self, region: Box<dyn ASRegion>) -> MosResult {
         let dirs = region.map(self.root_pt)?;
-        self.regions.insert(region);
+        self.regions.insert(region.metadata().start, region);
         self.pt_dirs.extend(dirs);
         Ok(())
     }
 
     pub fn unmap_region(&mut self, start: VirtPageNum) -> MosResult<Box<dyn ASRegion>> {
         let region = self.regions
-            .extract_if(|region| region.metadata().start == start)
-            .next()
-            .ok_or(MosError::BadAddress(VirtAddr::from(start)))?;
+            .remove(&start)
+            .ok_or(MosError::BadAddress(start.into()))?;
         region.unmap(self.root_pt)?;
         Ok(region)
     }
     
     pub fn handle_page_fault(&mut self, addr: VirtAddr, perform: ASPerms) -> MosResult {
         let vpn = addr.floor();
-        let mut region = self.regions
-            .extract_if(|region| region.metadata().start <= vpn && region.metadata().end() > vpn)
+        let region = self.regions
+            .values_mut()
+            .filter(|region| region.metadata().start <= vpn && region.metadata().end() > vpn)
             .next()
             .ok_or(MosError::BadAddress(addr))?;
         
@@ -233,7 +234,6 @@ impl AddressSpace {
         } else {
             Err(MosError::PageAccessDenied(addr.into()))
         };
-        self.regions.insert(region);
         result
     }
 
@@ -241,7 +241,7 @@ impl AddressSpace {
         let vpn_start = start.floor();
         let vpn_end = end.floor();
         let mut cur = vpn_start;
-        for region in self.regions.iter() {
+        for region in self.regions.values() {
             let metadata = region.metadata();
             if metadata.start > cur {
                 return Err(Errno::EFAULT);

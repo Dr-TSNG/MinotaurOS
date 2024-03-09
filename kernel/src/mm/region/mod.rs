@@ -24,7 +24,7 @@ pub trait ASRegion: Send + Sync {
     fn unmap(&self, root_pt: PageTable) -> MosResult;
 
     /// 拷贝区域
-    fn copy(&self) -> MosResult<Box<dyn ASRegion>>;
+    fn fork(&mut self, parent_pt: PageTable) -> MosResult<Box<dyn ASRegion>>;
 
     /// 错误处理
     fn fault_handler(&mut self, _root_pt: PageTable, vpn: VirtPageNum) -> MosResult {

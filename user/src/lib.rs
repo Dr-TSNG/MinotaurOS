@@ -7,6 +7,7 @@ pub mod syscall;
 extern crate alloc;
 
 use alloc::vec::Vec;
+use core::mem::size_of;
 use buddy_system_allocator::LockedHeap;
 use crate::syscall::sys_exit;
 
@@ -26,7 +27,7 @@ pub extern "C" fn _start(argc: usize, argv: usize) {
     let mut v: Vec<&'static str> = Vec::new();
     for i in 0..argc {
         let str_start =
-            unsafe { ((argv + i * core::mem::size_of::<usize>()) as *const usize).read_volatile() };
+            unsafe { ((argv + i * size_of::<usize>()) as *const usize).read_volatile() };
         let len = (0usize..)
             .find(|i| unsafe { ((str_start + *i) as *const u8).read_volatile() == 0 })
             .unwrap();

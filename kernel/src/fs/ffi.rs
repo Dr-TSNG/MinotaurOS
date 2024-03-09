@@ -1,3 +1,4 @@
+use core::mem::size_of;
 use core::time::Duration;
 use bitflags::bitflags;
 use lazy_static::lazy_static;
@@ -111,7 +112,7 @@ pub enum InodeMode {
 pub const AT_FDCWD: i32 = -100;
 pub const PATH_MAX: usize = 260;
 pub const MAX_NAME_LEN: usize = 256;
-pub const DIRENT_SIZE: usize = core::mem::size_of::<LinuxDirent>();
+pub const DIRENT_SIZE: usize = size_of::<LinuxDirent>();
 
 #[repr(C)]
 pub struct LinuxDirent {

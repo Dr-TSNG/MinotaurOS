@@ -51,9 +51,8 @@ impl ASRegion for DirectRegion {
         Ok(())
     }
 
-    fn copy(&self) -> MosResult<Box<dyn ASRegion>> {
-        let other_region = self.clone();
-        Ok(Box::new(other_region))
+    fn fork(&mut self, _parent_pt: PageTable) -> MosResult<Box<dyn ASRegion>> {
+        Ok(Box::new(self.clone()))
     }
 }
 

@@ -9,6 +9,7 @@ use crate::result::{Errno, SyscallResult};
 
 pub type FdNum = i32;
 
+#[derive(Clone)]
 pub struct FdTable {
     table: Vec<Option<FileDescriptor>>,
 }

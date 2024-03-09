@@ -1,5 +1,7 @@
+use log::debug;
+use crate::process::ffi::CloneFlags;
 use crate::processor::{current_process, current_thread};
-use crate::result::SyscallResult;
+use crate::result::{Errno, SyscallResult};
 use crate::sched::yield_now;
 
 pub fn sys_exit(exit_code: i8) -> SyscallResult<usize> {
@@ -39,4 +41,20 @@ pub fn sys_getegid() -> SyscallResult<usize> {
 
 pub fn sys_gettid() -> SyscallResult<usize> {
     Ok(current_thread().tid.0)
+}
+
+pub fn sys_clone(
+    flags: u32,
+    stack: usize,
+    ptid: usize,
+    tls: usize,
+    ctid: usize,
+) -> SyscallResult<usize> {
+    let flags = CloneFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
+    debug!("[sys_clone] flags: {:?}", flags);
+    if flags.contains(CloneFlags::CLONE_VM) {
+        current_process().clone_thread(flags, stack, tls, ptid, ctid)
+    } else {
+        current_process().fork_process(flags, stack)
+    }
 }

@@ -50,8 +50,37 @@ impl ASRegion for LazyRegion {
         Ok(())
     }
 
-    fn copy(&self) -> MosResult<Box<dyn ASRegion>> {
-        todo!()
+    fn fork(&mut self, parent_pt: PageTable) -> MosResult<Box<dyn ASRegion>> {
+        let mut new_pages = vec![];
+        let mut remap = vec![];
+        for (i, page) in self.pages.iter_mut().enumerate() {
+            let mut temp = PageState::Free;
+            core::mem::swap(&mut temp, page);
+            let new_page = match temp {
+                PageState::Free => PageState::Free,
+                PageState::Framed(tracker) => {
+                    remap.push(i);
+                    let tracker = Arc::new(tracker);
+                    temp = PageState::CopyOnWrite(tracker.clone());
+                    PageState::CopyOnWrite(tracker)
+                }
+                PageState::CopyOnWrite(tracker) => {
+                    temp = PageState::CopyOnWrite(tracker.clone());
+                    PageState::CopyOnWrite(tracker)
+                }
+            };
+            core::mem::swap(&mut temp, page);
+            new_pages.push(new_page);
+        }
+        for i in remap {
+            let vpn = self.metadata.start + i;
+            self.map_one(parent_pt, &new_pages[i], vpn, true)?;
+        }
+        let new_region = LazyRegion {
+            metadata: self.metadata.clone(),
+            pages: new_pages,
+        };
+        Ok(Box::new(new_region))
     }
 
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> MosResult<()> {
@@ -61,9 +90,8 @@ impl ASRegion for LazyRegion {
         match temp {
             PageState::Free => {
                 temp = PageState::Framed(alloc_user_frames(1)?);
-            },
+            }
             PageState::CopyOnWrite(tracker) => {
-                self.unmap_one(root_pt, vpn)?;
                 let new_tracker = alloc_user_frames(1)?;
                 new_tracker.ppn.byte_array().copy_from_slice(tracker.ppn.byte_array());
                 temp = PageState::Framed(new_tracker);
@@ -120,7 +148,7 @@ impl LazyRegion {
         &self,
         mut pt: PageTable,
         page: &PageState,
-        vpn: VirtPageNum, 
+        vpn: VirtPageNum,
         remap: bool,
     ) -> MosResult<Vec<HeapFrameTracker>> {
         let mut dirs = vec![];
