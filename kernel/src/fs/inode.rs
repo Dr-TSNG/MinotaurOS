@@ -9,6 +9,7 @@ use crate::fs::ffi::{InodeMode, TimeSpec};
 use crate::fs::file::File;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
+use crate::split_path;
 use crate::sync::mutex::Mutex;
 
 pub struct InodeMeta {
@@ -144,10 +145,8 @@ impl dyn Inode {
     pub async fn lookup_relative(self: Arc<Self>, relative_path: &str) -> SyscallResult<Arc<dyn Inode>> {
         assert!(!is_absolute_path(relative_path));
         let mut inode = self;
-        for name in relative_path.split('/') {
-            assert!(!name.is_empty());
+        for name in split_path!(relative_path) {
             match name {
-                "." => {}
                 ".." => {
                     let parent = inode.metadata().inner.lock().parent.clone();
                     inode = match parent.upgrade() {

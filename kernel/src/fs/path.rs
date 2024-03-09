@@ -8,6 +8,13 @@ use crate::fs::inode::Inode;
 use crate::process::ProcessInner;
 use crate::result::SyscallResult;
 
+#[macro_export]
+macro_rules! split_path {
+    ($path:expr) => {
+        $path.split('/').filter(|s| !s.is_empty() && *s != ".")
+    };
+}
+
 pub async fn resolve_path(proc_inner: &ProcessInner, dirfd: FdNum, path: &str) -> SyscallResult<Arc<dyn Inode>> {
     let path = normalize_path(path);
     let path = path.as_ref();
@@ -38,9 +45,8 @@ fn normalize_path(path: &str) -> String {
     let mut result = vec![];
     let mut parents = 0;
 
-    for name in path.split('/') {
+    for name in split_path!(path) {
         match name {
-            "" | "." => {}
             ".." => {
                 if result.is_empty() {
                     parents += 1;

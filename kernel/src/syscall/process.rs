@@ -1,5 +1,6 @@
 use alloc::ffi::CString;
 use alloc::vec::Vec;
+use core::mem::size_of;
 use log::debug;
 use crate::arch::VirtAddr;
 use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
@@ -72,10 +73,13 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     }
     let push_args = |args_vec: &mut Vec<CString>, mut arg_ptr: usize| -> SyscallResult {
         loop {
-            let arg = proc_inner.addr_space.user_slice_str(VirtAddr(arg_ptr), PATH_MAX)?;
+            proc_inner.addr_space.user_slice_r(VirtAddr(arg_ptr), size_of::<usize>())?;
+            let arg_addr = unsafe { *(arg_ptr as *const usize) };
+            if arg_addr == 0 { break; }
+            let arg = proc_inner.addr_space.user_slice_str(VirtAddr(arg_addr), PATH_MAX)?;
             if arg.is_empty() { break; }
             args_vec.push(CString::new(arg).unwrap());
-            arg_ptr += arg.len() + 1;
+            arg_ptr += size_of::<usize>();
         }
         Ok(())
     };
@@ -86,9 +90,11 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     if inode.metadata().mode == InodeMode::DIR {
         return Err(Errno::EISDIR);
     }
+
+    drop(proc_inner);
     let file = inode.open()?;
     let elf_data = file.read_all().await?;
-    current_process().execve(&elf_data, &args_vec, &envs_vec)?;
+    current_process().execve(&elf_data, &args_vec, &envs_vec).await?;
 
     Ok(0)
 }

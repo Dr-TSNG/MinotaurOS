@@ -61,8 +61,9 @@ pub struct ProcessInner {
 }
 
 impl Process {
-    pub fn new_initproc(mnt_ns: Arc<MountNamespace>, elf_data: &[u8]) -> MosResult<Arc<Self>> {
-        let (addr_space, entry, user_sp, _) = AddressSpace::from_elf(elf_data)?;
+    pub async fn new_initproc(mnt_ns: Arc<MountNamespace>, elf_data: &[u8]) -> MosResult<Arc<Self>> {
+        let (addr_space, entry, user_sp, _) =
+            AddressSpace::from_elf(&mnt_ns, elf_data).await?;
         let pid = Arc::new(TidTracker::new());
 
         let process = Arc::new(Process {
@@ -93,13 +94,15 @@ impl Process {
         Ok(process.clone())
     }
 
-    pub fn execve(
+    pub async fn execve(
         &self,
         elf_data: &[u8],
         args: &[CString],
         envs: &[CString],
     ) -> SyscallResult<()> {
-        let (addr_space, entry, mut user_sp, mut auxv) = AddressSpace::from_elf(elf_data).unwrap();
+        let mnt_ns = self.inner.lock().mnt_ns.clone();
+        let (addr_space, entry, mut user_sp, mut auxv) =
+            AddressSpace::from_elf(&mnt_ns, elf_data).await.unwrap();
 
         current_process().inner.lock().apply_mut(|proc_inner| {
             if proc_inner.threads.len() > 1 {

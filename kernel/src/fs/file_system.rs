@@ -9,6 +9,7 @@ use crate::fs::ffi::VfsFlags;
 use crate::fs::inode::Inode;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
+use crate::split_path;
 use crate::sync::mutex::Mutex;
 
 pub enum FileSystemType {
@@ -51,10 +52,7 @@ impl dyn FileSystem {
     pub async fn lookup_from_root(self: Arc<Self>, absolute_path: &str) -> SyscallResult<Arc<dyn Inode>> {
         assert!(is_absolute_path(absolute_path));
         let mut inode = self.root().await?;
-        if absolute_path == "/" {
-            return Ok(inode);
-        }
-        for name in absolute_path.split('/') {
+        for name in split_path!(absolute_path) {
             inode = inode.lookup(name).await?;
         }
         Ok(inode)

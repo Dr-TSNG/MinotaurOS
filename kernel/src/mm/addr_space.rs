@@ -12,7 +12,8 @@ use riscv::register::satp;
 use xmas_elf::ElfFile;
 use crate::arch::{paddr_to_kvaddr, PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::board::{GLOBAL_MAPPINGS, PHYS_MEMORY};
-use crate::config::{USER_HEAP_SIZE, USER_STACK_SIZE};
+use crate::config::{DYNAMIC_LINKER_BASE, USER_HEAP_SIZE, USER_STACK_SIZE};
+use crate::fs::file_system::MountNamespace;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::page_table::PageTable;
 use crate::mm::region::{ASRegion, ASRegionMeta};
@@ -50,71 +51,78 @@ impl AddressSpace {
     pub fn new_bare() -> MosResult<Self> {
         let root_pt_page = alloc_kernel_frames(1)?;
         debug!("AddressSpace: create root page table {:?}", root_pt_page.ppn);
-        let mut addrs = AddressSpace {
+        let mut addr_space = AddressSpace {
             root_pt: PageTable::new(root_pt_page.ppn),
             asid: 0,
             regions: BTreeMap::new(),
             pt_dirs: vec![],
         };
-        addrs.pt_dirs.push(root_pt_page);
-        addrs.copy_global_mappings()?;
-        for region in addrs.regions.values() {
+        addr_space.pt_dirs.push(root_pt_page);
+        addr_space.copy_global_mappings()?;
+        for region in addr_space.regions.values() {
             let start = region.metadata().start;
             let end = start + region.metadata().pages;
             trace!("AddressSpace: {:?} {:x?} - {:x?}", region.metadata().name, start, end)
         }
-        Ok(addrs)
+        Ok(addr_space)
     }
 
-    pub fn from_elf(data: &[u8]) -> MosResult<(Self, usize, usize, Vec<Aux>)> {
-        let mut addrs = Self::new_bare()?;
+    pub async fn from_elf(
+        mnt_ns: &MountNamespace,
+        data: &[u8],
+    ) -> MosResult<(Self, usize, usize, Vec<Aux>)> {
+        let mut addr_space = Self::new_bare()?;
         let elf = ElfFile::new(data).map_err(InvalidExecutable)?;
         let mut auxv: Vec<Aux> = Vec::with_capacity(64);
-
         let ph_count = elf.header.pt2.ph_count();
 
-        // TODO: 动态链接
-        let mut linker_base = 0;
-        let mut entry_point = elf.header.pt2.entry_point() as usize;
-
-        let mut max_end_vpn = VirtPageNum(0);
+        let mut entry = elf.header.pt2.entry_point() as usize;
         let mut load_base = 0;
+        let mut linker_base = 0;
+        let mut max_end_vpn = VirtPageNum(0);
         for i in 0..ph_count {
             let phdr = elf.program_header(i).map_err(InvalidExecutable)?;
-            if phdr.get_type().map_err(InvalidExecutable)? == xmas_elf::program::Type::Load {
-                let start_addr = VirtAddr(phdr.virtual_addr() as usize);
-                let end_addr = VirtAddr((phdr.virtual_addr() + phdr.mem_size()) as usize);
-                let start_vpn = VirtPageNum::from(start_addr);
-                let end_vpn = end_addr.ceil();
-                if load_base == 0 {
-                    load_base = start_addr.0;
-                }
+            match phdr.get_type().map_err(InvalidExecutable)? {
+                xmas_elf::program::Type::Load => {
+                    let start_addr = VirtAddr(phdr.virtual_addr() as usize);
+                    let end_addr = VirtAddr((phdr.virtual_addr() + phdr.mem_size()) as usize);
+                    let start_vpn = start_addr.floor();
+                    let end_vpn = end_addr.ceil();
+                    if load_base == 0 {
+                        load_base = start_addr.0;
+                    }
 
-                let mut perms = ASPerms::U;
-                let ph_flags = phdr.flags();
-                if ph_flags.is_read() {
-                    perms |= ASPerms::R;
+                    let mut perms = ASPerms::U;
+                    let ph_flags = phdr.flags();
+                    if ph_flags.is_read() {
+                        perms |= ASPerms::R;
+                    }
+                    if ph_flags.is_write() {
+                        perms |= ASPerms::W;
+                    }
+                    if ph_flags.is_execute() {
+                        perms |= ASPerms::X;
+                    }
+                    let buf = &elf
+                        .input[phdr.offset() as usize..(phdr.offset() + phdr.file_size()) as usize];
+                    let region = LazyRegion::new_framed(
+                        ASRegionMeta {
+                            name: None,
+                            perms,
+                            start: start_vpn,
+                            pages: (end_vpn - start_vpn).0,
+                        },
+                        Some(buf),
+                    )?;
+                    max_end_vpn = region.metadata().end();
+                    addr_space.map_region(region)?;
+                    debug!("Map elf section: {:?} - {:?}", start_vpn, end_vpn);
                 }
-                if ph_flags.is_write() {
-                    perms |= ASPerms::W;
+                xmas_elf::program::Type::Interp => {
+                    linker_base = DYNAMIC_LINKER_BASE;
+                    entry = addr_space.load_linker(mnt_ns, linker_base).await?;
                 }
-                if ph_flags.is_execute() {
-                    perms |= ASPerms::X;
-                }
-                let buf = &elf
-                    .input[phdr.offset() as usize..(phdr.offset() + phdr.file_size()) as usize];
-                let region = LazyRegion::new_framed(
-                    ASRegionMeta {
-                        name: None,
-                        perms,
-                        start: start_vpn,
-                        pages: (end_vpn - start_vpn).0,
-                    },
-                    Some(buf),
-                )?;
-                max_end_vpn = region.metadata().end();
-                addrs.map_region(region)?;
-                debug!("Map elf section: {:?} - {:?}", start_vpn, end_vpn);
+                _ => {}
             }
         }
 
@@ -128,7 +136,7 @@ impl AddressSpace {
             start: ustack_bottom_vpn,
             pages: (ustack_top_vpn - ustack_bottom_vpn).0,
         });
-        addrs.map_region(region)?;
+        addr_space.map_region(region)?;
         debug!("Map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
 
         // 映射用户堆
@@ -140,7 +148,7 @@ impl AddressSpace {
             start: uheap_bottom_vpn,
             pages: (uheap_top_vpn - uheap_bottom_vpn).0,
         });
-        addrs.map_region(region)?;
+        addr_space.map_region(region)?;
         debug!("Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
 
         auxv.push(Aux::new(aux::AT_PHDR, load_base + elf.header.pt2.ph_offset() as usize));
@@ -155,7 +163,7 @@ impl AddressSpace {
         auxv.push(Aux::new(aux::AT_GID, 0));
         auxv.push(Aux::new(aux::AT_EGID, 0));
 
-        Ok((addrs, entry_point, ustack_top, auxv))
+        Ok((addr_space, entry, ustack_top, auxv))
     }
 
     pub fn fork(&mut self) -> MosResult<AddressSpace> {
@@ -172,40 +180,6 @@ impl AddressSpace {
         asm!("sfence.vma");
     }
 
-    fn copy_global_mappings(&mut self) -> MosResult {
-        for map in GLOBAL_MAPPINGS.iter() {
-            debug!("Copy global mappings: {} from {:?} to {:?}", map.name, map.phys_start, map.phys_end());
-            let ppn_start = PhysPageNum::from(map.phys_start);
-            let vpn_start = VirtPageNum::from(map.virt_start);
-            let vpn_end = VirtPageNum::from(map.virt_end);
-
-            let metadata = ASRegionMeta {
-                name: Some(map.name.to_string()),
-                perms: map.perms,
-                start: vpn_start,
-                pages: (vpn_end - vpn_start).0,
-            };
-            let region = DirectRegion::new(metadata, ppn_start);
-            self.map_region(region)?;
-        }
-        for (paddr_start, paddr_end) in PHYS_MEMORY.iter() {
-            debug!("Copy global mappings: [physical] from {:?} to {:?}", paddr_start, paddr_end);
-            let ppn_start = PhysPageNum::from(*paddr_start);
-            let vpn_start = VirtPageNum::from(paddr_to_kvaddr(*paddr_start));
-            let vpn_end = VirtPageNum::from(paddr_to_kvaddr(*paddr_end));
-            
-            let metadata = ASRegionMeta {
-                name: Some("[physical]".to_string()),
-                perms: ASPerms::R | ASPerms::W,
-                start: vpn_start,
-                pages: (vpn_end - vpn_start).0,
-            };
-            let region = DirectRegion::new(metadata, ppn_start);
-            self.map_region(region)?;
-        }
-        Ok(())
-    }
-
     pub fn map_region(&mut self, region: Box<dyn ASRegion>) -> MosResult {
         let dirs = region.map(self.root_pt)?;
         self.regions.insert(region.metadata().start, region);
@@ -220,7 +194,7 @@ impl AddressSpace {
         region.unmap(self.root_pt)?;
         Ok(region)
     }
-    
+
     pub fn handle_page_fault(&mut self, addr: VirtAddr, perform: ASPerms) -> MosResult {
         let vpn = addr.floor();
         let region = self.regions
@@ -228,7 +202,7 @@ impl AddressSpace {
             .filter(|region| region.metadata().start <= vpn && region.metadata().end() > vpn)
             .next()
             .ok_or(MosError::BadAddress(addr))?;
-        
+
         let result = if region.metadata().perms.contains(perform) {
             region.fault_handler(self.root_pt, vpn)
         } else {
@@ -239,7 +213,7 @@ impl AddressSpace {
 
     pub fn check_addr_valid(&self, start: VirtAddr, end: VirtAddr, perms: ASPerms) -> SyscallResult<()> {
         let vpn_start = start.floor();
-        let vpn_end = end.floor();
+        let vpn_end = end.ceil();
         let mut cur = vpn_start;
         for region in self.regions.values() {
             let metadata = region.metadata();
@@ -281,5 +255,85 @@ impl AddressSpace {
             cur_len = min(cur_len + PAGE_SIZE, max_len);
         }
         Err(Errno::EINVAL)
+    }
+}
+
+impl AddressSpace {
+    fn copy_global_mappings(&mut self) -> MosResult {
+        for map in GLOBAL_MAPPINGS.iter() {
+            debug!("Copy global mappings: {} from {:?} to {:?}", map.name, map.phys_start, map.phys_end());
+            let ppn_start = PhysPageNum::from(map.phys_start);
+            let vpn_start = VirtPageNum::from(map.virt_start);
+            let vpn_end = VirtPageNum::from(map.virt_end);
+
+            let metadata = ASRegionMeta {
+                name: Some(map.name.to_string()),
+                perms: map.perms,
+                start: vpn_start,
+                pages: (vpn_end - vpn_start).0,
+            };
+            let region = DirectRegion::new(metadata, ppn_start);
+            self.map_region(region)?;
+        }
+        for (paddr_start, paddr_end) in PHYS_MEMORY.iter() {
+            debug!("Copy global mappings: [physical] from {:?} to {:?}", paddr_start, paddr_end);
+            let ppn_start = PhysPageNum::from(*paddr_start);
+            let vpn_start = VirtPageNum::from(paddr_to_kvaddr(*paddr_start));
+            let vpn_end = VirtPageNum::from(paddr_to_kvaddr(*paddr_end));
+
+            let metadata = ASRegionMeta {
+                name: Some("[physical]".to_string()),
+                perms: ASPerms::R | ASPerms::W,
+                start: vpn_start,
+                pages: (vpn_end - vpn_start).0,
+            };
+            let region = DirectRegion::new(metadata, ppn_start);
+            self.map_region(region)?;
+        }
+        Ok(())
+    }
+
+    async fn load_linker(&mut self, mnt_ns: &MountNamespace, offset: usize) -> MosResult<usize> {
+        let (fs, path) = mnt_ns.resolve("/libc.so").unwrap();
+        let inode = fs.lookup_from_root(&path).await.unwrap();
+        let file = inode.open().unwrap();
+        let elf_data = file.read_all().await.unwrap();
+        let elf = ElfFile::new(&elf_data).map_err(InvalidExecutable)?;
+        let ph_count = elf.header.pt2.ph_count();
+
+        for i in 0..ph_count {
+            let phdr = elf.program_header(i).map_err(InvalidExecutable)?;
+            if phdr.get_type().map_err(InvalidExecutable)? == xmas_elf::program::Type::Load {
+                let start_addr = VirtAddr(phdr.virtual_addr() as usize + offset);
+                let end_addr = VirtAddr((phdr.virtual_addr() + phdr.mem_size()) as usize + offset);
+                let start_vpn = start_addr.floor();
+                let end_vpn = end_addr.ceil();
+
+                let mut perms = ASPerms::U;
+                let ph_flags = phdr.flags();
+                if ph_flags.is_read() {
+                    perms |= ASPerms::R;
+                }
+                if ph_flags.is_write() {
+                    perms |= ASPerms::W;
+                }
+                if ph_flags.is_execute() {
+                    perms |= ASPerms::X;
+                }
+                let buf = &elf
+                    .input[phdr.offset() as usize..(phdr.offset() + phdr.file_size()) as usize];
+                let region = LazyRegion::new_framed(
+                    ASRegionMeta {
+                        name: None,
+                        perms,
+                        start: start_vpn,
+                        pages: (end_vpn - start_vpn).0,
+                    },
+                    Some(buf),
+                )?;
+                self.map_region(region)?;
+            }
+        }
+        Ok(elf.header.pt2.entry_point() as usize + offset)
     }
 }

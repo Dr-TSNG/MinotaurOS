@@ -70,8 +70,8 @@ pub async fn trap_from_user() {
 
 fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
     debug!("User page fault at {:?} for {:?}", addr, perform);
-    let mut inner = current_process().inner.lock();
-    match inner.addr_space.handle_page_fault(addr, perform) {
+    let mut proc_inner = current_process().inner.lock();
+    match proc_inner.addr_space.handle_page_fault(addr, perform) {
         Ok(()) => debug!("Page fault resolved"),
         Err(e) => {
             error!("Fatal page fault failed, send SIGSEGV: {:?}", e);
