@@ -118,7 +118,7 @@ impl Inode for FAT32Inode {
                 offset -= fs.fat32meta.bytes_per_cluster;
                 continue;
             }
-            let next = min(fs.fat32meta.bytes_per_cluster - offset, buf.len() - cur);
+            let next = min(cur + fs.fat32meta.bytes_per_cluster - offset, buf.len());
             if let Err(e) = fs.read_data(*cluster, &mut buf[cur..next], offset).await {
                 error!("IO Error: {:?}", e);
                 return Err(Errno::EIO);

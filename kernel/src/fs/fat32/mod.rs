@@ -88,7 +88,7 @@ impl FAT32FileSystem {
                     offset -= BLOCK_SIZE;
                     continue;
                 }
-                let next = min(BLOCK_SIZE - offset, buf.len() - cur);
+                let next = min(cur + BLOCK_SIZE - offset, buf.len());
                 self.cache.read_block(block_id, &mut buf[cur..next], offset).await?;
                 offset = 0;
                 cur = next;
@@ -118,7 +118,7 @@ impl FAT32FileSystem {
                     offset -= BLOCK_SIZE;
                     continue;
                 }
-                let next = min(BLOCK_SIZE - offset, buf.len() - cur);
+                let next = min(cur + BLOCK_SIZE - offset, buf.len());
                 self.cache.write_block(block_id, &buf[cur..next], offset).await?;
                 offset = 0;
                 cur = next;
