@@ -41,7 +41,7 @@ pub async fn trap_from_user() {
                     ctx.user_x[15],
                 ],
             ).await;
-            // exec 会改变当前线程，所以需要重新获取
+            // clone 会改变当前线程，所以需要重新获取
             ctx = current_trap_ctx();
             ctx.user_x[10] = result.unwrap_or_else(|err| -(err as isize) as usize)
         }

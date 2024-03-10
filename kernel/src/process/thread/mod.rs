@@ -17,8 +17,15 @@ pub struct Thread {
 
 pub struct ThreadInner {
     pub trap_ctx: TrapContext,
+    pub tid_address: TidAddress,
     pub rusage: ResourceUsage,
     pub exit_code: Option<i8>,
+}
+
+#[derive(Default)]
+pub struct TidAddress {
+    pub set_tid_address: Option<usize>,
+    pub clear_tid_address: Option<usize>,
 }
 
 unsafe impl Send for Thread {}
@@ -33,6 +40,7 @@ impl Thread {
         let tid = tid.unwrap_or(Arc::new(TidTracker::new()));
         let inner = ThreadInner {
             trap_ctx,
+            tid_address: TidAddress::default(),
             rusage: ResourceUsage::new(),
             exit_code: None,
         };

@@ -263,15 +263,22 @@ impl Process {
             trap_ctx.user_x[4] = tls;
 
             let new_thread = Thread::new(self.clone(), trap_ctx, None);
-            proc_inner.threads.insert(new_thread.tid.0, Arc::downgrade(&new_thread));
+            let new_tid = new_thread.tid.0;
+            proc_inner.threads.insert(new_tid, Arc::downgrade(&new_thread));
 
             if flags.contains(CloneFlags::CLONE_PARENT_SETTID) {
-                proc_inner.addr_space.user_slice_w(VirtAddr(ptid), size_of::<usize>())?;
-                unsafe {
-                    *(ptid as *mut usize) = new_thread.tid.0;
-                }
+                let buf = proc_inner.addr_space.user_slice_w(VirtAddr(ptid), size_of::<usize>())?;
+                buf.copy_from_slice(&new_tid.to_ne_bytes());
             }
-            // TODO: CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID
+            if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
+                proc_inner.addr_space.user_slice_w(VirtAddr(ctid), size_of::<usize>())?;
+                new_thread.inner().tid_address.clear_tid_address = Some(ctid);
+            }
+            if flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
+                let buf = proc_inner.addr_space.user_slice_w(VirtAddr(ctid), size_of::<usize>())?;
+                buf.copy_from_slice(&new_tid.to_ne_bytes());
+                new_thread.inner().tid_address.set_tid_address = Some(ctid);
+            }
 
             Ok(new_thread)
         })?;

@@ -170,7 +170,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Utimensat
         SyscallCode::Exit => syscall!(sys_exit, args[0] as i8),
         // SyscallCode::ExitGroup
-        // SyscallCode::SetTidAddress
+        SyscallCode::SetTidAddress => syscall!(sys_set_tid_address, args[0]),
         // SyscallCode::Futex
         // SyscallCode::Nanosleep
         // SyscallCode::Setitimer
