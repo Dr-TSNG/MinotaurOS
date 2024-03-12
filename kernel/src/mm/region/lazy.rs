@@ -119,23 +119,26 @@ impl LazyRegion {
 
     pub fn new_framed(
         metadata: ASRegionMeta,
-        buf: Option<&[u8]>,
+        buf: &[u8],
+        mut offset: usize,
     ) -> MosResult<Box<Self>> {
-        if buf.is_some_and(|buf| buf.len() > metadata.pages * PAGE_SIZE) {
+        if buf.len() + offset > metadata.pages * PAGE_SIZE {
             return Err(MosError::CrossBoundary);
         }
+        let mut cur = 0;
         let mut pages = vec![];
-        for i in 0..metadata.pages {
+        for _ in 0..metadata.pages {
             let page = alloc_user_frames(1)?;
-            if let Some(buf) = buf {
-                let copy_start = i * PAGE_SIZE;
-                if copy_start < buf.len() {
-                    let copy_cnt = min(PAGE_SIZE, buf.len() - copy_start);
-                    page.ppn
-                        .byte_array()[0..copy_cnt]
-                        .copy_from_slice(&buf[copy_start..copy_start + copy_cnt]);
-                }
+            if offset >= PAGE_SIZE {
+                offset -= PAGE_SIZE;
+                continue;
             }
+            let copy_cnt = min(PAGE_SIZE - offset, buf.len() - cur);
+            page.ppn
+                .byte_array()[offset..offset + copy_cnt]
+                .copy_from_slice(&buf[cur..cur + copy_cnt]);
+            offset = 0;
+            cur += copy_cnt;
             pages.push(PageState::Framed(page));
         }
         let region = Self { metadata, pages };

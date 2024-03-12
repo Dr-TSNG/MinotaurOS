@@ -73,7 +73,6 @@ impl AddressSpace {
     ) -> MosResult<(Self, usize, usize, Vec<Aux>)> {
         let mut addr_space = Self::new_bare()?;
         let elf = ElfFile::new(data).map_err(InvalidExecutable)?;
-        let mut auxv: Vec<Aux> = Vec::with_capacity(64);
         let ph_count = elf.header.pt2.ph_count();
 
         let mut entry = elf.header.pt2.entry_point() as usize;
@@ -112,7 +111,8 @@ impl AddressSpace {
                             start: start_vpn,
                             pages: (end_vpn - start_vpn).0,
                         },
-                        Some(buf),
+                        buf,
+                        start_addr.page_offset(2),
                     )?;
                     max_end_vpn = region.metadata().end();
                     addr_space.map_region(region)?;
@@ -151,6 +151,7 @@ impl AddressSpace {
         addr_space.map_region(region)?;
         debug!("Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
 
+        let mut auxv: Vec<Aux> = Vec::with_capacity(64);
         auxv.push(Aux::new(aux::AT_PHDR, load_base + elf.header.pt2.ph_offset() as usize));
         auxv.push(Aux::new(aux::AT_PHENT, elf.header.pt2.ph_entry_size() as usize));
         auxv.push(Aux::new(aux::AT_PHNUM, ph_count as usize));
@@ -329,7 +330,8 @@ impl AddressSpace {
                         start: start_vpn,
                         pages: (end_vpn - start_vpn).0,
                     },
-                    Some(buf),
+                    buf,
+                    start_addr.page_offset(2),
                 )?;
                 self.map_region(region)?;
                 debug!("Map linker section: {:?} - {:?}", start_vpn, end_vpn);

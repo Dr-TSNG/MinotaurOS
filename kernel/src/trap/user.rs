@@ -27,7 +27,7 @@ pub async fn trap_from_user() {
     debug!("Trap {:?} from user at {:#x} for {:#x}", trap, sepc, stval);
     match trap {
         Trap::Exception(Exception::UserEnvCall) => {
-            let mut ctx = current_trap_ctx();
+            let ctx = current_trap_ctx();
             // syscall 完成后，需要跳转到下一条指令
             ctx.sepc += 4;
             let result = syscall(
@@ -41,8 +41,6 @@ pub async fn trap_from_user() {
                     ctx.user_x[15],
                 ],
             ).await;
-            // clone 会改变当前线程，所以需要重新获取
-            ctx = current_trap_ctx();
             ctx.user_x[10] = result.unwrap_or_else(|err| -(err as isize) as usize)
         }
         | Trap::Exception(Exception::LoadFault)

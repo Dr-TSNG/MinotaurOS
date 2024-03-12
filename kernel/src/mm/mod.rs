@@ -34,7 +34,8 @@ fn vm_test() -> MosResult {
             start,
             pages: 4,
         },
-        None,
+        &[],
+        0,
     )?;
     kernel_space.map_region(region)?;
     let slice = unsafe {

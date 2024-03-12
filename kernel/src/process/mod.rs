@@ -99,7 +99,7 @@ impl Process {
         elf_data: &[u8],
         args: &[CString],
         envs: &[CString],
-    ) -> SyscallResult<()> {
+    ) -> SyscallResult<usize> {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
         let (addr_space, entry, mut user_sp, mut auxv) =
             AddressSpace::from_elf(&mnt_ns, elf_data).await.unwrap();
@@ -143,11 +143,13 @@ impl Process {
         }
         let envp = write_args(envs, &mut user_sp)?;
         let argv = write_args(args, &mut user_sp)?;
+        auxv.push(Aux::new(aux::AT_EXECFN, argv[0]));
 
         // 写入 `platform`
         let platform = CString::new("RISC-V64").unwrap();
         let platform_bytes = platform.as_bytes_with_nul();
         user_sp -= platform_bytes.len();
+        auxv.push(Aux::new(aux::AT_PLATFORM, user_sp));
         unsafe {
             copy_nonoverlapping(platform_bytes.as_ptr(), user_sp as *mut u8, platform_bytes.len());
         }
@@ -155,10 +157,8 @@ impl Process {
         // 写入 16 字节随机数（这里直接写入 0）
         user_sp -= 16;
         auxv.push(Aux::new(aux::AT_RANDOM, user_sp));
+        auxv.push(Aux::new(aux::AT_NULL, 0));
         user_sp -= user_sp % 16;
-
-        auxv.push(Aux::new(aux::AT_EXECFN, argv[0]));   // 文件名
-        auxv.push(Aux::new(aux::AT_NULL, 0));           // 结束标志
 
         // 写入向量表
         fn write_vector<T>(vec: Vec<T>, add_zero: bool, sp: &mut usize) -> usize {
@@ -198,7 +198,7 @@ impl Process {
             "[execve] Execve process (pid: {}): argc {:#x}, argv {:#x}, envp {:#x}, auxv {:#x}, sp {:#x}",
             current_process().pid.0, args.len(), argv_base, envp_base, auxv_base, user_sp,
         );
-        Ok(())
+        Ok(args.len())
     }
 
     pub fn fork_process(self: &Arc<Self>, flags: CloneFlags, stack: usize) -> SyscallResult<Pid> {

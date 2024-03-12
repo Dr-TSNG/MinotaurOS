@@ -107,7 +107,6 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     drop(proc_inner);
     let file = inode.open()?;
     let elf_data = file.read_all().await?;
-    current_process().execve(&elf_data, &args_vec, &envs_vec).await?;
-
-    Ok(0)
+    let argc = current_process().execve(&elf_data, &args_vec, &envs_vec).await?;
+    Ok(argc)
 }
