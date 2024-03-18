@@ -18,10 +18,15 @@ pub trait ASRegion: Send + Sync {
     fn metadata(&self) -> &ASRegionMeta;
 
     /// 将区域映射到页表，返回创建的页表帧
-    fn map(&self, root_pt: PageTable) -> MosResult<Vec<HeapFrameTracker>>;
+    fn map(&self, root_pt: PageTable, overwrite: bool) -> MosResult<Vec<HeapFrameTracker>>;
 
     /// 将区域取消映射到页表
     fn unmap(&self, root_pt: PageTable) -> MosResult;
+
+    /// 调整区域大小
+    /// 
+    /// SAFETY: 需要手动调用 `map` 或 `unmap` 来更新页表
+    fn resize(&mut self, new_pages: usize);
 
     /// 拷贝区域
     fn fork(&mut self, parent_pt: PageTable) -> MosResult<Box<dyn ASRegion>>;

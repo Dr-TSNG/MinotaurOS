@@ -20,7 +20,7 @@ impl ASRegion for DirectRegion {
         &self.metadata
     }
 
-    fn map(&self, root_pt: PageTable) -> MosResult<Vec<HeapFrameTracker>> {
+    fn map(&self, root_pt: PageTable, overwrite: bool) -> MosResult<Vec<HeapFrameTracker>> {
         let mut dirs = vec![];
         let mut offset = 0;
         while offset < self.metadata.pages {
@@ -30,7 +30,7 @@ impl ASRegion for DirectRegion {
                 true => (1, next_lv1),
                 false => (2, offset + 1),
             };
-            dirs.extend(self.map_one(root_pt, level, offset)?);
+            dirs.extend(self.map_one(root_pt, level, offset, overwrite)?);
             offset = next;
         }
         Ok(dirs)
@@ -51,6 +51,10 @@ impl ASRegion for DirectRegion {
         Ok(())
     }
 
+    fn resize(&mut self, new_pages: usize) {
+        self.metadata.pages = new_pages;
+    }
+
     fn fork(&mut self, _parent_pt: PageTable) -> MosResult<Box<dyn ASRegion>> {
         Ok(Box::new(self.clone()))
     }
@@ -64,13 +68,13 @@ impl DirectRegion {
 }
 
 impl DirectRegion {
-    fn map_one(&self, mut pt: PageTable, level: usize, offset: usize) -> MosResult<Vec<HeapFrameTracker>> {
+    fn map_one(&self, mut pt: PageTable, level: usize, offset: usize, overwrite: bool) -> MosResult<Vec<HeapFrameTracker>> {
         let vpn = self.metadata.start + offset;
         let mut dirs = vec![];
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == level {
-                if pte.valid() {
+                if !overwrite && pte.valid() {
                     return Err(MosError::PageAlreadyMapped(pte.ppn()));
                 }
                 let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D;

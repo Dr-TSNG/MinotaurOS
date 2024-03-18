@@ -8,9 +8,10 @@ use crate::result::MosResult;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
 
-pub mod allocator;
-pub mod page_table;
 pub mod addr_space;
+pub mod allocator;
+pub mod ffi;
+pub mod page_table;
 pub mod region;
 
 pub static KERNEL_SPACE: LateInit<Mutex<AddressSpace>> = LateInit::new();

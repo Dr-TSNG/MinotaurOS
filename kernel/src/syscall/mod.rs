@@ -1,9 +1,11 @@
 mod fs;
+mod mm;
 mod process;
 mod system;
 mod time;
 
 use fs::*;
+use mm::*;
 use process::*;
 use system::*;
 use time::*;
@@ -133,7 +135,7 @@ pub enum SyscallCode {
 
 pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
     let code = SyscallCode::from(code);
-    match code {
+    let result = match code {
         SyscallCode::Shutdown => syscall!(sys_shutdown),
         SyscallCode::Getcwd => syscall!(sys_getcwd, args[0], args[1]),
         SyscallCode::Dup => syscall!(sys_dup, args[0] as FdNum),
@@ -199,11 +201,11 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Shmget
         // SyscallCode::Shmctl
         // SyscallCode::Shmat
-        // SyscallCode::Brk
+        SyscallCode::Brk => syscall!(sys_brk, args[0]),
         // SyscallCode::Munmap
         SyscallCode::Clone => syscall!(sys_clone, args[0] as u32, args[1], args[2], args[3], args[4]),
         SyscallCode::Execve => async_syscall!(sys_execve, args[0], args[1], args[2]),
-        // SyscallCode::Mmap
+        SyscallCode::Mmap => syscall!(sys_mmap, args[0], args[1], args[2] as u32, args[3] as u32, args[4] as FdNum, args[5]),
         // SyscallCode::Mprotect
         // SyscallCode::Madvise
         // SyscallCode::Wait4
@@ -218,5 +220,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
             warn!("Unsupported syscall: {:?}", code);
             Err(Errno::ENOSYS)
         }
-    }
+    };
+    strace!("return: {:?}", result);
+    result
 }

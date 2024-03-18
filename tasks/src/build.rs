@@ -40,7 +40,7 @@ impl CommandExt for Command {
     }
     fn features(&mut self, features: &[String]) -> &mut Self {
         if !features.is_empty() {
-        self.arg("--no-default-features");
+            self.arg("--no-default-features");
             for feature in features {
                 self.arg("--features").arg(feature);
             }

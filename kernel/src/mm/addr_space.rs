@@ -12,7 +12,7 @@ use riscv::register::satp;
 use xmas_elf::ElfFile;
 use crate::arch::{paddr_to_kvaddr, PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::board::{GLOBAL_MAPPINGS, PHYS_MEMORY};
-use crate::config::{DYNAMIC_LINKER_BASE, USER_HEAP_SIZE, USER_STACK_SIZE};
+use crate::config::{DYNAMIC_LINKER_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::fs::file_system::MountNamespace;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::page_table::PageTable;
@@ -127,8 +127,8 @@ impl AddressSpace {
         }
 
         // 映射用户栈
-        let ustack_bottom_vpn = max_end_vpn + 1; // Guard page
-        let ustack_top_vpn = ustack_bottom_vpn + USER_STACK_SIZE / PAGE_SIZE;
+        let ustack_top_vpn = VirtPageNum::from(USER_STACK_TOP);
+        let ustack_bottom_vpn = ustack_top_vpn - USER_STACK_SIZE / PAGE_SIZE;
         let ustack_top = VirtAddr::from(ustack_top_vpn).0;
         let region = LazyRegion::new_free(ASRegionMeta {
             name: Some("[stack]".to_string()),
@@ -140,7 +140,7 @@ impl AddressSpace {
         debug!("Map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
 
         // 映射用户堆
-        let uheap_bottom_vpn = ustack_top_vpn + 1;
+        let uheap_bottom_vpn = max_end_vpn;
         let uheap_top_vpn = uheap_bottom_vpn + USER_HEAP_SIZE / PAGE_SIZE;
         let region = LazyRegion::new_free(ASRegionMeta {
             name: Some("[heap]".to_string()),
@@ -182,7 +182,7 @@ impl AddressSpace {
     }
 
     pub fn map_region(&mut self, region: Box<dyn ASRegion>) -> MosResult {
-        let dirs = region.map(self.root_pt)?;
+        let dirs = region.map(self.root_pt, false)?;
         self.regions.insert(region.metadata().start, region);
         self.pt_dirs.extend(dirs);
         Ok(())
@@ -256,6 +256,60 @@ impl AddressSpace {
             cur_len = min(cur_len + PAGE_SIZE, max_len);
         }
         Err(Errno::EINVAL)
+    }
+
+    pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult {
+        let heap_start = self.regions
+            .values()
+            .find(|region| region.metadata().name.as_deref() == Some("[heap]"))
+            .map(|region| region.metadata().start)
+            .unwrap();
+        if addr.floor() < heap_start {
+            return Err(Errno::ENOMEM);
+        }
+        if let Some((upper_vpn, _)) = self.regions.range(heap_start..).next() {
+            if addr.floor() >= *upper_vpn {
+                return Err(Errno::ENOMEM);
+            }
+        }
+        let mut brk = self.unmap_region(heap_start).unwrap();
+        brk.resize((addr.ceil() - heap_start).0);
+        // todo: No unwrap
+        self.map_region(brk).unwrap();
+        Ok(())
+    }
+
+    pub fn create_region(&mut self, start: Option<VirtPageNum>, pages: usize, perms: ASPerms) -> SyscallResult<usize> {
+        let start = if let Some(start) = start {
+            let end = start + pages;
+            let is_overlap = self.regions
+                .values()
+                .any(|region| region.metadata().start < end && region.metadata().end() > start);
+            if is_overlap {
+                return Err(Errno::EINVAL);
+            }
+            start
+        } else {
+            let mut iter = self.regions
+                .iter()
+                .skip_while(|(_, region)| region.metadata().name.as_deref() != Some("[heap]"));
+            let mut region_low = iter.next().unwrap().1;
+            let mut region_high = iter.next().unwrap().1;
+            while region_low.metadata().end() + pages > region_high.metadata().start {
+                region_low = region_high;
+                region_high = iter.next().unwrap().1;
+            }
+            region_low.metadata().end()
+        };
+        let region = LazyRegion::new_free(ASRegionMeta {
+            name: None,
+            perms,
+            start,
+            pages,
+        });
+        // todo: No unwrap
+        self.map_region(region).unwrap();
+        Ok(VirtAddr::from(start).0)
     }
 }
 

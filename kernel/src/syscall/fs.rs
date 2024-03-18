@@ -14,15 +14,14 @@ pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
     if buf == 0 || size == 0 {
         return Err(Errno::EINVAL);
     }
-    if size > PATH_MAX {
-        return Err(Errno::ENAMETOOLONG);
-    }
     let proc_inner = current_process().inner.lock();
-    let cwd = proc_inner.cwd.as_str();
+    let cwd = proc_inner.cwd.clone();
     if cwd.len() + 1 > size {
         return Err(Errno::ERANGE);
     }
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size)?;
+    drop(proc_inner);
+
     user_buf[..cwd.len()].copy_from_slice(cwd.as_bytes());
     user_buf[cwd.len()] = b'\0';
     Ok(buf)

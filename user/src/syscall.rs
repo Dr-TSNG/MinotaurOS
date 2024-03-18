@@ -1,6 +1,8 @@
 use alloc::ffi::CString;
+use alloc::vec::Vec;
 use core::arch::asm;
 use bitflags::bitflags;
+use crate::println;
 use crate::syscall::SyscallCode::*;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -184,4 +186,17 @@ pub fn sys_write(fd: i32, buf: &[u8]) -> isize {
 
 pub fn sys_yield() -> isize {
     syscall!(SchedYield)
+}
+
+pub fn sys_execve(path: &str, argv: &[&str], envp: &[&str]) -> isize {
+    let path = CString::new(path).unwrap();
+    let argv: Vec<_> = argv.iter().map(|s| CString::new(*s).unwrap()).collect();
+    let envp: Vec<_> = envp.iter().map(|s| CString::new(*s).unwrap()).collect();
+    let mut argv = argv.iter().map(|s| s.as_ptr() as usize).collect::<Vec<_>>();
+    let mut envp = envp.iter().map(|s| s.as_ptr() as usize).collect::<Vec<_>>();
+    argv.push(0);
+    envp.push(0);
+    println!("argv: {:?}, envp: {:?}", argv, envp);
+    println!("argv_ptr: {:#x}, envp_ptr: {:#x}", argv.as_ptr() as usize, envp.as_ptr() as usize);
+    syscall!(Execve, path.as_ptr() as usize, argv.as_ptr() as usize, envp.as_ptr() as usize)
 }

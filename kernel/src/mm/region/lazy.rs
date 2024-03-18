@@ -31,11 +31,11 @@ impl ASRegion for LazyRegion {
         &self.metadata
     }
 
-    fn map(&self, root_pt: PageTable) -> MosResult<Vec<HeapFrameTracker>> {
+    fn map(&self, root_pt: PageTable, overwrite: bool) -> MosResult<Vec<HeapFrameTracker>> {
         let mut dirs = vec![];
         let mut vpn = self.metadata.start;
         for page in self.pages.iter() {
-            dirs.extend(self.map_one(root_pt, page, vpn, false)?);
+            dirs.extend(self.map_one(root_pt, page, vpn, overwrite)?);
             vpn = vpn + 1;
         }
         Ok(dirs)
@@ -48,6 +48,17 @@ impl ASRegion for LazyRegion {
             vpn = vpn + 1;
         }
         Ok(())
+    }
+
+    fn resize(&mut self, new_pages: usize) {
+        if new_pages > self.pages.len() {
+            for _ in 0..new_pages - self.pages.len() {
+                self.pages.push(PageState::Free);
+            }
+        } else {
+            self.pages.truncate(new_pages);
+        }
+        self.metadata.pages = new_pages;
     }
 
     fn fork(&mut self, parent_pt: PageTable) -> MosResult<Box<dyn ASRegion>> {
@@ -152,13 +163,13 @@ impl LazyRegion {
         mut pt: PageTable,
         page: &PageState,
         vpn: VirtPageNum,
-        remap: bool,
+        overwrite: bool,
     ) -> MosResult<Vec<HeapFrameTracker>> {
         let mut dirs = vec![];
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == 2 {
-                if !remap && pte.valid() {
+                if !overwrite && pte.valid() {
                     return Err(MosError::PageAlreadyMapped(pte.ppn()));
                 }
                 let (ppn, flags) = match page {
