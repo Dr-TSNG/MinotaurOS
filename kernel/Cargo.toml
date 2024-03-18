@@ -34,4 +34,4 @@ debug = []
 trace = []
 strace = []
 
-default = ["strace"]
+default = ["info"]

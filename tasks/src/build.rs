@@ -1,5 +1,5 @@
+use anyhow::Result;
 use std::path::PathBuf;
-use anyhow::{bail, Result};
 use std::process::Command;
 use clap::{Parser, Subcommand};
 
@@ -17,16 +17,16 @@ pub struct BuildConfig {
     pub offline: bool,
     #[clap(long)]
     pub release: bool,
-    #[clap(long, default_value = "info")]
-    pub log_level: String,
     #[clap(long, default_value = "qemu")]
     pub board: String,
+    #[clap(long)]
+    pub features: Vec<String>,
 }
 
 trait CommandExt {
     fn offline(&mut self, offline: bool) -> &mut Self;
     fn release(&mut self, release: bool) -> &mut Self;
-    fn log_level(&mut self, log_level: &str) -> Result<&mut Self>;
+    fn features(&mut self, features: &[String]) -> &mut Self;
 }
 
 impl CommandExt for Command {
@@ -38,16 +38,14 @@ impl CommandExt for Command {
         if release { self.arg("--release"); }
         self
     }
-    fn log_level(&mut self, log_level: &str) -> Result<&mut Self> {
-        match log_level {
-            "trace" => self.arg("--features").arg("trace"),
-            "debug" => self.arg("--features").arg("debug"),
-            "info" => self.arg("--features").arg("info"),
-            "warn" => self.arg("--features").arg("warn"),
-            "error" => self.arg("--features").arg("error"),
-            _ => bail!("Invalid log level: {}", log_level),
-        };
-        Ok(self)
+    fn features(&mut self, features: &[String]) -> &mut Self {
+        if !features.is_empty() {
+        self.arg("--no-default-features");
+            for feature in features {
+                self.arg("--features").arg(feature);
+            }
+        }
+        self
     }
 }
 
@@ -72,9 +70,9 @@ fn build_kernel(config: &BuildConfig) -> Result<()> {
         .arg("build")
         .offline(config.offline)
         .release(config.release)
+        .features(&config.features)
         .arg("--features")
         .arg(format!("board_{}", config.board))
-        .log_level(&config.log_level)?
         .spawn()?.wait()?
         .exit_ok()?;
     Command::new("rust-objcopy")

@@ -18,10 +18,10 @@ pub struct RunConfig {
     pub smp: u8,
     #[clap(long, default_value = "128M")]
     pub mem: String,
-    #[clap(long, default_value = "info")]
-    pub log_level: String,
     #[clap(long, default_value = "prebuilts/disk.img")]
     pub disk: String,
+    #[clap(long)]
+    pub features: Vec<String>,
 }
 
 pub fn run(command: Run) -> Result<()> {
@@ -36,7 +36,7 @@ fn run_qemu(config: &RunConfig) -> Result<()> {
         offline: false,
         release: config.release,
         board: "qemu".to_string(),
-        log_level: config.log_level.clone(),
+        features: config.features.clone(),
     };
     build::run(build::Build::Kernel(build_config))?;
     Command::new("qemu-system-riscv64")
