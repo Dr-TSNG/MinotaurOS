@@ -6,7 +6,8 @@ use async_trait::async_trait;
 use lazy_static::lazy_static;
 use crate::arch::sbi;
 use crate::fs::file::{File, FileMeta};
-use crate::result::SyscallResult;
+use crate::result::{Errno, SyscallResult};
+use crate::sched::yield_now;
 use crate::sync::mutex::AsyncMutex;
 
 pub struct TtyFile {
@@ -40,14 +41,19 @@ impl File for TtyFile {
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         let _lock = self.mutex.lock().await;
-        let size = sbi::console_read(buf).unwrap();
-        Ok(size as isize)
+        loop {
+            let size = sbi::console_read(buf).map_err(|_| Errno::EIO)?;
+            match size {
+                0 => yield_now().await,
+                _ => return Ok(size as isize)
+            }
+        }
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         let _lock = self.mutex.lock().await;
         let str = String::from_utf8_lossy(buf);
-        let size = sbi::console_write(&str).unwrap();
+        let size = sbi::console_write(&str).map_err(|_| Errno::EIO)?;
         Ok(size as isize)
     }
 }

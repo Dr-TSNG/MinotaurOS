@@ -27,6 +27,7 @@ mod process;
 mod processor;
 mod result;
 mod sched;
+mod signal;
 mod sync;
 mod syscall;
 mod trap;

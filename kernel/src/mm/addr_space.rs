@@ -10,9 +10,10 @@ use bitflags::bitflags;
 use log::{debug, trace};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
+use zerocopy::transmute;
 use crate::arch::{paddr_to_kvaddr, PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::board::{GLOBAL_MAPPINGS, PHYS_MEMORY};
-use crate::config::{DYNAMIC_LINKER_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::fs::file_system::MountNamespace;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::page_table::PageTable;
@@ -258,25 +259,25 @@ impl AddressSpace {
         Err(Errno::EINVAL)
     }
 
-    pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult {
-        let heap_start = self.regions
+    pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult<usize> {
+        let (heap_start, heap_end) = self.regions
             .values()
             .find(|region| region.metadata().name.as_deref() == Some("[heap]"))
-            .map(|region| region.metadata().start)
+            .map(|region| (region.metadata().start, region.metadata().end()))
             .unwrap();
         if addr.floor() < heap_start {
-            return Err(Errno::ENOMEM);
+            return Ok(VirtAddr::from(heap_end).0);
         }
-        if let Some((upper_vpn, _)) = self.regions.range(heap_start..).next() {
+        if let Some((upper_vpn, _)) = self.regions.range(heap_start..).skip(1).next() {
             if addr.floor() >= *upper_vpn {
-                return Err(Errno::ENOMEM);
+                return Ok(VirtAddr::from(heap_end).0);
             }
         }
         let mut brk = self.unmap_region(heap_start).unwrap();
         brk.resize((addr.ceil() - heap_start).0);
         // todo: No unwrap
         self.map_region(brk).unwrap();
-        Ok(())
+        Ok(VirtAddr::from(addr.ceil()).0)
     }
 
     pub fn create_region(&mut self, start: Option<VirtPageNum>, pages: usize, perms: ASPerms) -> SyscallResult<usize> {
@@ -330,6 +331,7 @@ impl AddressSpace {
             let region = DirectRegion::new(metadata, ppn_start);
             self.map_region(region)?;
         }
+
         for (paddr_start, paddr_end) in PHYS_MEMORY.iter() {
             debug!("Copy global mappings: [physical] from {:?} to {:?}", paddr_start, paddr_end);
             let ppn_start = PhysPageNum::from(*paddr_start);
@@ -345,6 +347,20 @@ impl AddressSpace {
             let region = DirectRegion::new(metadata, ppn_start);
             self.map_region(region)?;
         }
+
+        // li a7, 139; ecall
+        let trampoline: [u8; 8] = transmute!([0x08b00893, 0x00000073]);
+        let region = LazyRegion::new_framed(
+            ASRegionMeta {
+                name: Some("[trampoline]".to_string()),
+                perms: ASPerms::R | ASPerms::X | ASPerms::U,
+                start: TRAMPOLINE_BASE.into(),
+                pages: 1,
+            },
+            &trampoline,
+            0,
+        )?;
+        self.map_region(region)?;
         Ok(())
     }
 

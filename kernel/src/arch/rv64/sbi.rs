@@ -32,7 +32,12 @@ pub fn set_timer(timer: usize) -> Result<(), SBIError> {
 }
 
 pub fn console_read(buffer: &mut [u8]) -> Result<usize, SBIError> {
-    sbi_call(EID_DBCN, CONSOLE_READ, buffer.len(), buffer.as_mut_ptr() as usize, 0)
+    let vaddr = VirtAddr(buffer.as_ptr() as usize);
+    let paddr = match &local_hart().ctx.user_task {
+        Some(task) => task.root_pt.translate(vaddr),
+        None => kvaddr_to_paddr(vaddr),
+    };
+    sbi_call(EID_DBCN, CONSOLE_READ, buffer.len(), paddr.0, 0)
 }
 
 pub fn console_write(content: &str) -> Result<usize, SBIError> {

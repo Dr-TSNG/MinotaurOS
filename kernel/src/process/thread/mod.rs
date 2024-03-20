@@ -3,6 +3,7 @@ use core::cell::UnsafeCell;
 use crate::process::Process;
 use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::tid::TidTracker;
+use crate::signal::SignalController;
 use crate::trap::context::TrapContext;
 
 pub mod resource;
@@ -12,6 +13,7 @@ pub mod tid;
 pub struct Thread {
     pub tid: Arc<TidTracker>,
     pub process: Arc<Process>,
+    pub signals: SignalController,
     inner: UnsafeCell<ThreadInner>,
 }
 
@@ -47,6 +49,7 @@ impl Thread {
         let thread = Thread {
             tid,
             process,
+            signals: SignalController::new(),
             inner: UnsafeCell::new(inner),
         };
         Arc::new(thread)

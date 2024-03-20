@@ -129,7 +129,7 @@ impl PhysAddr {
         PhysPageNum(self.0 / SV39_PAGE_SIZE)
     }
     pub fn ceil(&self) -> PhysPageNum {
-        PhysPageNum((self.0 - 1 + SV39_PAGE_SIZE) / SV39_PAGE_SIZE)
+        PhysPageNum((self.0 + SV39_PAGE_SIZE - 1) / SV39_PAGE_SIZE)
     }
     pub fn page_offset(&self, level: usize) -> usize {
         self.0 & ((1 << (SV39_PAGE_BITS + SV39_VPN_BITS * (2 - level))) - 1)
@@ -144,7 +144,7 @@ impl VirtAddr {
         VirtPageNum(self.0 / SV39_PAGE_SIZE)
     }
     pub fn ceil(&self) -> VirtPageNum {
-        VirtPageNum((self.0 - 1 + SV39_PAGE_SIZE) / SV39_PAGE_SIZE)
+        VirtPageNum((self.0 + SV39_PAGE_SIZE - 1) / SV39_PAGE_SIZE)
     }
     pub fn page_offset(&self, level: usize) -> usize {
         self.0 & ((1 << (SV39_PAGE_BITS + SV39_VPN_BITS * (2 - level))) - 1)

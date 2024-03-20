@@ -3,7 +3,6 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
-use log::trace;
 use crate::arch::{PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_kernel_frames, alloc_user_frames, HeapFrameTracker, UserFrameTracker};
@@ -189,10 +188,6 @@ impl LazyRegion {
                         (tracker.ppn, flags)
                     }
                 };
-                trace!(
-                    "LazyMap: create page at lv{}pt {:?} slot {} -> {:?} - {:?} | {:?}",
-                    i, pt.ppn, idx, ppn, vpn, flags,
-                );
                 *pte = PageTableEntry::new(ppn, flags);
                 break;
             } else {
@@ -201,10 +196,6 @@ impl LazyRegion {
                     SlotType::Page(ppn) => return Err(MosError::PageAlreadyMapped(ppn)),
                     SlotType::Invalid => {
                         let dir = alloc_kernel_frames(1)?;
-                        trace!(
-                            "LazyMap: create dir at lv{}pt {:?} slot {} -> {:?}",
-                            i, pt.ppn, idx, dir.ppn,
-                        );
                         *pte = PageTableEntry::new(dir.ppn, PTEFlags::V);
                         pt = PageTable::new(dir.ppn);
                         dirs.push(dir);
@@ -219,13 +210,6 @@ impl LazyRegion {
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == 2 {
-                if !pte.valid() {
-                    return Err(MosError::BadAddress(VirtAddr::from(vpn)));
-                }
-                trace!(
-                    "LazyUnmap: invalidate page at lv{}pt {:?} slot {} -> {:?}",
-                    i, pt.ppn, idx, vpn,
-                );
                 pte.set_flags(PTEFlags::empty());
                 break;
             } else {

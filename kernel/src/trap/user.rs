@@ -1,17 +1,24 @@
-use log::{debug, error};
+use core::mem::size_of;
+use log::{debug, error, info, trace};
 use riscv::register::{scause, sepc, stval};
 use riscv::register::scause::{Exception, Interrupt, Trap};
 use crate::arch::VirtAddr;
+use crate::config::TRAMPOLINE_BASE;
 use crate::mm::addr_space::ASPerms;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::sched::time::set_next_trigger;
 use crate::sched::yield_now;
+use crate::signal::ffi::UContext;
+use crate::signal::SignalHandler;
 use crate::syscall::syscall;
 use crate::trap::{__restore_to_user, set_kernel_trap_entry, set_user_trap_entry};
 
 pub fn trap_return() {
     set_user_trap_entry();
-    debug!("Trap return to user");
+    trace!("Trap return to user");
+
+    check_signal();
+
     unsafe {
         current_thread().inner().rusage.trap_out();
         __restore_to_user(current_trap_ctx());
@@ -62,6 +69,35 @@ pub async fn trap_from_user() {
         }
         _ => {
             panic!("Fatal");
+        }
+    }
+}
+
+fn check_signal() {
+    if let Some(poll) = current_thread().signals.poll() {
+        info!("Handle signal {:?}", poll.signal);
+        match poll.handler {
+            SignalHandler::Kernel(f) => f(poll.signal),
+            SignalHandler::User(sig_action) => {
+                let trap_ctx = current_trap_ctx();
+                let ucontext = UContext::new(poll.blocked_before, trap_ctx.clone());
+                let mut user_sp = VirtAddr(trap_ctx.get_sp());
+                if let Err(e) = current_process()
+                    .inner.lock().addr_space
+                    .user_slice_w(user_sp, size_of::<UContext>()) {
+                    todo!("Stack Overflow: {:?}", e)
+                }
+                user_sp = user_sp - size_of::<UContext>();
+                unsafe { user_sp.as_ptr().cast::<UContext>().write(ucontext); }
+
+                trap_ctx.sepc = sig_action.sa_handler;
+                trap_ctx.user_x[10] = poll.signal as usize;
+                trap_ctx.user_x[12] = user_sp.0;
+                trap_ctx.user_x[1] = match sig_action.sa_restorer {
+                    0 => TRAMPOLINE_BASE.0,
+                    _ => sig_action.sa_restorer,
+                }
+            }
         }
     }
 }

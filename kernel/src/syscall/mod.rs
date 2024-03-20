@@ -1,12 +1,14 @@
 mod fs;
 mod mm;
 mod process;
+mod signal;
 mod system;
 mod time;
 
 use fs::*;
 use mm::*;
 use process::*;
+use signal::*;
 use system::*;
 use time::*;
 
@@ -141,7 +143,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Dup => syscall!(sys_dup, args[0] as FdNum),
         SyscallCode::Dup3 => syscall!(sys_dup3, args[0] as FdNum, args[1] as FdNum, args[2] as u32),
         // SyscallCode::Fcntl
-        // SyscallCode::Ioctl
+        SyscallCode::Ioctl => syscall!(sys_ioctl, args[0] as FdNum, args[1], args[2], args[3], args[4], args[5]),
         // SyscallCode::Mkdirat
         // SyscallCode::Unlinkat
         // SyscallCode::Umount2
@@ -157,8 +159,8 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Lseek => async_syscall!(sys_lseek, args[0] as FdNum, args[1] as isize, args[2] as i32),
         SyscallCode::Read => async_syscall!(sys_read, args[0] as FdNum, args[1], args[2]),
         SyscallCode::Write => async_syscall!(sys_write, args[0] as FdNum, args[1], args[2]),
-        // SyscallCode::Readv
-        // SyscallCode::Writev
+        SyscallCode::Readv => async_syscall!(sys_readv, args[0] as FdNum, args[1], args[2]),
+        SyscallCode::Writev => async_syscall!(sys_writev, args[0] as FdNum, args[1], args[2]),
         SyscallCode::Pread64 => async_syscall!(sys_pread, args[0] as FdNum, args[1], args[2], args[3] as isize),
         SyscallCode::Pwrite64 => async_syscall!(sys_pwrite, args[0] as FdNum, args[1], args[2], args[3] as isize),
         // SyscallCode::Sendfile
@@ -181,11 +183,11 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::SchedYield => async_syscall!(sys_yield),
         // SyscallCode::Kill
         // SyscallCode::Tkill
-        // SyscallCode::RtSigsupend
-        // SyscallCode::RtSigaction
-        // SyscallCode::RtSigprocmask
+        SyscallCode::RtSigsupend => async_syscall!(sys_rt_sigsuspend, args[0]),
+        SyscallCode::RtSigaction => syscall!(sys_rt_sigaction, args[0] as i32, args[1], args[2]),
+        SyscallCode::RtSigprocmask => syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2]),
         // SyscallCode::RtSigtimedwait
-        // SyscallCode::RtSigreturn
+        SyscallCode::RtSigreturn => syscall!(sys_rt_sigreturn),
         // SyscallCode::Times
         SyscallCode::Uname => syscall!(sys_uname, args[0]),
         // SyscallCode::Getrusage

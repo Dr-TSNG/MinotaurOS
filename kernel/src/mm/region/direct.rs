@@ -1,7 +1,6 @@
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use log::trace;
 use crate::arch::{PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
@@ -81,10 +80,6 @@ impl DirectRegion {
                 if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
                 if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
                 if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
-                trace!(
-                    "DirectMap: create page at lv{}pt {:?} slot {} -> {:?} - {:?} | {:?}",
-                    i, pt.ppn, idx, self.ppn + offset, vpn, flags,
-                );
                 *pte = PageTableEntry::new(self.ppn + offset, flags);
                 break;
             } else {
@@ -93,10 +88,6 @@ impl DirectRegion {
                     SlotType::Page(ppn) => return Err(MosError::PageAlreadyMapped(ppn)),
                     SlotType::Invalid => {
                         let dir = alloc_kernel_frames(1)?;
-                        trace!(
-                            "DirectMap: create dir at lv{}pt {:?} slot {} -> {:?}",
-                            i, pt.ppn, idx, dir.ppn,
-                        );
                         *pte = PageTableEntry::new(dir.ppn, PTEFlags::V);
                         pt = PageTable::new(dir.ppn);
                         dirs.push(dir);
@@ -115,10 +106,6 @@ impl DirectRegion {
                 if !pte.valid() {
                     return Err(MosError::BadAddress(VirtAddr::from(vpn)));
                 }
-                trace!(
-                    "DirectUnmap: invalidate page at lv{}pt {:?} slot {} -> {:?} - {:?}",
-                    i, pt.ppn, idx, self.ppn + offset, vpn,
-                );
                 pte.set_flags(PTEFlags::empty());
                 break;
             } else {

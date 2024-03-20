@@ -25,16 +25,13 @@ impl FileDescriptor {
         Self { file, flags }
     }
 
-    pub fn dup(&self, cloexec: bool) -> Self {
-        let flags = if cloexec {
-            self.flags | OpenFlags::O_CLOEXEC
+    pub fn dup(mut self, cloexec: bool) -> Self {
+        if cloexec {
+            self.flags.insert(OpenFlags::O_CLOEXEC);
         } else {
-            self.flags & !OpenFlags::O_CLOEXEC
-        };
-        Self {
-            file: self.file.clone(),
-            flags,
+            self.flags.remove(OpenFlags::O_CLOEXEC);
         }
+        self
     }
 }
 
@@ -60,10 +57,10 @@ impl FdTable {
         }
     }
 
-    /// 获取指定位置的文件描述符的可变引用
-    pub fn get(&self, fd: FdNum) -> SyscallResult<&FileDescriptor> {
+    /// 获取指定位置的文件描述符
+    pub fn get(&self, fd: FdNum) -> SyscallResult<FileDescriptor> {
         let fd = fd as usize;
-        self.table.get(fd).and_then(Option::as_ref).ok_or(Errno::EBADF)
+        self.table.get(fd).and_then(Option::clone).ok_or(Errno::EBADF)
     }
 
     /// 插入一个文件描述符，返回位置

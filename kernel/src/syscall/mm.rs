@@ -6,8 +6,7 @@ use crate::result::{Errno, SyscallResult};
 
 pub fn sys_brk(addr: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    proc_inner.addr_space.set_brk(VirtAddr::from(addr))?;
-    Ok(0)
+    proc_inner.addr_space.set_brk(VirtAddr(addr))
 }
 
 pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offset: usize) -> SyscallResult<usize> {

@@ -115,6 +115,12 @@ pub const MAX_NAME_LEN: usize = 256;
 pub const DIRENT_SIZE: usize = size_of::<LinuxDirent>();
 
 #[repr(C)]
+pub struct IoVec {
+    pub base: usize,
+    pub len: usize,
+}
+
+#[repr(C)]
 pub struct LinuxDirent {
     pub d_ino: u64,
     pub d_off: i64,

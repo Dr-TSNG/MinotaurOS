@@ -38,6 +38,10 @@ impl TrapContext {
         ctx
     }
 
+    pub fn get_sp(&self) -> usize {
+        self.user_x[2]
+    }
+
     pub fn set_sp(&mut self, sp: usize) {
         self.user_x[2] = sp;
     }

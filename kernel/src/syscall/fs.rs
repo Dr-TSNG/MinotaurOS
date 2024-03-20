@@ -1,10 +1,11 @@
 use alloc::ffi::CString;
 use alloc::string::ToString;
+use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
-use log::trace;
+use log::{debug, trace, warn};
 use crate::arch::VirtAddr;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, DIRENT_SIZE, DirentType, InodeMode, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
+use crate::fs::ffi::{AT_FDCWD, DIRENT_SIZE, DirentType, InodeMode, IoVec, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
 use crate::processor::current_process;
@@ -51,6 +52,11 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
     Ok(new_fd as usize)
 }
 
+pub fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<usize> {
+    warn!("ioctl is not implemented");
+    Ok(0)
+}
+
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
@@ -66,7 +72,7 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
         0 => ".",
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
     };
-    trace!("openat: dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
+    debug!("openat: dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
     let inode = resolve_path(&mut proc_inner, dirfd, path).await?;
     if flags.contains(OpenFlags::O_DIRECTORY) {
         if inode.metadata().mode != InodeMode::DIR {
@@ -84,14 +90,12 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
 }
 
 pub fn sys_close(fd: FdNum) -> SyscallResult<usize> {
-    let mut proc_inner = current_process().inner.lock();
-    proc_inner.fd_table.remove(fd)?;
+    current_process().inner.lock().fd_table.remove(fd)?;
     Ok(0)
 }
 
 pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     if !fd_impl.flags.contains(OpenFlags::O_DIRECTORY) {
         return Err(Errno::ENOTDIR);
     }
@@ -113,7 +117,7 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
             d_name: [0; 256],
         };
         dirent.d_name[..name_bytes.len()].copy_from_slice(name_bytes);
-        let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(cur), DIRENT_SIZE)?;
+        let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(cur), DIRENT_SIZE)?;
         unsafe {
             copy_nonoverlapping(&dirent, user_buf.as_mut_ptr() as *mut LinuxDirent, 1);
         }
@@ -124,8 +128,7 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
 }
 
 pub async fn sys_lseek(fd: FdNum, offset: isize, whence: i32) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     let seek = Seek::try_from((whence, offset))?;
     let ret = fd_impl.file.seek(seek).await?;
     Ok(ret as usize)
@@ -138,6 +141,7 @@ pub async fn sys_read(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize>
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), len)?;
+    drop(proc_inner);
     let ret = fd_impl.file.read(user_buf).await?;
     Ok(ret as usize)
 }
@@ -149,7 +153,47 @@ pub async fn sys_write(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(buf), len)?;
+    drop(proc_inner);
     let ret = fd_impl.file.write(user_buf).await?;
+    Ok(ret as usize)
+}
+
+pub async fn sys_readv(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let fd_impl = proc_inner.fd_table.get(fd)?;
+    if !fd_impl.flags.readable() {
+        return Err(Errno::EBADF);
+    }
+    let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(iov), size_of::<IoVec>() * iovcnt)?;
+    let iovs: &[IoVec] = unsafe { core::mem::transmute(user_buf) };
+    drop(proc_inner);
+
+    let mut ret = 0;
+    for i in 0..iovcnt {
+        let iov = &iovs[i];
+        let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(iov.base), iov.len)?;
+        ret += fd_impl.file.read(user_buf).await?;
+    }
+    Ok(ret as usize)
+}
+
+pub async fn sys_writev(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let fd_impl = proc_inner.fd_table.get(fd)?;
+    if !fd_impl.flags.writable() {
+        return Err(Errno::EBADF);
+    }
+    let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(iov), size_of::<IoVec>() * iovcnt)?;
+    let iovs: &[IoVec] = unsafe { core::mem::transmute(user_buf) };
+    drop(proc_inner);
+
+    let mut ret = 0;
+    for i in 0..iovcnt {
+        let iov = &iovs[i];
+        let user_buf = current_process().inner.lock().addr_space.user_slice_r(VirtAddr(iov.base), iov.len)?;
+        ret += fd_impl.file.write(user_buf).await?;
+    }
+
     Ok(ret as usize)
 }
 
@@ -160,6 +204,7 @@ pub async fn sys_pread(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sysc
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), len)?;
+    drop(proc_inner);
     let ret = fd_impl.file.pread(user_buf, offset).await?;
     Ok(ret as usize)
 }
@@ -171,6 +216,7 @@ pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sys
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(buf), len)?;
+    drop(proc_inner);
     let ret = fd_impl.file.pwrite(user_buf, offset).await?;
     Ok(ret as usize)
 }
