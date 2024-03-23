@@ -23,6 +23,20 @@ time = { version = "0.3", default-features = false }
 virtio-drivers = "0.6.0"
 xmas-elf = "0.7.0"
 zerocopy = { version = "0.7", features = ["derive"] }
+smoltcp = { version = "0.10.0", default-features = false, features = [
+    "alloc",
+    "log",
+    "medium-ethernet",
+    "medium-ip",
+    "proto-ipv4",
+    "proto-ipv6",
+    "proto-dhcpv4",
+    "proto-ipv4-fragmentation",
+    "socket-udp",
+    "socket-tcp",
+    "socket-dhcpv4",
+    "async",
+] }
 
 [features]
 board_qemu = []
