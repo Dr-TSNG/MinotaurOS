@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 use bitvec_rs::BitVec;
-use log::trace;
+use log::{trace, warn};
 use crate::arch::PhysPageNum;
 use crate::board::PHYS_MEMORY;
 use crate::println;
-use crate::result::{MosError, MosResult};
+use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::IrqMutex;
 
 static USER_ALLOCATOR: IrqMutex<UserFrameAllocator> = IrqMutex::new(UserFrameAllocator::new());
@@ -32,13 +32,14 @@ impl UserFrameAllocator {
         self.0.push(Segment::new(start, end));
     }
 
-    fn alloc(&mut self, pages: usize) -> MosResult<UserFrameTracker> {
+    fn alloc(&mut self, pages: usize) -> SyscallResult<UserFrameTracker> {
         for segment in self.0.iter_mut() {
             if let Some(tracker) = segment.alloc(pages) {
                 return Ok(tracker);
             }
         }
-        Err(MosError::OutOfMemory)
+        warn!("[UserFrameAllocator] Out of memory for {} pages", pages);
+        Err(Errno::ENOSPC)
     }
 
     fn dealloc(&mut self, tracker: &UserFrameTracker) {
@@ -48,7 +49,7 @@ impl UserFrameAllocator {
                 return;
             }
         }
-        panic!("dealloc user frame {:?} for {} pages failed", tracker.ppn, tracker.pages);
+        panic!("Dealloc user frame {:?} for {} pages failed", tracker.ppn, tracker.pages);
     }
 }
 
@@ -106,7 +107,7 @@ impl Segment {
 /// 分配连续的用户页帧
 /// 
 /// SAFETY: 保证分配的页已经清零
-pub fn alloc_user_frames(pages: usize) -> MosResult<UserFrameTracker> {
+pub fn alloc_user_frames(pages: usize) -> SyscallResult<UserFrameTracker> {
     let tracker = USER_ALLOCATOR.lock().alloc(pages)?;
     tracker.ppn.byte_array().fill(0);
     Ok(tracker)

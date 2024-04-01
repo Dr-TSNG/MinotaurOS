@@ -1,17 +1,13 @@
+use log::error;
 use crate::fs::fat32::bpb::BPBOffset;
-use crate::result::MosError::UnsupportedFileSystem;
-use crate::result::MosResult;
+use crate::result::{Errno, SyscallResult};
 
 #[derive(Debug)]
 pub struct FAT32Meta {
     /// 活跃 FAT 表的扇区偏移
     pub fat_offset: usize,
-    /// FAT 表占的扇区数
-    pub fat_size: usize,
     /// 数据区的扇区偏移
     pub data_offset: usize,
-    /// 最后扇区
-    pub total_sectors: usize,
     /// 每扇区的字节数
     pub bytes_per_sector: usize,
     /// 每簇的扇区数
@@ -20,9 +16,11 @@ pub struct FAT32Meta {
     pub bytes_per_cluster: usize,
     /// 根目录所在的簇号
     pub root_cluster: usize,
+    /// 最大簇号
+    pub max_cluster: usize,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum FATEnt {
     /// 空簇
     EMPTY,
@@ -57,10 +55,11 @@ impl From<FATEnt> for u32 {
 }
 
 impl FAT32Meta {
-    pub fn new(boot_sector: &[u8]) -> MosResult<Self> {
+    pub fn new(boot_sector: &[u8]) -> SyscallResult<Self> {
         let ext_flags = BPBOffset::extend_flags(boot_sector);
         if ext_flags & (1 << 7) != 0 {
-            return Err(UnsupportedFileSystem("Mirrored FAT is not supported"));
+            error!("Mirrored FAT is not supported");
+            return Err(Errno::EINVAL);
         }
         let active = ext_flags & 0b1111;
         let reserved = BPBOffset::reserved_sectors(boot_sector) as usize;
@@ -72,18 +71,19 @@ impl FAT32Meta {
         let sectors_per_cluster = BPBOffset::sector_per_cluster(boot_sector) as usize;
         let bytes_per_cluster = bytes_per_sector * sectors_per_cluster;
         let root_cluster = BPBOffset::root_cluster(boot_sector) as usize;
+        let max_cluster = (total_sectors - data_offset) / sectors_per_cluster;
         if total_sectors / sectors_per_cluster < 65525 {
-            return Err(UnsupportedFileSystem("Not a FAT32 file system"));
+            error!("Not a FAT32 file system");
+            return Err(Errno::EINVAL);
         }
         let metadata = Self {
             fat_offset,
-            fat_size,
             data_offset,
-            total_sectors,
             bytes_per_sector,
             sectors_per_cluster,
             bytes_per_cluster,
             root_cluster,
+            max_cluster,
         };
         Ok(metadata)
     }

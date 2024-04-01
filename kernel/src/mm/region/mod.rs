@@ -9,7 +9,7 @@ use crate::arch::VirtPageNum;
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::HeapFrameTracker;
 use crate::mm::page_table::PageTable;
-use crate::result::{MosError, MosResult};
+use crate::result::{Errno, SyscallResult};
 
 /// 地址空间区域
 ///
@@ -18,10 +18,10 @@ pub trait ASRegion: Send + Sync {
     fn metadata(&self) -> &ASRegionMeta;
 
     /// 将区域映射到页表，返回创建的页表帧
-    fn map(&self, root_pt: PageTable, overwrite: bool) -> MosResult<Vec<HeapFrameTracker>>;
+    fn map(&self, root_pt: PageTable, overwrite: bool) -> Vec<HeapFrameTracker>;
 
     /// 将区域取消映射到页表
-    fn unmap(&self, root_pt: PageTable) -> MosResult;
+    fn unmap(&self, root_pt: PageTable);
 
     /// 调整区域大小
     /// 
@@ -29,11 +29,11 @@ pub trait ASRegion: Send + Sync {
     fn resize(&mut self, new_pages: usize);
 
     /// 拷贝区域
-    fn fork(&mut self, parent_pt: PageTable) -> MosResult<Box<dyn ASRegion>>;
+    fn fork(&mut self, parent_pt: PageTable) -> Box<dyn ASRegion>;
 
     /// 错误处理
-    fn fault_handler(&mut self, _root_pt: PageTable, vpn: VirtPageNum) -> MosResult {
-        Err(MosError::PageAccessDenied(vpn.into()))
+    fn fault_handler(&mut self, _root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
+        Err(Errno::EINVAL)
     }
 }
 

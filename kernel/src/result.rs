@@ -6,20 +6,7 @@ use core::future::Future;
 use core::pin::Pin;
 use crate::arch::{PhysPageNum, VirtAddr, VirtPageNum};
 
-pub type MosResult<T = ()> = Result<T, MosError>;
 pub type SyscallResult<T = ()> = Result<T, Errno>;
-
-#[derive(Debug)]
-pub enum MosError {
-    OutOfMemory,
-    CrossBoundary,
-    BadAddress(VirtAddr),
-    PageAccessDenied(VirtPageNum),
-    PageAlreadyMapped(PhysPageNum),
-    InvalidExecutable(&'static str),
-    BlockDeviceError(String),
-    UnsupportedFileSystem(&'static str),
-}
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Errno {
@@ -64,7 +51,6 @@ pub enum Errno {
     ENOSYS = 38,
     ENOTEMPTY = 39,
     ELOOP = 40,
-    // EWOULDBLOCK = 11,
     ENOMSG = 42,
     EIDRM = 43,
     ECHRNG = 44,
@@ -81,7 +67,6 @@ pub enum Errno {
     ENOANO = 55,
     EBADRQC = 56,
     EBADSLT = 57,
-    // EDEADLOCK = EDEADLK,
     EBFONT = 59,
     ENOSTR = 60,
     ENODATA = 61,

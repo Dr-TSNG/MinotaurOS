@@ -12,6 +12,8 @@ const LOG_LEVEL: LevelFilter = LevelFilter::Info;
 const LOG_LEVEL: LevelFilter = LevelFilter::Debug;
 #[cfg(feature = "trace")]
 const LOG_LEVEL: LevelFilter = LevelFilter::Trace;
+#[cfg(not(any(feature = "error", feature = "warn", feature = "info", feature = "debug", feature = "trace")))]
+const LOG_LEVEL: LevelFilter = LevelFilter::Off;
 
 struct SimpleLogger;
 
@@ -75,15 +77,14 @@ macro_rules! strace {
         use crate::{
             debug::logger::STRACE_COLOR_CODE,
             println,
-            processor::hart::local_hart,
+            processor::current_thread,
             sched::time::current_time,
         };
-        let thread = local_hart().current_thread().unwrap();
         println!(
             concat!("\x1b[{}m[{:6?}] [SCALL] tid {} | ", $fmt ,"\x1b[0m"),
             STRACE_COLOR_CODE,
             current_time(),
-            thread.tid.0
+            current_thread().tid.0
             $(, $($arg)+)?,
         );
     }

@@ -188,6 +188,10 @@ pub fn sys_yield() -> isize {
     syscall!(SchedYield)
 }
 
+pub fn sys_fork() -> isize {
+    syscall!(Clone, 0usize, 0, 0, 0, 0)
+}
+
 pub fn sys_execve(path: &str, argv: &[&str], envp: &[&str]) -> isize {
     let path = CString::new(path).unwrap();
     let argv: Vec<_> = argv.iter().map(|s| CString::new(*s).unwrap()).collect();
@@ -199,4 +203,8 @@ pub fn sys_execve(path: &str, argv: &[&str], envp: &[&str]) -> isize {
     println!("argv: {:?}, envp: {:?}", argv, envp);
     println!("argv_ptr: {:#x}, envp_ptr: {:#x}", argv.as_ptr() as usize, envp.as_ptr() as usize);
     syscall!(Execve, path.as_ptr() as usize, argv.as_ptr() as usize, envp.as_ptr() as usize)
+}
+
+pub fn sys_waitpid(pid: usize, status: &mut i32) -> isize {
+    syscall!(Wait4, pid, status as *mut i32, 0, 0)
 }

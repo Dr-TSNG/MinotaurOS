@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use log::info;
 use crate::mm::allocator::IdAllocator;
 
-use crate::result::MosResult;
+use crate::result::SyscallResult;
 use crate::sync::mutex::{Mutex, RwLock};
 
 pub static DEVICES: RwLock<BTreeMap<usize, Device>> = RwLock::new(BTreeMap::new());
@@ -52,13 +52,13 @@ pub trait BlockDevice: Send + Sync {
     fn metadata(&self) -> &DeviceMeta;
     
     /// 从块设备读取数据
-    async fn read_block(&self, block_id: usize, buf: &mut [u8]) -> MosResult;
+    async fn read_block(&self, block_id: usize, buf: &mut [u8]) -> SyscallResult;
 
     /// 向块设备写入数据
-    async fn write_block(&self, block_id: usize, buf: &[u8]) -> MosResult;
+    async fn write_block(&self, block_id: usize, buf: &[u8]) -> SyscallResult;
 }
 
-pub fn init() -> MosResult {
+pub fn init() -> SyscallResult {
     init_board()?;
     info!("Drivers initialized");
     Ok(())

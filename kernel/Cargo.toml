@@ -48,4 +48,4 @@ debug = []
 trace = []
 strace = []
 
-default = ["info"]
+default = ["error"]

@@ -7,7 +7,7 @@ use crate::arch::{kvaddr_to_paddr, paddr_to_kvaddr, PhysAddr, PhysPageNum, VirtA
 use crate::driver::Device;
 use crate::driver::virtio::VirtIOBlock;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
-use crate::result::MosResult;
+use crate::result::SyscallResult;
 use crate::sync::mutex::IrqMutex;
 
 pub mod virtio;
@@ -21,7 +21,7 @@ unsafe impl Hal for VirtioHal {
         pages: usize,
         _direction: BufferDirection,
     ) -> (virtio_drivers::PhysAddr, NonNull<u8>) {
-        let tracker = alloc_kernel_frames(pages).unwrap();
+        let tracker = alloc_kernel_frames(pages);
         let base_ppn = tracker.ppn;
         VIRTIO_FRAMES.lock().insert(base_ppn, tracker);
         let paddr = PhysAddr::from(base_ppn);
@@ -62,7 +62,7 @@ unsafe impl Hal for VirtioHal {
     ) {}
 }
 
-pub fn init_board() -> MosResult {
+pub fn init_board() -> SyscallResult {
     let virtio_blk = Arc::new(VirtIOBlock::new()?);
     let virtio_blk = Device::Block(virtio_blk);
     let virtio_dev_id = virtio_blk.metadata().dev_id;

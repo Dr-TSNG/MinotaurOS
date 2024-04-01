@@ -113,17 +113,17 @@ pub trait Inode: Send + Sync {
     }
 
     /// 在当前目录下创建文件
-    async fn create(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    async fn create(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
 
     /// 在当前目录下创建目录
-    async fn mkdir(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    async fn mkdir(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
 
     /// 在当前目录下删除文件
-    async fn unlink(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
 

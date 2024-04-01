@@ -4,7 +4,7 @@ use crate::arch::{PAGE_SIZE, VirtAddr, VirtPageNum};
 use crate::mm::addr_space::{AddressSpace, ASPerms};
 use crate::mm::region::ASRegionMeta;
 use crate::mm::region::lazy::LazyRegion;
-use crate::result::MosResult;
+use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
 
@@ -16,15 +16,15 @@ pub mod region;
 
 pub static KERNEL_SPACE: LateInit<Mutex<AddressSpace>> = LateInit::new();
 
-pub fn vm_init() -> MosResult {
-    KERNEL_SPACE.init(Mutex::new(AddressSpace::new_bare()?));
+pub fn vm_init() -> SyscallResult {
+    KERNEL_SPACE.init(Mutex::new(AddressSpace::new_kernel()));
     unsafe { KERNEL_SPACE.lock().activate(); }
     info!("Kernel address space activated");
     vm_test()?;
     Ok(())
 }
 
-fn vm_test() -> MosResult {
+fn vm_test() -> SyscallResult {
     let mut kernel_space = KERNEL_SPACE.lock();
     info!("Start VM test");
     let start = VirtPageNum(0x100);
@@ -38,7 +38,7 @@ fn vm_test() -> MosResult {
         &[],
         0,
     )?;
-    kernel_space.map_region(region)?;
+    kernel_space.map_region(region);
     let slice = unsafe {
         let ptr = VirtAddr::from(VirtPageNum::from(start)).as_ptr();
         core::slice::from_raw_parts_mut(ptr, 4 * PAGE_SIZE)

@@ -5,7 +5,6 @@ use log::trace;
 use crate::arch::{kvpn_to_ppn, PAGE_SIZE, PhysPageNum, ppn_to_kvpn, VirtAddr, VirtPageNum};
 use crate::config::KERNEL_HEAP_SIZE;
 use crate::println;
-use crate::result::{MosError, MosResult};
 use crate::sync::mutex::IrqMutex;
 
 #[global_allocator]
@@ -53,15 +52,14 @@ unsafe impl GlobalAlloc for HeapAllocator {
 /// 分配连续的内核页帧
 /// 
 /// SAFETY: 保证分配的页已经清零
-pub fn alloc_kernel_frames(pages: usize) -> MosResult<HeapFrameTracker> {
+pub fn alloc_kernel_frames(pages: usize) -> HeapFrameTracker {
     let vpn = KERNEL_HEAP.0.lock()
         .alloc(Layout::from_size_align(pages * PAGE_SIZE, PAGE_SIZE).unwrap())
         .map(|va| VirtPageNum::from(VirtAddr(va.as_ptr() as usize)))
-        .map_err(|_| MosError::OutOfMemory)?;
+        .expect("[HeapAllocator] Out of memory");
     let ppn = kvpn_to_ppn(vpn);
     ppn.byte_array().fill(0);
-    let tracker = HeapFrameTracker { ppn, pages };
-    Ok(tracker)
+    HeapFrameTracker { ppn, pages }
 }
 
 fn dealloc_kernel_pages(tracker: &HeapFrameTracker) {

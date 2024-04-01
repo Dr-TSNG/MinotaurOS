@@ -1,12 +1,11 @@
 use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
-use crate::arch::{PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum};
+use crate::arch::{PageTableEntry, PhysPageNum, PTEFlags, VirtPageNum};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::page_table::{PageTable, SlotType};
 use crate::mm::region::{ASRegion, ASRegionMeta};
-use crate::result::{MosError, MosResult};
 
 #[derive(Clone)]
 pub struct DirectRegion {
@@ -19,7 +18,7 @@ impl ASRegion for DirectRegion {
         &self.metadata
     }
 
-    fn map(&self, root_pt: PageTable, overwrite: bool) -> MosResult<Vec<HeapFrameTracker>> {
+    fn map(&self, root_pt: PageTable, overwrite: bool) -> Vec<HeapFrameTracker> {
         let mut dirs = vec![];
         let mut offset = 0;
         while offset < self.metadata.pages {
@@ -29,13 +28,13 @@ impl ASRegion for DirectRegion {
                 true => (1, next_lv1),
                 false => (2, offset + 1),
             };
-            dirs.extend(self.map_one(root_pt, level, offset, overwrite)?);
+            dirs.extend(self.map_one(root_pt, level, offset, overwrite));
             offset = next;
         }
-        Ok(dirs)
+        dirs
     }
 
-    fn unmap(&self, root_pt: PageTable) -> MosResult {
+    fn unmap(&self, root_pt: PageTable) {
         let mut offset = 0;
         while offset < self.metadata.pages {
             let next_lv1 = VirtPageNum(offset).step_lv1().0;
@@ -44,18 +43,17 @@ impl ASRegion for DirectRegion {
                 true => (1, next_lv1),
                 false => (2, offset + 1),
             };
-            self.unmap_one(root_pt, level, offset)?;
+            self.unmap_one(root_pt, level, offset);
             offset = next;
         }
-        Ok(())
     }
 
     fn resize(&mut self, new_pages: usize) {
         self.metadata.pages = new_pages;
     }
 
-    fn fork(&mut self, _parent_pt: PageTable) -> MosResult<Box<dyn ASRegion>> {
-        Ok(Box::new(self.clone()))
+    fn fork(&mut self, _parent_pt: PageTable) -> Box<dyn ASRegion> {
+        Box::new(self.clone())
     }
 }
 
@@ -67,14 +65,14 @@ impl DirectRegion {
 }
 
 impl DirectRegion {
-    fn map_one(&self, mut pt: PageTable, level: usize, offset: usize, overwrite: bool) -> MosResult<Vec<HeapFrameTracker>> {
+    fn map_one(&self, mut pt: PageTable, level: usize, offset: usize, overwrite: bool) -> Vec<HeapFrameTracker> {
         let vpn = self.metadata.start + offset;
         let mut dirs = vec![];
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == level {
                 if !overwrite && pte.valid() {
-                    return Err(MosError::PageAlreadyMapped(pte.ppn()));
+                    panic!("Page already mapped: {:?}", pte.ppn());
                 }
                 let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D;
                 if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
@@ -85,9 +83,9 @@ impl DirectRegion {
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    SlotType::Page(ppn) => return Err(MosError::PageAlreadyMapped(ppn)),
+                    SlotType::Page(ppn) => panic!("Page already mapped: {:?}", ppn),
                     SlotType::Invalid => {
-                        let dir = alloc_kernel_frames(1)?;
+                        let dir = alloc_kernel_frames(1);
                         *pte = PageTableEntry::new(dir.ppn, PTEFlags::V);
                         pt = PageTable::new(dir.ppn);
                         dirs.push(dir);
@@ -95,26 +93,25 @@ impl DirectRegion {
                 }
             }
         }
-        Ok(dirs)
+        dirs
     }
 
-    fn unmap_one(&self, mut pt: PageTable, level: usize, offset: usize) -> MosResult {
+    fn unmap_one(&self, mut pt: PageTable, level: usize, offset: usize) {
         let vpn = self.metadata.start + offset;
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == level {
                 if !pte.valid() {
-                    return Err(MosError::BadAddress(VirtAddr::from(vpn)));
+                    panic!("Page not mapped: {:?}", pte.ppn());
                 }
                 pte.set_flags(PTEFlags::empty());
                 break;
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    _ => return Err(MosError::BadAddress(VirtAddr::from(vpn))),
+                    _ => panic!("Page not mapped: {:?}", pte.ppn()),
                 }
             }
         }
-        Ok(())
     }
 }

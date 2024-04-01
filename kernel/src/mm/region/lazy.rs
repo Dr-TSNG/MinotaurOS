@@ -3,12 +3,12 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
-use crate::arch::{PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtAddr, VirtPageNum};
+use crate::arch::{PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtPageNum};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_kernel_frames, alloc_user_frames, HeapFrameTracker, UserFrameTracker};
 use crate::mm::page_table::{PageTable, SlotType};
 use crate::mm::region::{ASRegion, ASRegionMeta};
-use crate::result::{MosError, MosResult};
+use crate::result::SyscallResult;
 
 pub struct LazyRegion {
     metadata: ASRegionMeta,
@@ -30,23 +30,22 @@ impl ASRegion for LazyRegion {
         &self.metadata
     }
 
-    fn map(&self, root_pt: PageTable, overwrite: bool) -> MosResult<Vec<HeapFrameTracker>> {
+    fn map(&self, root_pt: PageTable, overwrite: bool) -> Vec<HeapFrameTracker> {
         let mut dirs = vec![];
         let mut vpn = self.metadata.start;
         for page in self.pages.iter() {
-            dirs.extend(self.map_one(root_pt, page, vpn, overwrite)?);
+            dirs.extend(self.map_one(root_pt, page, vpn, overwrite));
             vpn = vpn + 1;
         }
-        Ok(dirs)
+        dirs
     }
 
-    fn unmap(&self, root_pt: PageTable) -> MosResult {
+    fn unmap(&self, root_pt: PageTable) {
         let mut vpn = self.metadata.start;
         for _ in self.pages.iter() {
-            self.unmap_one(root_pt, vpn)?;
+            self.unmap_one(root_pt, vpn);
             vpn = vpn + 1;
         }
-        Ok(())
     }
 
     fn resize(&mut self, new_pages: usize) {
@@ -60,7 +59,7 @@ impl ASRegion for LazyRegion {
         self.metadata.pages = new_pages;
     }
 
-    fn fork(&mut self, parent_pt: PageTable) -> MosResult<Box<dyn ASRegion>> {
+    fn fork(&mut self, parent_pt: PageTable) -> Box<dyn ASRegion> {
         let mut new_pages = vec![];
         let mut remap = vec![];
         for (i, page) in self.pages.iter_mut().enumerate() {
@@ -84,16 +83,16 @@ impl ASRegion for LazyRegion {
         }
         for i in remap {
             let vpn = self.metadata.start + i;
-            self.map_one(parent_pt, &new_pages[i], vpn, true)?;
+            self.map_one(parent_pt, &new_pages[i], vpn, true);
         }
         let new_region = LazyRegion {
             metadata: self.metadata.clone(),
             pages: new_pages,
         };
-        Ok(Box::new(new_region))
+        Box::new(new_region)
     }
 
-    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> MosResult<()> {
+    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
         let id = vpn - self.metadata.start;
         let mut temp = PageState::Free;
         core::mem::swap(&mut temp, &mut self.pages[id.0]);
@@ -111,7 +110,7 @@ impl ASRegion for LazyRegion {
                 // TODO: 如果两个线程先后访问同一个页面，会发生什么？
             }
         }
-        self.map_one(root_pt, &temp, vpn, true)?;
+        self.map_one(root_pt, &temp, vpn, true);
         core::mem::swap(&mut temp, &mut self.pages[id.0]);
         Ok(())
     }
@@ -131,9 +130,9 @@ impl LazyRegion {
         metadata: ASRegionMeta,
         buf: &[u8],
         mut offset: usize,
-    ) -> MosResult<Box<Self>> {
+    ) -> SyscallResult<Box<Self>> {
         if buf.len() + offset > metadata.pages * PAGE_SIZE {
-            return Err(MosError::CrossBoundary);
+            panic!("Cross boundary");
         }
         let mut cur = 0;
         let mut pages = vec![];
@@ -163,13 +162,13 @@ impl LazyRegion {
         page: &PageState,
         vpn: VirtPageNum,
         overwrite: bool,
-    ) -> MosResult<Vec<HeapFrameTracker>> {
+    ) -> Vec<HeapFrameTracker> {
         let mut dirs = vec![];
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == 2 {
                 if !overwrite && pte.valid() {
-                    return Err(MosError::PageAlreadyMapped(pte.ppn()));
+                    panic!("Page already mapped: {:?}", pte.ppn());
                 }
                 let (ppn, flags) = match page {
                     PageState::Free => (PhysPageNum(0), PTEFlags::empty()),
@@ -193,9 +192,9 @@ impl LazyRegion {
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    SlotType::Page(ppn) => return Err(MosError::PageAlreadyMapped(ppn)),
+                    SlotType::Page(ppn) => panic!("Page already mapped: {:?}", ppn),
                     SlotType::Invalid => {
-                        let dir = alloc_kernel_frames(1)?;
+                        let dir = alloc_kernel_frames(1);
                         *pte = PageTableEntry::new(dir.ppn, PTEFlags::V);
                         pt = PageTable::new(dir.ppn);
                         dirs.push(dir);
@@ -203,10 +202,10 @@ impl LazyRegion {
                 }
             }
         }
-        Ok(dirs)
+        dirs
     }
 
-    fn unmap_one(&self, mut pt: PageTable, vpn: VirtPageNum) -> MosResult {
+    fn unmap_one(&self, mut pt: PageTable, vpn: VirtPageNum) {
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == 2 {
@@ -215,10 +214,9 @@ impl LazyRegion {
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    _ => return Err(MosError::BadAddress(VirtAddr::from(vpn))),
+                    _ => panic!("Page not mapped: {:?}", pte.ppn()),
                 }
             }
         }
-        Ok(())
     }
 }

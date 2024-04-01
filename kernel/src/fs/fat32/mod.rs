@@ -1,10 +1,8 @@
-use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
-use async_trait::async_trait;
-use log::{error, info, trace};
+use log::{info, trace, warn};
 use crate::driver::BlockDevice;
 use crate::fs::block_cache::BlockCache;
 use crate::fs::fat32::dir::FAT32Dirent;
@@ -13,8 +11,8 @@ use crate::fs::fat32::inode::FAT32Inode;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::Inode;
-use crate::result::{Errno, MosError, MosResult, SyscallResult};
-use crate::sync::mutex::Mutex;
+use crate::result::{Errno, SyscallResult};
+use crate::sync::once::LateInit;
 
 macro_rules! section {
     ($buf:ident, $start:ident, $end:ident) => {
@@ -38,44 +36,34 @@ pub struct FAT32FileSystem {
     vfsmeta: FileSystemMeta,
     fat32meta: FAT32Meta,
     cache: BlockCache<BLOCK_SIZE>,
-    root: Mutex<Option<Arc<FAT32Inode>>>,
+    root: LateInit<Arc<FAT32Inode>>,
 }
 
 impl FAT32FileSystem {
     pub async fn new(
         device: Arc<dyn BlockDevice>,
         flags: VfsFlags,
-    ) -> MosResult<Arc<Self>> {
+    ) -> SyscallResult<Arc<Self>> {
         let mut boot_sector = [0; BLOCK_SIZE];
         device.read_block(BOOT_SECTOR_ID, &mut boot_sector).await?;
-        let vfsmeta = FileSystemMeta::new(FileSystemType::FAT32, flags);
-        let fat32meta = FAT32Meta::new(&boot_sector)?;
-        let cache = BlockCache::new(device.clone(), BLOCK_CACHE_CAP);
-        let fs = FAT32FileSystem { device, vfsmeta, fat32meta, cache, root: Mutex::default() };
+        let fs = Arc::new(FAT32FileSystem {
+            device: device.clone(),
+            vfsmeta: FileSystemMeta::new(FileSystemType::FAT32, flags),
+            fat32meta: FAT32Meta::new(&boot_sector)?,
+            cache: BlockCache::new(device, BLOCK_CACHE_CAP),
+            root: LateInit::new(),
+        });
+        let root_cluster = fs.fat32meta.root_cluster as u32;
+        fs.root.init(FAT32Inode::root(&fs, None, root_cluster).await?);
         info!("FAT32 metadata: {:?}", fs.fat32meta);
-        Ok(Arc::new(fs))
-    }
-
-    /// 获取 FAT 表项
-    pub async fn read_fat_ent(&self, cluster: usize) -> MosResult<FATEnt> {
-        let (block_id, block_offset) = self.ent_block_for_cluster(cluster);
-        let mut ent = [0; 4];
-        self.cache.read_block(block_id, &mut ent, block_offset).await?;
-        Ok(FATEnt::from(u32::from_le_bytes(ent)))
-    }
-
-    /// 写入 FAT 表项
-    pub async fn write_fat_ent(&self, cluster: usize, ent: FATEnt) -> MosResult {
-        let (block_id, block_offset) = self.ent_block_for_cluster(cluster);
-        self.cache.write_block(block_id, &u32::from(ent).to_le_bytes(), block_offset).await?;
-        Ok(())
+        Ok(fs)
     }
 
     /// 根据簇号和偏移读取数据
-    pub async fn read_data(&self, cluster: usize, buf: &mut [u8], mut offset: usize) -> MosResult {
+    pub async fn read_data(&self, cluster: usize, buf: &mut [u8], mut offset: usize) -> SyscallResult {
         buf.len().checked_add(offset)
             .take_if(|v| *v <= self.fat32meta.bytes_per_cluster)
-            .ok_or(MosError::CrossBoundary)?;
+            .expect("Cross boundary");
 
         let mut cur = 0;
         let sector_start = self.fat32meta.data_sector_for_cluster(cluster);
@@ -102,10 +90,10 @@ impl FAT32FileSystem {
     }
 
     /// 根据簇号和偏移写入数据
-    pub async fn write_data(&self, cluster: usize, buf: &[u8], mut offset: usize) -> MosResult {
+    pub async fn write_data(&self, cluster: usize, buf: &[u8], mut offset: usize) -> SyscallResult {
         buf.len().checked_add(offset)
             .take_if(|v| *v <= self.fat32meta.bytes_per_cluster)
-            .ok_or(MosError::CrossBoundary)?;
+            .expect("Cross boundary");
 
         let mut cur = 0;
         let sector_start = self.fat32meta.data_sector_for_cluster(cluster);
@@ -131,7 +119,7 @@ impl FAT32FileSystem {
         Ok(())
     }
 
-    pub async fn read_dir(self: Arc<Self>, parent: Arc<dyn Inode>, clusters: &[usize]) -> MosResult<Vec<Arc<FAT32Inode>>> {
+    pub async fn read_dir(self: Arc<Self>, parent: Arc<dyn Inode>, clusters: &[usize]) -> SyscallResult<Vec<Arc<FAT32Inode>>> {
         let mut inodes = vec![];
         let mut dir = FAT32Dirent::default();
         'outer: for cluster in clusters {
@@ -163,7 +151,19 @@ impl FAT32FileSystem {
         }
         Ok(inodes)
     }
+}
 
+impl FileSystem for FAT32FileSystem {
+    fn metadata(&self) -> &FileSystemMeta {
+        &self.vfsmeta
+    }
+
+    fn root(self: Arc<Self>) -> Arc<dyn Inode> {
+        self.root.clone()
+    }
+}
+
+impl FAT32FileSystem {
     /// 根据簇号计算 FAT 表项所在的块号和块偏移
     fn ent_block_for_cluster(&self, cluster: usize) -> (usize, usize) {
         let ent_sector = self.fat32meta.ent_sector_for_cluster(cluster);
@@ -173,38 +173,45 @@ impl FAT32FileSystem {
         (block_id, block_offset)
     }
 
-    async fn walk_ent(&self, mut ent: FATEnt) -> MosResult<Vec<usize>> {
+    /// 获取 FAT 表项
+    async fn read_fat_ent(&self, cluster: usize) -> SyscallResult<FATEnt> {
+        let (block_id, block_offset) = self.ent_block_for_cluster(cluster);
+        let mut ent = [0; 4];
+        self.cache.read_block(block_id, &mut ent, block_offset).await?;
+        Ok(FATEnt::from(u32::from_le_bytes(ent)))
+    }
+
+    /// 写入 FAT 表项
+    async fn write_fat_ent(&self, cluster: usize, ent: FATEnt) -> SyscallResult {
+        let (block_id, block_offset) = self.ent_block_for_cluster(cluster);
+        self.cache.write_block(block_id, &u32::from(ent).to_le_bytes(), block_offset).await?;
+        Ok(())
+    }
+
+    /// 分配一个簇
+    async fn alloc_cluster(&self) -> SyscallResult<usize> {
+        let mut cluster = 0;
+        for pos in 2..self.fat32meta.max_cluster {
+            let fat_ent = self.read_fat_ent(cluster).await?;
+            if fat_ent == FATEnt::EMPTY {
+                cluster = pos;
+                break;
+            }
+        }
+        if cluster == 0 {
+            warn!("Disk is full");
+            return Err(Errno::ENOSPC);
+        }
+        self.write_fat_ent(cluster, FATEnt::EOF).await?;
+        Ok(cluster)
+    }
+
+    async fn walk_ent(&self, mut ent: FATEnt) -> SyscallResult<Vec<usize>> {
         let mut clusters = vec![];
         while let FATEnt::NEXT(cluster) = ent {
             clusters.push(cluster as usize);
             ent = self.read_fat_ent(cluster as usize).await?;
         }
         Ok(clusters)
-    }
-}
-
-#[async_trait]
-impl FileSystem for FAT32FileSystem {
-    fn metadata(&self) -> &FileSystemMeta {
-        &self.vfsmeta
-    }
-
-    async fn root(self: Arc<Self>) -> SyscallResult<Arc<dyn Inode>> {
-        let mut root = self.root.lock();
-        match root.clone() {
-            Some(inode) => Ok(inode),
-            None => {
-                let root_cluster = self.fat32meta.root_cluster as u32;
-                let inode = match FAT32Inode::root(&self, None, root_cluster).await {
-                    Ok(inode) => inode,
-                    Err(e) => {
-                        error!("IO Error: {:?}", e);
-                        return Err(Errno::EIO);
-                    }
-                };
-                *root = Some(inode.clone());
-                Ok(inode)
-            }
-        }
     }
 }

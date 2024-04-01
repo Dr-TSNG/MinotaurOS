@@ -23,7 +23,7 @@ use crate::process::thread::Thread;
 use crate::process::thread::tid::TidTracker;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::processor::hart::local_hart;
-use crate::result::{MosResult, SyscallResult};
+use crate::result::SyscallResult;
 use crate::sched::spawn_user_thread;
 use crate::sync::mutex::IrqMutex;
 use crate::trap::context::TrapContext;
@@ -61,7 +61,7 @@ pub struct ProcessInner {
 }
 
 impl Process {
-    pub async fn new_initproc(mnt_ns: Arc<MountNamespace>, elf_data: &[u8]) -> MosResult<Arc<Self>> {
+    pub async fn new_initproc(mnt_ns: Arc<MountNamespace>, elf_data: &[u8]) -> SyscallResult<Arc<Self>> {
         let (addr_space, entry, user_sp, _) =
             AddressSpace::from_elf(&mnt_ns, elf_data).await?;
         let pid = Arc::new(TidTracker::new());
@@ -102,7 +102,7 @@ impl Process {
     ) -> SyscallResult<usize> {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
         let (addr_space, entry, mut user_sp, mut auxv) =
-            AddressSpace::from_elf(&mnt_ns, elf_data).await.unwrap();
+            AddressSpace::from_elf(&mnt_ns, elf_data).await?;
 
         current_process().inner.lock().apply_mut(|proc_inner| {
             if proc_inner.threads.len() > 1 {
@@ -212,7 +212,7 @@ impl Process {
                     children: Vec::new(),
                     pgid: new_pid.0,
                     threads: BTreeMap::new(),
-                    addr_space: proc_inner.addr_space.fork().unwrap(),
+                    addr_space: proc_inner.addr_space.fork(),
                     mnt_ns: proc_inner.mnt_ns.clone(),
                     fd_table: proc_inner.fd_table.clone(),
                     cwd: proc_inner.cwd.clone(),

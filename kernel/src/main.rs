@@ -40,7 +40,7 @@ use config::KERNEL_ADDR_OFFSET;
 use crate::config::{LINKAGE_EBSS, LINKAGE_SBSS};
 use crate::process::Process;
 use crate::processor::hart;
-use crate::result::MosResult;
+use crate::result::SyscallResult;
 use crate::sched::spawn_kernel_thread;
 use crate::sync::executor::run_executor;
 
@@ -55,7 +55,7 @@ fn clear_bss() {
     }
 }
 
-fn start_main_hart() -> MosResult {
+fn start_main_hart() -> SyscallResult {
     clear_bss();
     hart::init(0);
     mm::allocator::init();

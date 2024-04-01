@@ -1,10 +1,8 @@
-use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use core::ops::Deref;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use async_trait::async_trait;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::inode::Inode;
 use crate::fs::path::is_absolute_path;
@@ -30,13 +28,12 @@ pub struct FileSystemMeta {
 }
 
 /// 文件系统
-#[async_trait]
 pub trait FileSystem: Send + Sync {
     /// 文件系统元数据
     fn metadata(&self) -> &FileSystemMeta;
 
     /// 根 Inode
-    async fn root(self: Arc<Self>) -> SyscallResult<Arc<dyn Inode>>;
+    fn root(self: Arc<Self>) -> Arc<dyn Inode>;
 }
 
 impl FileSystemMeta {
@@ -51,7 +48,7 @@ impl dyn FileSystem {
     /// 调用此方法时，需保证 `absolute_path` 不含有挂载点，否则应该调用 [Inode::lookup_with_mount]。
     pub async fn lookup_from_root(self: Arc<Self>, absolute_path: &str) -> SyscallResult<Arc<dyn Inode>> {
         assert!(is_absolute_path(absolute_path));
-        let mut inode = self.root().await?;
+        let mut inode = self.root();
         for name in split_path!(absolute_path) {
             inode = inode.lookup(name).await?;
         }

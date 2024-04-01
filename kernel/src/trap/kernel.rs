@@ -4,6 +4,7 @@ use riscv::register::scause::{Exception, Trap};
 use crate::arch::VirtAddr;
 use crate::mm::addr_space::ASPerms;
 use crate::processor::hart::local_hart;
+use crate::result::Errno;
 
 #[no_mangle]
 fn trap_from_kernel() {
@@ -38,8 +39,12 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
     let mut proc_inner = thread.process.inner.lock();
     match proc_inner.addr_space.handle_page_fault(addr, perform) {
         Ok(()) => debug!("Page fault resolved"),
+        Err(Errno::ENOSPC) => {
+            error!("Fatal page fault: Out of memory, kill process");
+            // current_process().terminate(-1);
+        }
         Err(e) => {
-            error!("Fatal page fault failed, send SIGSEGV: {:?}", e);
+            error!("Page fault failed: {:?}, send SIGSEGV", e);
             // current_process().signal(SIGSEGV);
             todo!()
         }

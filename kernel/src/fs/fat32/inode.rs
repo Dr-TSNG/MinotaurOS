@@ -6,14 +6,14 @@ use alloc::vec::Vec;
 use core::cmp::min;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
-use log::{debug, error, trace};
+use log::{debug, trace};
 use crate::fs::fat32::dir::{FAT32Dirent, FileAttr};
 use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::fat32::fat::FATEnt;
 use crate::fs::ffi::{InodeMode, TimeSpec};
 use crate::fs::file::{File, FileMeta, RegularFile};
 use crate::fs::inode::{Inode, InodeMeta};
-use crate::result::{Errno, MosResult, SyscallResult};
+use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::AsyncMutex;
 
 pub struct FAT32Inode {
@@ -34,7 +34,7 @@ impl FAT32Inode {
         fs: &Arc<FAT32FileSystem>,
         parent: Option<Weak<dyn Inode>>,
         root_cluster: u32,
-    ) -> MosResult<Arc<Self>> {
+    ) -> SyscallResult<Arc<Self>> {
         let metadata = InodeMeta::new(
             INO_POOL.fetch_add(1, Ordering::Acquire),
             fs.device.metadata().dev_id,
@@ -49,7 +49,7 @@ impl FAT32Inode {
         );
         let inode = Self {
             metadata,
-            fs: Arc::downgrade(&fs),
+            fs: Arc::downgrade(fs),
             inner: AsyncMutex::new(FAT32InodeInner {
                 clusters: fs.walk_ent(FATEnt::NEXT(root_cluster)).await?,
                 children: vec![],
@@ -62,7 +62,7 @@ impl FAT32Inode {
         fs: &Arc<FAT32FileSystem>,
         parent: &Arc<dyn Inode>,
         dir: FAT32Dirent,
-    ) -> MosResult<Arc<Self>> {
+    ) -> SyscallResult<Arc<Self>> {
         let mode = match dir.attr.contains(FileAttr::ATTR_DIRECTORY) {
             true => InodeMode::DIR,
             false => InodeMode::IFREG,
@@ -119,10 +119,7 @@ impl Inode for FAT32Inode {
                 continue;
             }
             let next = min(cur + fs.fat32meta.bytes_per_cluster - offset, buf.len());
-            if let Err(e) = fs.read_data(*cluster, &mut buf[cur..next], offset).await {
-                error!("IO Error: {:?}", e);
-                return Err(Errno::EIO);
-            }
+            fs.read_data(*cluster, &mut buf[cur..next], offset).await?;
             offset = 0;
             cur = next;
             if cur == buf.len() {
@@ -176,15 +173,20 @@ impl Inode for FAT32Inode {
         Ok(ret)
     }
 
-    async fn create(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    async fn create(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         todo!()
     }
 
-    async fn mkdir(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    async fn mkdir(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let mut inner = self.inner.lock().await;
+        if inner.children.is_empty() {
+            self.load_children(&mut inner, fs).await?;
+        }
         todo!()
     }
 
-    async fn unlink(&self, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         todo!()
     }
 }
@@ -192,10 +194,7 @@ impl Inode for FAT32Inode {
 impl FAT32Inode {
     async fn load_children(self: &Arc<Self>, inner: &mut FAT32InodeInner, fs: Arc<FAT32FileSystem>) -> SyscallResult {
         debug!("[fat32] Load children");
-        let inodes = fs.read_dir(self.clone(), &inner.clusters).await.map_err(|e| {
-            error!("IO Error: {:?}", e);
-            Errno::EIO
-        })?;
+        let inodes = fs.read_dir(self.clone(), &inner.clusters).await?;
         for inode in inodes {
             inner.children.push(inode);
         }

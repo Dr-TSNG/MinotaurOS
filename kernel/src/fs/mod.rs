@@ -1,12 +1,10 @@
-use alloc::string::ToString;
 use alloc::sync::Arc;
 use log::info;
 use crate::driver::{DEVICES, Device, BlockDevice};
 use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::MountNamespace;
-use crate::result::MosError::BlockDeviceError;
-use crate::result::MosResult;
+use crate::result::SyscallResult;
 use crate::sync::block_on;
 
 pub mod block_cache;
@@ -19,10 +17,10 @@ pub mod file_system;
 pub mod inode;
 pub mod path;
 
-pub fn init() -> MosResult<Arc<MountNamespace>> {
+pub fn init() -> SyscallResult<Arc<MountNamespace>> {
     let root_dev = match DEVICES.read().get(&1) {
         Some(Device::Block(blk)) => blk.clone(),
-        _ => return Err(BlockDeviceError("Missing root block device".to_string())),
+        None => panic!("Missing root block device"),
     };
     let mnt_ns = block_on(async_init(root_dev))?;
     info!("File systems initialized");
@@ -30,7 +28,7 @@ pub fn init() -> MosResult<Arc<MountNamespace>> {
     Ok(mnt_ns)
 }
 
-async fn async_init(root_dev: Arc<dyn BlockDevice>) -> MosResult<Arc<MountNamespace>> {
+async fn async_init(root_dev: Arc<dyn BlockDevice>) -> SyscallResult<Arc<MountNamespace>> {
     let root_fs = FAT32FileSystem::new(root_dev, VfsFlags::empty()).await?;
     let mnt_ns = Arc::new(MountNamespace::new(root_fs));
     Ok(mnt_ns)

@@ -7,7 +7,7 @@ use core::arch::asm;
 use core::cmp::min;
 use core::ffi::CStr;
 use bitflags::bitflags;
-use log::{debug, trace};
+use log::{debug, info};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
 use zerocopy::transmute;
@@ -21,8 +21,7 @@ use crate::mm::region::{ASRegion, ASRegionMeta};
 use crate::mm::region::direct::DirectRegion;
 use crate::mm::region::lazy::LazyRegion;
 use crate::process::aux::{self, Aux};
-use crate::result::{Errno, MosError, MosResult, SyscallResult};
-use crate::result::MosError::InvalidExecutable;
+use crate::result::{Errno, SyscallResult};
 
 bitflags! {
     pub struct ASPerms: u8 {
@@ -49,8 +48,8 @@ pub struct AddressSpace {
 }
 
 impl AddressSpace {
-    pub fn new_bare() -> MosResult<Self> {
-        let root_pt_page = alloc_kernel_frames(1)?;
+    pub fn new_bare() -> Self {
+        let root_pt_page = alloc_kernel_frames(1);
         debug!("AddressSpace: create root page table {:?}", root_pt_page.ppn);
         let mut addr_space = AddressSpace {
             root_pt: PageTable::new(root_pt_page.ppn),
@@ -59,21 +58,28 @@ impl AddressSpace {
             pt_dirs: vec![],
         };
         addr_space.pt_dirs.push(root_pt_page);
-        addr_space.copy_global_mappings()?;
+        addr_space
+    }
+
+    pub fn new_kernel() -> Self {
+        let mut addr_space = Self::new_bare();
+        addr_space.copy_global_mappings();
         for region in addr_space.regions.values() {
             let start = region.metadata().start;
             let end = start + region.metadata().pages;
-            trace!("AddressSpace: {:?} {:x?} - {:x?}", region.metadata().name, start, end)
+            info!("AddressSpace: {:?} {:x?} - {:x?}", region.metadata().name, start, end)
         }
-        Ok(addr_space)
+        addr_space
     }
 
     pub async fn from_elf(
         mnt_ns: &MountNamespace,
         data: &[u8],
-    ) -> MosResult<(Self, usize, usize, Vec<Aux>)> {
-        let mut addr_space = Self::new_bare()?;
-        let elf = ElfFile::new(data).map_err(InvalidExecutable)?;
+    ) -> SyscallResult<(Self, usize, usize, Vec<Aux>)> {
+        let mut addr_space = Self::new_bare();
+        addr_space.copy_global_mappings();
+        addr_space.map_trampoline()?;
+        let elf = ElfFile::new(data).map_err(|_| Errno::ENOEXEC)?;
         let ph_count = elf.header.pt2.ph_count();
 
         let mut entry = elf.header.pt2.entry_point() as usize;
@@ -81,8 +87,8 @@ impl AddressSpace {
         let mut linker_base = 0;
         let mut max_end_vpn = VirtPageNum(0);
         for i in 0..ph_count {
-            let phdr = elf.program_header(i).map_err(InvalidExecutable)?;
-            match phdr.get_type().map_err(InvalidExecutable)? {
+            let phdr = elf.program_header(i).map_err(|_| Errno::ENOEXEC)?;
+            match phdr.get_type().map_err(|_| Errno::ENOEXEC)? {
                 xmas_elf::program::Type::Load => {
                     let start_addr = VirtAddr(phdr.virtual_addr() as usize);
                     let end_addr = VirtAddr((phdr.virtual_addr() + phdr.mem_size()) as usize);
@@ -116,7 +122,7 @@ impl AddressSpace {
                         start_addr.page_offset(2),
                     )?;
                     max_end_vpn = region.metadata().end();
-                    addr_space.map_region(region)?;
+                    addr_space.map_region(region);
                     debug!("Map elf section: {:?} - {:?}", start_vpn, end_vpn);
                 }
                 xmas_elf::program::Type::Interp => {
@@ -137,7 +143,7 @@ impl AddressSpace {
             start: ustack_bottom_vpn,
             pages: (ustack_top_vpn - ustack_bottom_vpn).0,
         });
-        addr_space.map_region(region)?;
+        addr_space.map_region(region);
         debug!("Map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
 
         // 映射用户堆
@@ -149,7 +155,7 @@ impl AddressSpace {
             start: uheap_bottom_vpn,
             pages: (uheap_top_vpn - uheap_bottom_vpn).0,
         });
-        addr_space.map_region(region)?;
+        addr_space.map_region(region);
         debug!("Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
 
         let mut auxv: Vec<Aux> = Vec::with_capacity(64);
@@ -168,13 +174,13 @@ impl AddressSpace {
         Ok((addr_space, entry, ustack_top, auxv))
     }
 
-    pub fn fork(&mut self) -> MosResult<AddressSpace> {
-        let mut forked = Self::new_bare()?;
+    pub fn fork(&mut self) -> AddressSpace {
+        let mut forked = Self::new_bare();
         for region in self.regions.values_mut() {
-            let forked_region = region.fork(self.root_pt)?;
-            forked.map_region(forked_region)?;
+            let forked_region = region.fork(self.root_pt);
+            forked.map_region(forked_region);
         }
-        Ok(forked)
+        forked
     }
 
     pub unsafe fn activate(&self) {
@@ -182,33 +188,31 @@ impl AddressSpace {
         asm!("sfence.vma");
     }
 
-    pub fn map_region(&mut self, region: Box<dyn ASRegion>) -> MosResult {
-        let dirs = region.map(self.root_pt, false)?;
+    pub fn map_region(&mut self, region: Box<dyn ASRegion>) {
+        let dirs = region.map(self.root_pt, false);
         self.regions.insert(region.metadata().start, region);
         self.pt_dirs.extend(dirs);
-        Ok(())
     }
 
-    pub fn unmap_region(&mut self, start: VirtPageNum) -> MosResult<Box<dyn ASRegion>> {
-        let region = self.regions
+    pub fn unmap_region(&mut self, start: VirtPageNum) -> Option<Box<dyn ASRegion>> {
+        self.regions
             .remove(&start)
-            .ok_or(MosError::BadAddress(start.into()))?;
-        region.unmap(self.root_pt)?;
-        Ok(region)
+            .inspect(|region| region.unmap(self.root_pt))
     }
 
-    pub fn handle_page_fault(&mut self, addr: VirtAddr, perform: ASPerms) -> MosResult {
+    pub fn handle_page_fault(&mut self, addr: VirtAddr, perform: ASPerms) -> SyscallResult {
         let vpn = addr.floor();
         let region = self.regions
             .values_mut()
             .filter(|region| region.metadata().start <= vpn && region.metadata().end() > vpn)
             .next()
-            .ok_or(MosError::BadAddress(addr))?;
+            .ok_or(Errno::EFAULT)?;
 
         let result = if region.metadata().perms.contains(perform) {
             region.fault_handler(self.root_pt, vpn)
         } else {
-            Err(MosError::PageAccessDenied(addr.into()))
+            info!("Page access violation: {:?} - {:?}", addr, perform);
+            Err(Errno::EACCES)
         };
         result
     }
@@ -275,8 +279,7 @@ impl AddressSpace {
         }
         let mut brk = self.unmap_region(heap_start).unwrap();
         brk.resize((addr.ceil() - heap_start).0);
-        // todo: No unwrap
-        self.map_region(brk).unwrap();
+        self.map_region(brk);
         Ok(VirtAddr::from(addr.ceil()).0)
     }
 
@@ -308,14 +311,13 @@ impl AddressSpace {
             start,
             pages,
         });
-        // todo: No unwrap
-        self.map_region(region).unwrap();
+        self.map_region(region);
         Ok(VirtAddr::from(start).0)
     }
 }
 
 impl AddressSpace {
-    fn copy_global_mappings(&mut self) -> MosResult {
+    fn copy_global_mappings(&mut self) {
         for map in GLOBAL_MAPPINGS.iter() {
             debug!("Copy global mappings: {} from {:?} to {:?}", map.name, map.phys_start, map.phys_end());
             let ppn_start = PhysPageNum::from(map.phys_start);
@@ -329,7 +331,7 @@ impl AddressSpace {
                 pages: (vpn_end - vpn_start).0,
             };
             let region = DirectRegion::new(metadata, ppn_start);
-            self.map_region(region)?;
+            self.map_region(region);
         }
 
         for (paddr_start, paddr_end) in PHYS_MEMORY.iter() {
@@ -345,9 +347,11 @@ impl AddressSpace {
                 pages: (vpn_end - vpn_start).0,
             };
             let region = DirectRegion::new(metadata, ppn_start);
-            self.map_region(region)?;
+            self.map_region(region);
         }
+    }
 
+    fn map_trampoline(&mut self) -> SyscallResult {
         // li a7, 139; ecall
         let trampoline: [u8; 8] = transmute!([0x08b00893, 0x00000073]);
         let region = LazyRegion::new_framed(
@@ -360,21 +364,21 @@ impl AddressSpace {
             &trampoline,
             0,
         )?;
-        self.map_region(region)?;
+        self.map_region(region);
         Ok(())
     }
 
-    async fn load_linker(&mut self, mnt_ns: &MountNamespace, offset: usize) -> MosResult<usize> {
+    async fn load_linker(&mut self, mnt_ns: &MountNamespace, offset: usize) -> SyscallResult<usize> {
         let (fs, path) = mnt_ns.resolve("/libc.so").unwrap();
         let inode = fs.lookup_from_root(&path).await.unwrap();
         let file = inode.open().unwrap();
         let elf_data = file.read_all().await.unwrap();
-        let elf = ElfFile::new(&elf_data).map_err(InvalidExecutable)?;
+        let elf = ElfFile::new(&elf_data).map_err(|_| Errno::ENOEXEC)?;
         let ph_count = elf.header.pt2.ph_count();
 
         for i in 0..ph_count {
-            let phdr = elf.program_header(i).map_err(InvalidExecutable)?;
-            if phdr.get_type().map_err(InvalidExecutable)? == xmas_elf::program::Type::Load {
+            let phdr = elf.program_header(i).map_err(|_| Errno::ENOEXEC)?;
+            if phdr.get_type().map_err(|_| Errno::ENOEXEC)? == xmas_elf::program::Type::Load {
                 let start_addr = VirtAddr(phdr.virtual_addr() as usize + offset);
                 let end_addr = VirtAddr((phdr.virtual_addr() + phdr.mem_size()) as usize + offset);
                 let start_vpn = start_addr.floor();
@@ -403,7 +407,7 @@ impl AddressSpace {
                     buf,
                     start_addr.page_offset(2),
                 )?;
-                self.map_region(region)?;
+                self.map_region(region);
                 debug!("Map linker section: {:?} - {:?}", start_vpn, end_vpn);
             }
         }

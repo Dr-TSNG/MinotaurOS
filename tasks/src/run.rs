@@ -18,7 +18,7 @@ pub struct RunConfig {
     pub smp: u8,
     #[clap(long, default_value = "128M")]
     pub mem: String,
-    #[clap(long, default_value = "prebuilts/disk.img")]
+    #[clap(long, default_value = "prebuilts/pre-2024.img")]
     pub disk: String,
     #[clap(long)]
     pub features: Vec<String>,
