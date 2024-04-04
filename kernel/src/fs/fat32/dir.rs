@@ -1,7 +1,10 @@
+use alloc::collections::VecDeque;
 use alloc::string::String;
+use alloc::vec::Vec;
 use bitflags::bitflags;
 use time::{Date, Month, Time};
 use crate::fs::ffi::TimeSpec;
+use crate::sched::time::current_time;
 
 /// 目录项偏移
 enum DirOffset {
@@ -138,33 +141,41 @@ pub struct FAT32Dirent {
     pub size: u32,
 }
 
-impl From<&[u8]> for FAT32Dirent {
-    fn from(value: &[u8]) -> Self {
-        let attr = FileAttr::from_bits_truncate(value[DirOffset::Attr as usize]);
-        assert!(attr.contains(FileAttr::ATTR_LONG_NAME));
-        let acc_time = DirOffset::acc_time(value);
-        let wrt_time = DirOffset::wrt_time(value);
-        let crt_time = DirOffset::crt_time(value);
-        Self {
-            name: String::new(),
-            attr,
-            acc_time: Self::time_normalize(acc_time.0, acc_time.1).unwrap_or_default(),
-            wrt_time: Self::time_normalize(wrt_time.0, wrt_time.1).unwrap_or_default(),
-            crt_time: Self::time_normalize(crt_time.0, crt_time.1).unwrap_or_default(),
-            cluster: DirOffset::cluster(value),
-            size: DirOffset::size(value),
-        }
-    }
-}
-
 impl FAT32Dirent {
-    pub fn is_empty(value: &[u8]) -> bool {
+    pub fn is_end(value: &[u8]) -> bool {
         value[DirOffset::Name as usize] == 0x00
     }
-    
+
+    pub fn is_empty(value: &[u8]) -> bool {
+        value[DirOffset::Name as usize] == 0xE5
+    }
+
     pub fn is_long_dirent(value: &[u8]) -> bool {
         let attr = FileAttr::from_bits_truncate(value[DirOffset::Attr as usize]);
         attr == FileAttr::ATTR_LONG_NAME
+    }
+
+    pub fn end() -> [u8; 32] {
+        [0; 32]
+    }
+
+    pub fn empty() -> [u8; 32] {
+        let mut dir = [0; 32];
+        dir[DirOffset::Name as usize] = 0xE5;
+        dir
+    }
+
+    pub fn new(name: String, attr: FileAttr, cluster: u32, size: u32) -> Self {
+        let now = current_time();
+        Self {
+            name,
+            attr,
+            acc_time: now.into(),
+            wrt_time: now.into(),
+            crt_time: now.into(),
+            cluster,
+            size,
+        }
     }
 
     /// 添加一个长目录项
@@ -185,6 +196,59 @@ impl FAT32Dirent {
         self.crt_time = Self::time_normalize(crt_time.0, crt_time.1).unwrap_or_default();
         self.cluster = DirOffset::cluster(short_dir);
         self.size = DirOffset::size(short_dir);
+    }
+
+    pub fn to_dirs(&self) -> VecDeque<[u8; 32]> {
+        let short_name = self.short_name();
+        let checksum = short_name.iter().fold(0u8, |sum, c| {
+            (sum & 1).wrapping_shl(7).wrapping_add(sum >> 1).wrapping_add(*c)
+        });
+        let mut dirs = VecDeque::new();
+        let mut name: Vec<u16> = self.name.encode_utf16().collect();
+        for _ in name.len() % 13..13 {
+            name.push(0);
+        }
+        for i in 0..name.len() / 13 {
+            let mut long_dir = [0; 32];
+            long_dir[LongDirOffset::Ord as usize] = LAST_LONG_ENTRY | (i + 1) as u8;
+            let slice = &name[i * 13..(i + 1) * 13];
+            long_dir[LongDirOffset::Name1 as usize..LongDirOffset::Attr as usize]
+                .copy_from_slice(bytemuck::cast_slice(&slice[..5]));
+            long_dir[LongDirOffset::Name2 as usize..LongDirOffset::FstClusLO as usize]
+                .copy_from_slice(bytemuck::cast_slice(&slice[5..11]));
+            long_dir[LongDirOffset::Name3 as usize..LongDirOffset::End as usize]
+                .copy_from_slice(bytemuck::cast_slice(&slice[11..]));
+            long_dir[LongDirOffset::Attr as usize] = FileAttr::ATTR_LONG_NAME.bits();
+            long_dir[LongDirOffset::Chksum as usize] = checksum;
+            dirs.push_front(long_dir);
+        }
+
+        let mut short_dir = [0; 32];
+        short_dir[DirOffset::Name as usize..DirOffset::Attr as usize]
+            .copy_from_slice(&short_name);
+        short_dir[DirOffset::Attr as usize] = self.attr.bits();
+        let hi = (self.cluster >> 16) as u16;
+        let lo = self.cluster as u16;
+        short_dir[DirOffset::FstClusHI as usize..DirOffset::WrtTime as usize]
+            .copy_from_slice(&hi.to_le_bytes());
+        short_dir[DirOffset::FstClusLO as usize..DirOffset::FileSize as usize]
+            .copy_from_slice(&lo.to_le_bytes());
+        dirs.push_back(short_dir);
+        dirs
+    }
+
+    fn short_name(&self) -> [u8; 11] {
+        let mut short_name = [0x20; 11];
+        let mut i = 0;
+        for c in self.name.as_bytes() {
+            if *c == '.' as u8 {
+                i = 8;
+                continue;
+            }
+            short_name[i] = *c;
+            i += 1;
+        }
+        short_name
     }
 
     fn time_normalize(date: u16, hms: u16) -> Option<TimeSpec> {

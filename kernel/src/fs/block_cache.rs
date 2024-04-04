@@ -2,6 +2,7 @@ use alloc::sync::Arc;
 use lru::LruCache;
 use crate::driver::BlockDevice;
 use crate::result::SyscallResult;
+use crate::sync::block_on;
 use crate::sync::mutex::AsyncMutex;
 
 /// 异步块缓存
@@ -15,6 +16,13 @@ pub struct BlockCache<const B: usize> {
 pub struct CacheValue<const B: usize> {
     dirty: bool,
     data: [u8; B],
+}
+
+impl<const B: usize> Drop for BlockCache<B> {
+    fn drop(&mut self) {
+        // TODO: Async drop?
+        block_on(self.sync_all()).unwrap();
+    }
 }
 
 impl<const B: usize> Drop for CacheValue<B> {
@@ -109,9 +117,10 @@ impl<const B: usize> BlockCache<B> {
         Ok(())
     }
 
-    async fn sync(&self, block_id: usize, cache: CacheValue<B>) -> SyscallResult {
+    async fn sync(&self, block_id: usize, mut cache: CacheValue<B>) -> SyscallResult {
         if cache.dirty {
             self.device.write_block(block_id, &cache.data).await?;
+            cache.dirty = false;
         }
         Ok(())
     }

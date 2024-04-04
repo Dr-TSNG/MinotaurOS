@@ -1,4 +1,5 @@
 use log::error;
+use crate::fs::fat32::BLOCK_SIZE;
 use crate::fs::fat32::bpb::BPBOffset;
 use crate::result::{Errno, SyscallResult};
 
@@ -72,6 +73,10 @@ impl FAT32Meta {
         let bytes_per_cluster = bytes_per_sector * sectors_per_cluster;
         let root_cluster = BPBOffset::root_cluster(boot_sector) as usize;
         let max_cluster = (total_sectors - data_offset) / sectors_per_cluster;
+        if bytes_per_sector != BLOCK_SIZE {
+            error!("Unsupported sector size");
+            return Err(Errno::EINVAL);
+        }
         if total_sectors / sectors_per_cluster < 65525 {
             error!("Not a FAT32 file system");
             return Err(Errno::EINVAL);

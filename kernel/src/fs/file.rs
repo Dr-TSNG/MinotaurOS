@@ -10,7 +10,7 @@ use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::AsyncMutex;
 
 pub struct FileMeta {
-    pub inode: Arc<dyn Inode>,
+    pub inode: Option<Arc<dyn Inode>>,
     pub prw_lock: AsyncMutex<()>,
     pub inner: AsyncMutex<FileMetaInner>,
 }
@@ -24,7 +24,7 @@ pub struct FileMetaInner {
 }
 
 impl FileMeta {
-    pub fn new(inode: Arc<dyn Inode>) -> Self {
+    pub fn new(inode: Option<Arc<dyn Inode>>) -> Self {
         FileMeta {
             inode,
             prw_lock: AsyncMutex::default(),
@@ -56,6 +56,7 @@ impl TryFrom<(i32, isize)> for Seek {
     }
 }
 
+#[allow(unused)]
 #[async_trait]
 pub trait File: Send + Sync {
     fn metadata(&self) -> &FileMeta;
@@ -64,25 +65,21 @@ pub trait File: Send + Sync {
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize>;
 
+    async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
+        Err(Errno::ESPIPE)
+    }
+
     async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
-        let _lock = self.metadata().prw_lock.lock().await;
-        let old = self.seek(Seek::Cur(0)).await?;
-        self.seek(Seek::Set(offset)).await?;
-        let ret = self.read(buf).await;
-        self.seek(Seek::Set(old)).await?;
-        ret
+        Err(Errno::ESPIPE)
     }
 
     async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
-        let _lock = self.metadata().prw_lock.lock().await;
-        let old = self.seek(Seek::Cur(0)).await?;
-        self.seek(Seek::Set(offset)).await?;
-        let ret = self.write(buf).await;
-        self.seek(Seek::Set(old)).await?;
-        ret
+        Err(Errno::ESPIPE)
     }
+}
 
-    async fn read_all(&self) -> SyscallResult<Vec<u8>> {
+impl dyn File {
+    pub async fn read_all(&self) -> SyscallResult<Vec<u8>> {
         self.seek(Seek::Set(0)).await?;
         let mut buf = Vec::new();
         let mut tmp = [0u8; PAGE_SIZE];
@@ -94,33 +91,6 @@ pub trait File: Send + Sync {
             buf.extend_from_slice(&tmp[..len as usize]);
         }
         Ok(buf)
-    }
-
-    async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
-        let metadata = self.metadata();
-        let mut inner = metadata.inner.lock().await;
-        inner.pos = match seek {
-            Seek::Set(offset) => {
-                if offset < 0 {
-                    return Err(Errno::EINVAL);
-                }
-                offset
-            }
-            Seek::Cur(offset) => {
-                match inner.pos.checked_add(offset) {
-                    Some(new_pos) => new_pos,
-                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
-                }
-            }
-            Seek::End(offset) => {
-                let size = metadata.inode.metadata().inner.lock().size;
-                match size.checked_add(offset) {
-                    Some(new_pos) => new_pos,
-                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
-                }
-            }
-        };
-        Ok(inner.pos)
     }
 }
 
@@ -142,7 +112,7 @@ impl File for RegularFile {
 
     // TODO: Page Cache
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
-        let inode = self.metadata.inode.clone();
+        let inode = self.metadata.inode.as_ref().unwrap();
         let mut inner = self.metadata.inner.lock().await;
         let count = inode.read(buf, inner.pos).await?;
         inner.pos += count;
@@ -150,10 +120,55 @@ impl File for RegularFile {
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
-        let inode = self.metadata.inode.clone();
+        let inode = self.metadata.inode.as_ref().unwrap();
         let mut inner = self.metadata.inner.lock().await;
         let count = inode.write(buf, inner.pos).await?;
         inner.pos += count;
         Ok(count)
+    }
+
+    async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
+        let metadata = self.metadata();
+        let mut inner = metadata.inner.lock().await;
+        inner.pos = match seek {
+            Seek::Set(offset) => {
+                if offset < 0 {
+                    return Err(Errno::EINVAL);
+                }
+                offset
+            }
+            Seek::Cur(offset) => {
+                match inner.pos.checked_add(offset) {
+                    Some(new_pos) => new_pos,
+                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
+                }
+            }
+            Seek::End(offset) => {
+                let size = metadata.inode.as_ref().unwrap().metadata().inner.lock().size;
+                match size.checked_add(offset) {
+                    Some(new_pos) => new_pos,
+                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
+                }
+            }
+        };
+        Ok(inner.pos)
+    }
+
+    async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
+        let _lock = self.metadata().prw_lock.lock().await;
+        let old = self.seek(Seek::Cur(0)).await?;
+        self.seek(Seek::Set(offset)).await?;
+        let ret = self.read(buf).await;
+        self.seek(Seek::Set(old)).await?;
+        ret
+    }
+
+    async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
+        let _lock = self.metadata().prw_lock.lock().await;
+        let old = self.seek(Seek::Cur(0)).await?;
+        self.seek(Seek::Set(offset)).await?;
+        let ret = self.write(buf).await;
+        self.seek(Seek::Set(old)).await?;
+        ret
     }
 }

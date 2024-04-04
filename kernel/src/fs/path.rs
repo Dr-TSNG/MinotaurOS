@@ -6,7 +6,7 @@ use crate::fs::fd::FdNum;
 use crate::fs::ffi::AT_FDCWD;
 use crate::fs::inode::Inode;
 use crate::process::ProcessInner;
-use crate::result::SyscallResult;
+use crate::result::{Errno, SyscallResult};
 
 #[macro_export]
 macro_rules! split_path {
@@ -30,7 +30,7 @@ pub async fn resolve_path(proc_inner: &ProcessInner, dirfd: FdNum, path: &str) -
             },
             _ => {
                 let fd_impl = proc_inner.fd_table.get(dirfd)?;
-                fd_impl.file.metadata().inode.clone()
+                fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?
             }
         };
         inode.lookup_relative(path).await

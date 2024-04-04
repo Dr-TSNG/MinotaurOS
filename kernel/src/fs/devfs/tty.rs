@@ -1,7 +1,6 @@
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::Arc;
-use core::mem::MaybeUninit;
 use async_trait::async_trait;
 use lazy_static::lazy_static;
 use crate::arch::sbi;
@@ -23,8 +22,7 @@ impl TtyFile {
     fn new() -> Self {
         TtyFile {
             metadata: FileMeta {
-                // TODO: inode and inner
-                inode: unsafe { MaybeUninit::zeroed().assume_init() },
+                inode: None,
                 prw_lock: Default::default(),
                 inner: Default::default(),
             },

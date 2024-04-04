@@ -82,6 +82,7 @@ impl InodeMeta {
     }
 }
 
+#[allow(unused)]
 #[async_trait]
 pub trait Inode: Send + Sync {
     /// 获取 Inode 元数据

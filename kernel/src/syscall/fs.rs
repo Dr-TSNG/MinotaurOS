@@ -2,7 +2,7 @@ use alloc::ffi::CString;
 use alloc::string::ToString;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
-use log::{debug, trace, warn};
+use log::{debug, warn};
 use crate::arch::VirtAddr;
 use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::fs::ffi::{AT_FDCWD, DIRENT_SIZE, DirentType, InodeMode, IoVec, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
@@ -57,6 +57,19 @@ pub fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4: usiz
     Ok(0)
 }
 
+pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
+    let mut proc_inner = current_process().inner.lock();
+    let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
+    debug!("mkdirat: fd: {}, path: {:?}, mode: {:?}", dirfd, path, mode);
+    let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
+    let inode = resolve_path(&mut proc_inner, dirfd, parent).await?;
+    if inode.metadata().mode != InodeMode::DIR {
+        return Err(Errno::ENOTDIR);
+    }
+    inode.mkdir(name).await?;
+    Ok(0)
+}
+
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
@@ -74,15 +87,6 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
     };
     debug!("openat: dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
     let inode = resolve_path(&mut proc_inner, dirfd, path).await?;
-    if flags.contains(OpenFlags::O_DIRECTORY) {
-        if inode.metadata().mode != InodeMode::DIR {
-            return Err(Errno::ENOTDIR);
-        }
-    } else {
-        if inode.metadata().mode == InodeMode::DIR {
-            return Err(Errno::EISDIR);
-        }
-    }
     let file = inode.open()?;
     let fd_impl = FileDescriptor::new(file, flags);
     let fd = proc_inner.fd_table.put(fd_impl)?;
@@ -101,7 +105,7 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
     }
 
     let file_inner = fd_impl.file.metadata().inner.lock().await;
-    let inode = fd_impl.file.metadata().inode.clone();
+    let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
     let mut cur = buf;
     for child in inode.list(file_inner.pos as usize).await? {
         if cur + DIRENT_SIZE > buf + count as usize {
