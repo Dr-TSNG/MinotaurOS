@@ -102,7 +102,15 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
     };
     debug!("openat: dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
-    let inode = resolve_path(&mut proc_inner, dirfd, path).await?;
+    let inode = match resolve_path(&mut proc_inner, dirfd, path).await {
+        Ok(inode) => inode,
+        Err(Errno::ENOENT) if flags.contains(OpenFlags::O_CREAT) => {
+            let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
+            let parent_inode = resolve_path(&mut proc_inner, dirfd, parent).await?;
+            parent_inode.create(name).await?
+        }
+        Err(e) => return Err(e),
+    };
     let file = inode.open()?;
     let fd_impl = FileDescriptor::new(file, flags);
     let fd = proc_inner.fd_table.put(fd_impl)?;
