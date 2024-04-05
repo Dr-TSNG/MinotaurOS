@@ -130,7 +130,7 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FAT32Dirent {
     pub name: String,
     pub attr: FileAttr,

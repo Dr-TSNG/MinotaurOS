@@ -31,6 +31,7 @@ struct FAT32InodeInner {
     dir_occupy: BitVec,
     clusters: Vec<usize>,
     children: Vec<Arc<dyn Inode>>,
+    children_loaded: bool,
 }
 
 static INO_POOL: AtomicUsize = AtomicUsize::new(0);
@@ -62,6 +63,7 @@ impl FAT32Inode {
                 dir_occupy: BitVec::new(),
                 clusters: fs.walk_fat_ent(FATEnt::NEXT(root_cluster)).await?,
                 children: vec![],
+                children_loaded: false,
             }),
         };
         Ok(Arc::new(inode))
@@ -100,6 +102,7 @@ impl FAT32Inode {
                 dir_occupy: BitVec::new(),
                 clusters: fs.walk_fat_ent(FATEnt::NEXT(dir.cluster)).await?,
                 children: vec![],
+                children_loaded: false,
             }),
         };
         Ok(Arc::new(inode))
@@ -157,7 +160,7 @@ impl Inode for FAT32Inode {
             self.metadata().ino,
             name,
         );
-        if inner.children.is_empty() {
+        if !inner.children_loaded {
             self.load_children(&mut inner, &fs).await?;
         }
         for inode in inner.children.iter() {
@@ -177,7 +180,7 @@ impl Inode for FAT32Inode {
             self.metadata().ino,
             index,
         );
-        if inner.children.is_empty() {
+        if !inner.children_loaded {
             self.load_children(&mut inner, &fs).await?;
         }
         let mut ret = vec![];
@@ -193,9 +196,8 @@ impl Inode for FAT32Inode {
 
     async fn mkdir(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
-        let mut inner = self.inner.lock().await;
-        let inner = inner.deref_mut();
-        if inner.children.is_empty() {
+        let inner = &mut *self.inner.lock().await;
+        if !inner.children_loaded {
             self.load_children(inner, &fs).await?;
         }
         for inode in inner.children.iter() {
@@ -228,8 +230,17 @@ impl Inode for FAT32Inode {
                 dir_occupy: BitVec::new(),
                 clusters: vec![cluster],
                 children: vec![],
+                children_loaded: true,
             }),
         });
+        {
+            let child_inner = &mut *inode.inner.lock().await;
+            let parent_dir = FAT32Dirent::new("..".to_string(), FileAttr::ATTR_DIRECTORY, inner.clusters[0] as u32, 0);
+            let mut child_dir = dirent.clone();
+            child_dir.name = ".".to_string();
+            fs.append_dir(&mut child_inner.clusters, &mut child_inner.dir_occupy, &parent_dir).await?;
+            fs.append_dir(&mut child_inner.clusters, &mut child_inner.dir_occupy, &child_dir).await?;
+        }
         inner.children.push(inode.clone());
         Ok(inode)
     }
@@ -246,6 +257,7 @@ impl FAT32Inode {
         for inode in inodes {
             inner.children.push(inode);
         }
+        inner.children_loaded = true;
         Ok(())
     }
 }
