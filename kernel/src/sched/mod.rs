@@ -5,13 +5,11 @@ use alloc::sync::Arc;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use log::debug;
 use pin_project::pin_project;
 use crate::process::thread::Thread;
 use crate::processor::context::{HartContext, UserTask};
-use crate::processor::current_thread;
 use crate::processor::hart::local_hart;
-use crate::trap::user::{trap_from_user, trap_return};
+use crate::trap::user::{check_signal, trap_from_user, trap_return};
 
 #[pin_project]
 struct HartTaskFuture<F: Future<Output=()> + Send + 'static> {
@@ -68,12 +66,12 @@ async fn thread_loop(thread: Arc<Thread>) {
     loop {
         trap_return();
         trap_from_user().await;
-        if let Some(code) = thread.inner().exit_code {
-            debug!("Thread {} terminated with code {}", current_thread().tid.0, code);
+        check_signal();
+        if thread.inner().exit_code.is_some() {
             break;
         }
     }
-    thread.on_terminate();
+    thread.on_exit();
 }
 
 pub async fn yield_now() {

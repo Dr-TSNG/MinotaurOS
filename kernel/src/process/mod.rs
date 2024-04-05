@@ -21,16 +21,18 @@ use crate::process::ffi::CloneFlags;
 use crate::process::monitor::PROCESS_MONITOR;
 use crate::process::thread::Thread;
 use crate::process::thread::tid::TidTracker;
+use crate::process::thread::wait::Event;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::processor::hart::local_hart;
 use crate::result::SyscallResult;
 use crate::sched::spawn_user_thread;
+use crate::signal::ffi::Signal;
 use crate::sync::mutex::IrqMutex;
 use crate::trap::context::TrapContext;
 
-type Tid = usize;
-type Pid = usize;
-type Gid = usize;
+pub type Tid = usize;
+pub type Pid = usize;
+pub type Gid = usize;
 
 pub struct Process {
     /// 进程的 pid
@@ -56,8 +58,8 @@ pub struct ProcessInner {
     pub fd_table: FdTable,
     /// 工作目录
     pub cwd: String,
-    /// 是否终止
-    pub terminated: bool,
+    /// 退出状态
+    pub exit_code: Option<i8>,
 }
 
 impl Process {
@@ -77,16 +79,13 @@ impl Process {
                 mnt_ns,
                 fd_table: FdTable::new(),
                 cwd: String::from("/"),
-                terminated: false,
+                exit_code: None,
             }),
         });
 
         let trap_ctx = TrapContext::new(entry, user_sp);
         let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()));
-        process.inner.lock().apply_mut(|inner| {
-            inner.parent = Arc::downgrade(&process);
-            inner.threads.insert(pid.0, Arc::downgrade(&thread));
-        });
+        process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
 
         PROCESS_MONITOR.add(pid.0, Arc::downgrade(&process));
         spawn_user_thread(thread);
@@ -216,16 +215,18 @@ impl Process {
                     mnt_ns: proc_inner.mnt_ns.clone(),
                     fd_table: proc_inner.fd_table.clone(),
                     cwd: proc_inner.cwd.clone(),
-                    terminated: false,
+                    exit_code: None,
                 }),
             });
 
             let mut trap_ctx = current_trap_ctx().clone();
+            trap_ctx.user_x[10] = 0;
             if stack != 0 {
                 trap_ctx.set_sp(stack);
             }
             let new_thread = Thread::new(new_process.clone(), trap_ctx, Some(new_pid.clone()));
-            proc_inner.threads.insert(new_pid.0, Arc::downgrade(&new_thread));
+            new_process.inner.lock().threads.insert(new_pid.0, Arc::downgrade(&new_thread));
+            proc_inner.children.push(new_process.clone());
 
             new_thread
         });
@@ -290,5 +291,46 @@ impl Process {
             new_tid, self.pid.0,
         );
         Ok(new_tid)
+    }
+
+    pub fn terminate(&self, exit_code: i8) {
+        self.inner.lock().apply_mut(|inner| {
+            inner.exit_code = Some(exit_code);
+            inner.threads.iter().for_each(|(_, thread)| {
+                if let Some(thread) = thread.upgrade() {
+                    thread.terminate(exit_code);
+                }
+            });
+        });
+    }
+
+    pub fn on_thread_exit(&self, tid: Tid, exit_code: i8) {
+        info!("Thread {} exited with code {}", tid, exit_code);
+        self.inner.lock().apply_mut(|inner| {
+            inner.threads.remove(&tid);
+            // 如果没有线程了，通知父进程
+            if inner.threads.is_empty() {
+                inner.exit_code = Some(exit_code);
+                if let Some(parent) = inner.parent.upgrade() {
+                    parent.on_child_exit(self.pid.0, exit_code);
+                }
+                // 将子进程的父进程设置为 init
+                inner.children.iter_mut().for_each(|child| {
+                    child.inner.lock().parent = Arc::downgrade(&PROCESS_MONITOR.init_proc());
+                })
+            }
+        });
+    }
+
+    pub fn on_child_exit(&self, pid: Pid, exit_code: i8) {
+        info!("Child {} exited with code {}", pid, exit_code);
+        self.inner.lock().apply_mut(|inner| {
+            inner.threads.values().for_each(|thread| {
+                if let Some(thread) = thread.upgrade() {
+                    thread.signals.recv_signal(Signal::SIGCHLD);
+                    thread.event_bus.recv_event(Event::CHILD_EXIT);
+                }
+            })
+        });
     }
 }

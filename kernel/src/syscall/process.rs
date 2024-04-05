@@ -1,11 +1,15 @@
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use log::debug;
+use core::pin::pin;
+use futures::future::{Either, select};
+use log::{debug, info};
 use crate::arch::VirtAddr;
 use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
-use crate::process::ffi::CloneFlags;
+use crate::process::ffi::{CloneFlags, WaitOptions};
+use crate::process::Pid;
+use crate::process::thread::wait::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::yield_now;
@@ -109,4 +113,18 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     let elf_data = file.read_all().await?;
     let argc = current_process().execve(&elf_data, &args_vec, &envs_vec).await?;
     Ok(argc)
+}
+
+pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
+    info!("[sys_wait4] pid: {:?}, wstatus: {:?}, options: {:?}", pid as isize, wstatus, options);
+    let options = WaitOptions::from_bits(options).ok_or(Errno::EINVAL)?;
+    let ret = match select(
+        WaitPidFuture::new(pid, options, wstatus),
+        pin!(current_thread().event_bus.wait(Event::all().difference(Event::CHILD_EXIT))),
+    ).await {
+        Either::Left((pid, _)) => pid,
+        Either::Right(_) => Err(Errno::EINTR),
+    };
+    info!("[sys_wait4] ret: {:?}", ret);
+    ret
 }

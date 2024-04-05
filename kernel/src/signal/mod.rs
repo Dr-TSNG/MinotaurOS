@@ -4,6 +4,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use log::{debug, info};
+use crate::processor::current_thread;
 use crate::signal::ffi::{SIG_MAX, SigAction, Signal, SigSet};
 use crate::sync::mutex::Mutex;
 
@@ -27,7 +28,6 @@ impl SignalHandler {
             Signal::SIGSEGV => Self::Kernel(Self::k_terminate),
             Signal::SIGALRM => Self::Kernel(Self::k_terminate),
             Signal::SIGTERM => Self::Kernel(Self::k_terminate),
-            Signal::SIGCHLD => Self::Kernel(Self::k_terminate),
             Signal::SIGSTOP => Self::Kernel(Self::k_terminate),
             _ => Self::Kernel(Self::k_ignore),
         }
@@ -39,7 +39,7 @@ impl SignalHandler {
 
     pub fn k_terminate(signal: Signal) {
         info!("Default signal handler for {:?}: terminate", signal);
-        // current_process.terminate(-1);
+        current_thread().terminate(-1);
     }
 }
 

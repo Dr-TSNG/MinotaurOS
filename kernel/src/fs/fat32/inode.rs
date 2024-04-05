@@ -352,18 +352,18 @@ impl Inode for FAT32Inode {
         if !inner.children_loaded {
             self.load_children(inner, &fs).await?;
         }
-        let mut target: Option<FAT32Child> = None;
-        for child in inner.children.iter().cloned() {
+        let mut target: Option<usize> = None;
+        for (idx, child) in inner.children.iter().cloned().enumerate() {
             if child.inode.metadata().name == name {
                 if child.inode.metadata().mode == InodeMode::DIR && child.inode.clone().list(0).await.is_ok() {
                     return Err(Errno::ENOTEMPTY);
                 } else {
-                    target = Some(child);
+                    target = Some(idx);
                     break;
                 }
             }
         }
-        let target = target.ok_or(Errno::ENOENT)?;
+        let target = inner.children.swap_remove(target.ok_or(Errno::ENOENT)?);
         fs.remove_dir(&mut inner.clusters, &mut inner.dir_occupy, target.dir_pos, target.dir_len).await?;
         Ok(())
     }

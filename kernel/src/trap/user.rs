@@ -8,7 +8,7 @@ use crate::mm::addr_space::ASPerms;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::sched::time::set_next_trigger;
 use crate::sched::yield_now;
-use crate::signal::ffi::UContext;
+use crate::signal::ffi::{Signal, UContext};
 use crate::signal::SignalHandler;
 use crate::syscall::syscall;
 use crate::trap::{__restore_to_user, set_kernel_trap_entry, set_user_trap_entry};
@@ -16,8 +16,6 @@ use crate::trap::{__restore_to_user, set_kernel_trap_entry, set_user_trap_entry}
 pub fn trap_return() {
     set_user_trap_entry();
     trace!("Trap return to user");
-
-    check_signal();
 
     unsafe {
         current_thread().inner().rusage.trap_out();
@@ -68,12 +66,13 @@ pub async fn trap_from_user() {
             yield_now().await;
         }
         _ => {
-            panic!("Fatal");
+            error!("Unhandled trap: {:?}", trap);
+            current_thread().terminate(-1);
         }
     }
 }
 
-fn check_signal() {
+pub fn check_signal() {
     if let Some(poll) = current_thread().signals.poll() {
         info!("Handle signal {:?}", poll.signal);
         match poll.handler {
@@ -109,8 +108,7 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
         Ok(()) => debug!("Page fault resolved"),
         Err(e) => {
             error!("Fatal page fault failed, send SIGSEGV: {:?}", e);
-            // current_process().signal(SIGSEGV);
-            todo!()
+            current_thread().signals.recv_signal(Signal::SIGSEGV);
         }
     }
 }

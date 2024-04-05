@@ -26,10 +26,11 @@ impl log::Log for SimpleLogger {
             match local_hart().current_thread() {
                 Some(thread) => {
                     println!(
-                        "\x1b[{}m[{:6?}] [{:5}] tid {} | {}\x1b[0m",
+                        "\x1b[{}m[{:6?}] [{:5}] [{}, {}] | {}\x1b[0m",
                         level_color(record.level()),
                         current_time(),
                         record.level(),
+                        thread.process.pid.0,
                         thread.tid.0,
                         record.args()
                     );
@@ -77,13 +78,14 @@ macro_rules! strace {
         use crate::{
             debug::logger::STRACE_COLOR_CODE,
             println,
-            processor::current_thread,
+            processor::{current_process, current_thread},
             sched::time::current_time,
         };
         println!(
-            concat!("\x1b[{}m[{:6?}] [SCALL] tid {} | ", $fmt ,"\x1b[0m"),
+            concat!("\x1b[{}m[{:6?}] [SCALL] [{}, {}] | ", $fmt ,"\x1b[0m"),
             STRACE_COLOR_CODE,
             current_time(),
+            current_process().pid.0,
             current_thread().tid.0
             $(, $($arg)+)?,
         );

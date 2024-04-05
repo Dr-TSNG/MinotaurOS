@@ -2,6 +2,7 @@ use bitflags::bitflags;
 
 bitflags! {
     pub struct CloneFlags: u32 {
+        const SIGCHLD = 17;
         const CLONE_VM = 1 << 8;
         const CLONE_FS = 1 << 9;
         const CLONE_FILES = 1 << 10;
@@ -26,5 +27,13 @@ bitflags! {
         const CLONE_NEWPID = 1 << 29;
         const CLONE_NEWNET = 1 << 30;
         const CLONE_IO = 1 << 31;
+    }
+}
+
+bitflags! {
+    pub struct WaitOptions: u32 {
+        const WNOHANG = 1;
+        const WUNTRACED = 1 << 1;
+        const WCONTINUED = 1 << 3;
     }
 }

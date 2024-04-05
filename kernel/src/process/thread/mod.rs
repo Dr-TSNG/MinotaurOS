@@ -3,17 +3,20 @@ use core::cell::UnsafeCell;
 use crate::process::Process;
 use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::tid::TidTracker;
+use crate::process::thread::wait::EventBus;
 use crate::signal::SignalController;
 use crate::trap::context::TrapContext;
 
 pub mod resource;
 pub mod tid;
+pub mod wait;
 
 /// 线程 TCB
 pub struct Thread {
     pub tid: Arc<TidTracker>,
     pub process: Arc<Process>,
     pub signals: SignalController,
+    pub event_bus: EventBus,
     inner: UnsafeCell<ThreadInner>,
 }
 
@@ -50,6 +53,7 @@ impl Thread {
             tid,
             process,
             signals: SignalController::new(),
+            event_bus: EventBus::default(),
             inner: UnsafeCell::new(inner),
         };
         Arc::new(thread)
@@ -66,7 +70,8 @@ impl Thread {
         self.inner().exit_code = Some(exit_code);
     }
     
-    pub fn on_terminate(self: Arc<Self>) {
-        
+    pub fn on_exit(self: Arc<Self>) {
+        let exit_code = self.inner().exit_code.unwrap();
+        self.process.on_thread_exit(self.tid.0, exit_code);
     }
 }
