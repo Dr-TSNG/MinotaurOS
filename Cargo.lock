@@ -11,7 +11,7 @@ dependencies = [
  "cfg-if",
  "once_cell",
  "version_check",
- "zerocopy 0.7.32",
+ "zerocopy",
 ]
 
 [[package]]
@@ -379,7 +379,7 @@ dependencies = [
  "time",
  "virtio-drivers",
  "xmas-elf",
- "zerocopy 0.7.32",
+ "zerocopy",
 ]
 
 [[package]]
@@ -716,13 +716,13 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "virtio-drivers"
-version = "0.6.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "721c9c6a36ebc9bbfedb1933130f0fa6153bf1fa7c9272e4baf7f6f48dfff3bd"
+checksum = "f4fd50c69dad27f9d266e42be17da981cd507d6cd47077558a81c25169431392"
 dependencies = [
  "bitflags 2.4.2",
  "log",
- "zerocopy 0.6.6",
+ "zerocopy",
 ]
 
 [[package]]
@@ -808,33 +808,12 @@ checksum = "2fe21bcc34ca7fe6dd56cc2cb1261ea59d6b93620215aefb5ea6032265527784"
 
 [[package]]
 name = "zerocopy"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "854e949ac82d619ee9a14c66a1b674ac730422372ccb759ce0c39cabcf2bf8e6"
-dependencies = [
- "byteorder",
- "zerocopy-derive 0.6.6",
-]
-
-[[package]]
-name = "zerocopy"
 version = "0.7.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74d4d3961e53fa4c9a25a8637fc2bfaf2595b3d3ae34875568a5cf64787716be"
 dependencies = [
  "byteorder",
- "zerocopy-derive 0.7.32",
-]
-
-[[package]]
-name = "zerocopy-derive"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "125139de3f6b9d625c39e2efdd73d41bdac468ccd556556440e322be0e1bbd91"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.52",
+ "zerocopy-derive",
 ]
 
 [[package]]

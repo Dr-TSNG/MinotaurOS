@@ -45,7 +45,7 @@ unsafe impl Hal for VirtioHal {
         paddr: virtio_drivers::PhysAddr,
         _size: usize,
     ) -> NonNull<u8> {
-        NonNull::new_unchecked(paddr_to_kvaddr(PhysAddr::from(paddr)).as_ptr())
+        NonNull::new_unchecked(paddr_to_kvaddr(PhysAddr(paddr)).as_ptr())
     }
 
     unsafe fn share(
