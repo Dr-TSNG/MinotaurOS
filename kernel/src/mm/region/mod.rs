@@ -1,4 +1,5 @@
 pub mod direct;
+pub mod file;
 pub mod lazy;
 
 use alloc::boxed::Box;

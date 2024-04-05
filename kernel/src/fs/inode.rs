@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use log::warn;
 use crate::fs::ffi::{InodeMode, TimeSpec};
 use crate::fs::file::File;
+use crate::fs::page_cache::PageCache;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
 use crate::split_path;
@@ -23,6 +24,8 @@ pub struct InodeMeta {
     pub name: String,
     /// 文件系统路径
     pub path: String,
+    /// 页面缓存
+    pub page_cache: Option<Arc<PageCache>>,
     /// 可变数据
     pub inner: Mutex<InodeMetaInner>,
 }
@@ -50,7 +53,7 @@ pub struct InodeMetaInner {
 
 impl InodeMeta {
     /// 创建新的 Inode 元数据
-    /// 
+    ///
     /// 若 `parent` 为 `None`，则指向自身
     pub fn new(
         ino: usize,
@@ -58,6 +61,7 @@ impl InodeMeta {
         mode: InodeMode,
         name: String,
         path: String,
+        page_cache: Option<Arc<PageCache>>,
         atime: TimeSpec,
         mtime: TimeSpec,
         ctime: TimeSpec,
@@ -78,7 +82,7 @@ impl InodeMeta {
         if let Some(parent) = parent {
             inner.parent = parent;
         }
-        Self { ino, dev, mode, name, path, inner: Mutex::new(inner) }
+        Self { ino, dev, mode, name, path, page_cache, inner: Mutex::new(inner) }
     }
 }
 
@@ -93,13 +97,18 @@ pub trait Inode: Send + Sync {
         Err(Errno::EPERM)
     }
 
-    /// 从 `offset` 处读取 `buf`
-    async fn read(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
+    /// 从 `offset` 处读取 `buf`，绕过缓存
+    async fn read_direct(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         Err(Errno::EPERM)
     }
 
-    /// 向 `offset` 处写入 `buf`
-    async fn write(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
+    /// 向 `offset` 处写入 `buf`，绕过缓存
+    async fn write_direct(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
+        Err(Errno::EPERM)
+    }
+
+    /// 设置文件大小，绕过缓存
+    async fn truncate_direct(&self, size: isize) -> SyscallResult {
         Err(Errno::EPERM)
     }
 
@@ -127,14 +136,37 @@ pub trait Inode: Send + Sync {
     async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult {
         Err(Errno::EPERM)
     }
-
-    /// 同步修改
-    async fn sync(&self) -> SyscallResult {
-        Err(Errno::EPERM)
-    }
 }
 
 impl dyn Inode {
+    pub async fn read(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
+        match &self.metadata().page_cache {
+            Some(cache) => cache.read(buf, offset).await,
+            None => self.read_direct(buf, offset).await,
+        }
+    }
+
+    pub async fn write(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
+        match &self.metadata().page_cache {
+            Some(cache) => cache.write(buf, offset).await,
+            None => self.write_direct(buf, offset).await,
+        }
+    }
+    
+    pub async fn truncate(&self, size: isize) -> SyscallResult {
+        match &self.metadata().page_cache {
+            Some(cache) => cache.truncate(size).await,
+            None => self.truncate_direct(size).await,
+        }
+    }
+
+    pub async fn sync(&self) -> SyscallResult<isize> {
+        if let Some(page_cache) = &self.metadata().page_cache {
+            page_cache.sync_all().await?;
+        }
+        Ok(0)
+    }
+
     pub async fn lookup_with_mount(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         let inode = self.metadata().inner.lock().mounts.get(name).map(Arc::clone);
         match inode {
@@ -142,7 +174,7 @@ impl dyn Inode {
             None => self.lookup(name).await,
         }
     }
-    
+
     pub async fn lookup_relative(self: Arc<Self>, relative_path: &str) -> SyscallResult<Arc<dyn Inode>> {
         assert!(!is_absolute_path(relative_path));
         let mut inode = self;

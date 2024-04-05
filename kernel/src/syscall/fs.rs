@@ -86,6 +86,15 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
     Ok(0)
 }
 
+pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
+    if !fd_impl.flags.writable() {
+        return Err(Errno::EBADF);
+    }
+    fd_impl.file.truncate(size).await?;
+    Ok(0)
+}
+
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
@@ -124,12 +133,11 @@ pub fn sys_close(fd: FdNum) -> SyscallResult<usize> {
 
 pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
-    if !fd_impl.flags.contains(OpenFlags::O_DIRECTORY) {
-        return Err(Errno::ENOTDIR);
-    }
-
     let file_inner = fd_impl.file.metadata().inner.lock().await;
     let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
+    if inode.metadata().mode != InodeMode::DIR {
+        return Err(Errno::ENOTDIR);
+    }
     let mut cur = buf;
     for child in inode.list(file_inner.pos as usize).await? {
         if cur + DIRENT_SIZE > buf + count as usize {
@@ -247,4 +255,10 @@ pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sys
     drop(proc_inner);
     let ret = fd_impl.file.pwrite(user_buf, offset).await?;
     Ok(ret as usize)
+}
+
+pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
+    fd_impl.file.sync().await?;
+    Ok(0)
 }

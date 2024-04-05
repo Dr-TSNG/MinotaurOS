@@ -16,6 +16,7 @@ pub mod file;
 pub mod file_system;
 pub mod inode;
 pub mod path;
+pub mod page_cache;
 
 pub fn init() -> SyscallResult<Arc<MountNamespace>> {
     let root_dev = match DEVICES.read().get(&1) {

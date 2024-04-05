@@ -14,6 +14,7 @@ use crate::fs::fat32::fat::FATEnt;
 use crate::fs::ffi::{InodeMode, TimeSpec};
 use crate::fs::file::{File, FileMeta, RegularFile};
 use crate::fs::inode::{Inode, InodeMeta};
+use crate::fs::page_cache::PageCache;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::time::current_time;
 use crate::sync::mutex::AsyncMutex;
@@ -52,20 +53,20 @@ impl FAT32Inode {
         parent: Option<Weak<dyn Inode>>,
         root_cluster: u32,
     ) -> SyscallResult<Arc<Self>> {
-        let metadata = InodeMeta::new(
-            INO_POOL.fetch_add(1, Ordering::Acquire),
-            fs.device.metadata().dev_id,
-            InodeMode::DIR,
-            "/".to_string(),
-            "/".to_string(),
-            TimeSpec::default(),
-            TimeSpec::default(),
-            TimeSpec::default(),
-            0,
-            parent,
-        );
         let inode = Self {
-            metadata,
+            metadata: InodeMeta::new(
+                INO_POOL.fetch_add(1, Ordering::Acquire),
+                fs.device.metadata().dev_id,
+                InodeMode::DIR,
+                "/".to_string(),
+                "/".to_string(),
+                None,
+                TimeSpec::default(),
+                TimeSpec::default(),
+                TimeSpec::default(),
+                0,
+                parent,
+            ),
             fs: Arc::downgrade(fs),
             inner: AsyncMutex::new(FAT32InodeInner {
                 dir_occupy: BitVec::new(),
@@ -82,25 +83,25 @@ impl FAT32Inode {
         parent: Arc<dyn Inode>,
         dir: FAT32Dirent,
     ) -> SyscallResult<Arc<Self>> {
-        let mode = match dir.attr.contains(FileAttr::ATTR_DIRECTORY) {
-            true => InodeMode::DIR,
-            false => InodeMode::IFREG,
+        let (mode, page_cache) = match dir.attr.contains(FileAttr::ATTR_DIRECTORY) {
+            true => (InodeMode::DIR, None),
+            false => (InodeMode::IFREG, Some(PageCache::new())),
         };
         let path = format!("{}/{}", parent.metadata().path, dir.name);
-        let metadata = InodeMeta::new(
-            INO_POOL.fetch_add(1, Ordering::Acquire),
-            fs.device.metadata().dev_id,
-            mode,
-            dir.name,
-            path,
-            dir.acc_time,
-            dir.wrt_time,
-            dir.crt_time,
-            dir.size as isize,
-            Some(Arc::downgrade(&parent)),
-        );
-        let inode = Self {
-            metadata,
+        let inode = Arc::new(Self {
+            metadata: InodeMeta::new(
+                INO_POOL.fetch_add(1, Ordering::Acquire),
+                fs.device.metadata().dev_id,
+                mode,
+                dir.name,
+                path,
+                page_cache,
+                dir.acc_time,
+                dir.wrt_time,
+                dir.crt_time,
+                dir.size as isize,
+                Some(Arc::downgrade(&parent)),
+            ),
             fs: Arc::downgrade(&fs),
             inner: AsyncMutex::new(FAT32InodeInner {
                 dir_occupy: BitVec::new(),
@@ -108,8 +109,9 @@ impl FAT32Inode {
                 children: vec![],
                 children_loaded: false,
             }),
-        };
-        Ok(Arc::new(inode))
+        });
+        inode.metadata.page_cache.as_ref().inspect(|cache| cache.set_inode(inode.clone()));
+        Ok(inode)
     }
 }
 
@@ -123,10 +125,9 @@ impl Inode for FAT32Inode {
         Ok(Arc::new(RegularFile::new(FileMeta::new(Some(self)))))
     }
 
-    async fn read(&self, mut buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
+    async fn read_direct(&self, mut buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let file_size = self.metadata.inner.lock().size as usize;
-
         let mut offset = offset as usize;
         if offset >= file_size { return Ok(0); }
         let buf_end = min(buf.len(), file_size - offset);
@@ -134,25 +135,83 @@ impl Inode for FAT32Inode {
 
         let inner = self.inner.lock().await;
         let mut cur = 0;
-        'outer: for cluster in &inner.clusters {
-            if offset >= fs.fat32meta.bytes_per_cluster {
-                offset -= fs.fat32meta.bytes_per_cluster;
-                continue;
-            }
+        let cluster_start = offset / fs.fat32meta.bytes_per_cluster;
+        offset %= fs.fat32meta.bytes_per_cluster;
+        for cluster in &inner.clusters[cluster_start..] {
             let next = min(cur + fs.fat32meta.bytes_per_cluster - offset, buf.len());
             fs.read_data(*cluster, &mut buf[cur..next], offset).await?;
             offset = 0;
             cur = next;
             if cur == buf.len() {
-                break 'outer;
+                break;
             }
         }
 
         Ok(buf.len() as isize)
     }
 
-    async fn write(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
-        todo!()
+    async fn write_direct(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let file_size = self.metadata.inner.lock().size as usize;
+        let mut offset = offset as usize;
+        if offset + buf.len() > file_size {
+            self.truncate_direct((offset + buf.len()) as isize).await?;
+        }
+
+        let inner = self.inner.lock().await;
+        let mut cur = 0;
+        let cluster_start = offset / fs.fat32meta.bytes_per_cluster;
+        offset %= fs.fat32meta.bytes_per_cluster;
+        for cluster in &inner.clusters[cluster_start..] {
+            let next = min(cur + fs.fat32meta.bytes_per_cluster - offset, buf.len());
+            fs.write_data(*cluster, &buf[cur..next], offset).await?;
+            offset = 0;
+            cur = next;
+            if cur == buf.len() {
+                break;
+            }
+        }
+
+        Ok(buf.len() as isize)
+    }
+
+    async fn truncate_direct(&self, new_size: isize) -> SyscallResult {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let file_size = self.metadata.inner.lock().size as usize;
+        let new_size = new_size as usize;
+        if new_size == file_size {
+            return Ok(());
+        } else if new_size < file_size {
+            let mut inner = self.inner.lock().await;
+            let mut cluster_start = new_size.div_ceil(fs.fat32meta.bytes_per_cluster);
+            if cluster_start == 0 {
+                cluster_start = 1;
+            }
+            fs.write_fat_ent(inner.clusters[cluster_start - 1], FATEnt::EOF).await?;
+            if cluster_start < inner.clusters.len() {
+                for cluster in &inner.clusters[cluster_start..] {
+                    fs.write_fat_ent(*cluster, FATEnt::EMPTY).await?;
+                }
+                inner.clusters.truncate(cluster_start);
+            }
+        } else {
+            let mut inner = self.inner.lock().await;
+            let cluster_start = file_size.div_ceil(fs.fat32meta.bytes_per_cluster);
+            let cluster_end = new_size.div_ceil(fs.fat32meta.bytes_per_cluster);
+            if cluster_start < cluster_end {
+                let mut prev = inner.clusters[cluster_start - 1];
+                for _ in cluster_start..cluster_end {
+                    let cluster = fs.alloc_cluster().await?;
+                    fs.write_fat_ent(prev, FATEnt::NEXT(cluster as u32)).await?;
+                    prev = cluster;
+                    inner.clusters.push(cluster);
+                }
+                fs.write_fat_ent(prev, FATEnt::EOF).await?;
+            }
+        }
+        self.metadata.inner.lock().size = new_size as isize;
+
+        Ok(())
     }
 
     async fn lookup(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
@@ -217,6 +276,7 @@ impl Inode for FAT32Inode {
                 InodeMode::IFREG,
                 name.to_string(),
                 format!("{}/{}", self.metadata().path, name),
+                Some(PageCache::new()),
                 now.into(),
                 now.into(),
                 now.into(),
@@ -231,6 +291,7 @@ impl Inode for FAT32Inode {
                 children_loaded: false,
             }),
         });
+        inode.metadata.page_cache.as_ref().unwrap().set_inode(inode.clone());
         inner.children.push(FAT32Child::new(inode.clone(), dir_pos, dir_len));
         Ok(inode)
     }
@@ -258,6 +319,7 @@ impl Inode for FAT32Inode {
                 InodeMode::DIR,
                 name.to_string(),
                 format!("{}/{}", self.metadata().path, name),
+                None,
                 now.into(),
                 now.into(),
                 now.into(),

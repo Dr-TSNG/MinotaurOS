@@ -149,7 +149,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Umount2
         // SyscallCode::Mount
         // SyscallCode::Statfs
-        // SyscallCode::Ftruncate
+        SyscallCode::Ftruncate => async_syscall!(sys_ftruncate, args[0] as FdNum, args[1] as isize),
         // SyscallCode::Faccessat
         SyscallCode::Chdir => async_syscall!(sys_chdir, args[0]),
         SyscallCode::Openat => async_syscall!(sys_openat, args[0] as i32, args[1], args[2] as u32, args[3] as u32),
@@ -170,7 +170,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Newfstatat
         // SyscallCode::Fstat
         // SyscallCode::Sync
-        // SyscallCode::Fsync
+        SyscallCode::Fsync => async_syscall!(sys_fsync, args[0] as FdNum),
         // SyscallCode::Utimensat
         SyscallCode::Exit => syscall!(sys_exit, args[0] as i8),
         // SyscallCode::ExitGroup

@@ -288,6 +288,8 @@ impl FAT32FileSystem {
             return Err(Errno::ENOSPC);
         }
         self.write_fat_ent(cluster, FATEnt::EOF).await?;
+        let clear = vec![0; self.fat32meta.bytes_per_cluster];
+        self.write_data(cluster, &clear, 0).await?;
         Ok(cluster)
     }
 }

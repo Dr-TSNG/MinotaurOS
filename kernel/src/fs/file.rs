@@ -1,11 +1,10 @@
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use async_trait::async_trait;
 use crate::arch::PAGE_SIZE;
+use crate::fs::ffi::InodeMode;
 use crate::fs::inode::Inode;
-use crate::mm::region::ASRegion;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::AsyncMutex;
 
@@ -19,8 +18,6 @@ pub struct FileMeta {
 pub struct FileMetaInner {
     /// 位置指针
     pub pos: isize,
-    /// 页缓存
-    pub page_cache: BTreeMap<usize, Weak<Box<dyn ASRegion>>>,
 }
 
 impl FileMeta {
@@ -64,6 +61,14 @@ pub trait File: Send + Sync {
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize>;
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize>;
+
+    async fn truncate(&self, size: isize) -> SyscallResult {
+        Err(Errno::EPERM)
+    }
+
+    async fn sync(&self) -> SyscallResult {
+        Err(Errno::EINVAL)
+    }
 
     async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
         Err(Errno::ESPIPE)
@@ -110,9 +115,11 @@ impl File for RegularFile {
         &self.metadata
     }
 
-    // TODO: Page Cache
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
+        if inode.metadata().mode == InodeMode::DIR {
+            return Err(Errno::EISDIR);
+        }
         let mut inner = self.metadata.inner.lock().await;
         let count = inode.read(buf, inner.pos).await?;
         inner.pos += count;
@@ -121,15 +128,37 @@ impl File for RegularFile {
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
+        if inode.metadata().mode == InodeMode::DIR {
+            return Err(Errno::EISDIR);
+        }
         let mut inner = self.metadata.inner.lock().await;
         let count = inode.write(buf, inner.pos).await?;
         inner.pos += count;
         Ok(count)
     }
 
+    async fn truncate(&self, size: isize) -> SyscallResult {
+        let inode = self.metadata.inode.as_ref().unwrap();
+        if inode.metadata().mode == InodeMode::DIR {
+            return Err(Errno::EISDIR);
+        }
+        inode.truncate(size).await?;
+        // The value of the seek pointer shall not be modified by a call to ftruncate().
+        Ok(())
+    }
+
+    async fn sync(&self) -> SyscallResult {
+        let inode = self.metadata.inode.as_ref().unwrap();
+        inode.sync().await?;
+        Ok(())
+    }
+
     async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
-        let metadata = self.metadata();
-        let mut inner = metadata.inner.lock().await;
+        let inode = self.metadata.inode.as_ref().unwrap();
+        if inode.metadata().mode == InodeMode::DIR {
+            return Err(Errno::EISDIR);
+        }
+        let mut inner = self.metadata.inner.lock().await;
         inner.pos = match seek {
             Seek::Set(offset) => {
                 if offset < 0 {
@@ -144,7 +173,7 @@ impl File for RegularFile {
                 }
             }
             Seek::End(offset) => {
-                let size = metadata.inode.as_ref().unwrap().metadata().inner.lock().size;
+                let size = self.metadata.inode.as_ref().unwrap().metadata().inner.lock().size;
                 match size.checked_add(offset) {
                     Some(new_pos) => new_pos,
                     None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
