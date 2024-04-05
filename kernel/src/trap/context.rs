@@ -22,6 +22,7 @@ impl TrapContext {
         sstatus.set_spp(SPP::User);
         sstatus.set_sie(false);
         sstatus.set_spie(false);
+        sstatus.set_fs(sstatus::FS::Clean);
         let mut ctx = Self {
             user_x: [0; 32],
             user_f: [0; 32],

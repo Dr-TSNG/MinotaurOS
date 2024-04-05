@@ -1,5 +1,6 @@
 use alloc::sync::Arc;
 use core::arch::asm;
+use riscv::register::mstatus::FS;
 use riscv::register::sstatus;
 use crate::config::MAX_HARTS;
 use crate::mm::KERNEL_SPACE;
@@ -67,5 +68,6 @@ pub fn init(hart_id: usize) {
         HARTS[hart_id].id = hart_id;
         // 允许内核访问用户态地址空间
         sstatus::set_sum();
+        sstatus::set_fs(FS::Clean);
     };
 }
