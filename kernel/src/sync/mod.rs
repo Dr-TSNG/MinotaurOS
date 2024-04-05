@@ -6,7 +6,6 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use log::trace;
 
-pub mod executor;
 pub mod mutex;
 pub mod once;
 

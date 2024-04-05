@@ -41,8 +41,8 @@ use crate::config::{LINKAGE_EBSS, LINKAGE_SBSS};
 use crate::process::Process;
 use crate::processor::hart;
 use crate::result::SyscallResult;
+use crate::sched::executor::run_executor;
 use crate::sched::spawn_kernel_thread;
-use crate::sync::executor::run_executor;
 
 global_asm!(include_str!("entry.asm"));
 
