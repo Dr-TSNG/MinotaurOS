@@ -4,7 +4,6 @@ use alloc::sync::{Arc, Weak};
 use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::cmp::min;
-use core::ops::DerefMut;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use bitvec_rs::BitVec;
@@ -26,12 +25,23 @@ pub struct FAT32Inode {
 }
 
 struct FAT32InodeInner {
-    dir_pos: usize,
-    dir_len: usize,
     dir_occupy: BitVec,
     clusters: Vec<usize>,
-    children: Vec<Arc<dyn Inode>>,
+    children: Vec<FAT32Child>,
     children_loaded: bool,
+}
+
+#[derive(Clone)]
+pub struct FAT32Child {
+    inode: Arc<dyn Inode>,
+    dir_pos: usize,
+    dir_len: usize,
+}
+
+impl FAT32Child {
+    pub fn new(inode: Arc<dyn Inode>, dir_pos: usize, dir_len: usize) -> Self {
+        Self { inode, dir_pos, dir_len }
+    }
 }
 
 static INO_POOL: AtomicUsize = AtomicUsize::new(0);
@@ -58,8 +68,6 @@ impl FAT32Inode {
             metadata,
             fs: Arc::downgrade(fs),
             inner: AsyncMutex::new(FAT32InodeInner {
-                dir_pos: 0,
-                dir_len: 0,
                 dir_occupy: BitVec::new(),
                 clusters: fs.walk_fat_ent(FATEnt::NEXT(root_cluster)).await?,
                 children: vec![],
@@ -73,8 +81,6 @@ impl FAT32Inode {
         fs: &Arc<FAT32FileSystem>,
         parent: Arc<dyn Inode>,
         dir: FAT32Dirent,
-        dir_pos: usize,
-        dir_len: usize,
     ) -> SyscallResult<Arc<Self>> {
         let mode = match dir.attr.contains(FileAttr::ATTR_DIRECTORY) {
             true => InodeMode::DIR,
@@ -97,8 +103,6 @@ impl FAT32Inode {
             metadata,
             fs: Arc::downgrade(&fs),
             inner: AsyncMutex::new(FAT32InodeInner {
-                dir_pos,
-                dir_len,
                 dir_occupy: BitVec::new(),
                 clusters: fs.walk_fat_ent(FATEnt::NEXT(dir.cluster)).await?,
                 children: vec![],
@@ -163,9 +167,9 @@ impl Inode for FAT32Inode {
         if !inner.children_loaded {
             self.load_children(&mut inner, &fs).await?;
         }
-        for inode in inner.children.iter() {
-            if inode.metadata().name == name {
-                return Ok(inode.clone());
+        for child in inner.children.iter() {
+            if child.inode.metadata().name == name {
+                return Ok(child.inode.clone());
             }
         }
         Err(Errno::ENOENT)
@@ -185,7 +189,7 @@ impl Inode for FAT32Inode {
         }
         let mut ret = vec![];
         for child in inner.children.iter().skip(index) {
-            ret.push(child.clone());
+            ret.push(child.inode.clone());
         }
         Ok(ret)
     }
@@ -200,14 +204,14 @@ impl Inode for FAT32Inode {
         if !inner.children_loaded {
             self.load_children(inner, &fs).await?;
         }
-        for inode in inner.children.iter() {
-            if inode.metadata().name == name {
+        for child in inner.children.iter() {
+            if child.inode.metadata().name == name {
                 return Err(Errno::EEXIST);
             }
         }
         let cluster = fs.alloc_cluster().await?;
         let dirent = FAT32Dirent::new(name.to_string(), FileAttr::ATTR_DIRECTORY, cluster as u32, 0);
-        fs.append_dir(&mut inner.clusters, &mut inner.dir_occupy, &dirent).await?;
+        let (dir_pos, dir_len) = fs.append_dir(&mut inner.clusters, &mut inner.dir_occupy, &dirent).await?;
         let now = current_time();
         let this: Arc<dyn Inode> = self.clone();
         let inode = Arc::new(Self {
@@ -225,8 +229,6 @@ impl Inode for FAT32Inode {
             ),
             fs: Arc::downgrade(&fs),
             inner: AsyncMutex::new(FAT32InodeInner {
-                dir_pos: 0,
-                dir_len: 0,
                 dir_occupy: BitVec::new(),
                 clusters: vec![cluster],
                 children: vec![],
@@ -241,12 +243,30 @@ impl Inode for FAT32Inode {
             fs.append_dir(&mut child_inner.clusters, &mut child_inner.dir_occupy, &parent_dir).await?;
             fs.append_dir(&mut child_inner.clusters, &mut child_inner.dir_occupy, &child_dir).await?;
         }
-        inner.children.push(inode.clone());
+        inner.children.push(FAT32Child::new(inode.clone(), dir_pos, dir_len));
         Ok(inode)
     }
 
-    async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
-        todo!()
+    async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let inner = &mut *self.inner.lock().await;
+        if !inner.children_loaded {
+            self.load_children(inner, &fs).await?;
+        }
+        let mut target: Option<FAT32Child> = None;
+        for child in inner.children.iter().cloned() {
+            if child.inode.metadata().name == name {
+                if child.inode.metadata().mode == InodeMode::DIR && child.inode.clone().list(0).await.is_ok() {
+                    return Err(Errno::ENOTEMPTY);
+                } else {
+                    target = Some(child);
+                    break;
+                }
+            }
+        }
+        let target = target.ok_or(Errno::ENOENT)?;
+        fs.remove_dir(&mut inner.clusters, &mut inner.dir_occupy, target.dir_pos, target.dir_len).await?;
+        Ok(())
     }
 }
 

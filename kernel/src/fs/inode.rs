@@ -124,7 +124,7 @@ pub trait Inode: Send + Sync {
     }
 
     /// 在当前目录下删除文件
-    async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult {
         Err(Errno::EPERM)
     }
 

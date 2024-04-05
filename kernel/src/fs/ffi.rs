@@ -110,6 +110,8 @@ pub enum InodeMode {
 }
 
 pub const AT_FDCWD: i32 = -100;
+pub const AT_REMOVEDIR: u32 = 0x200;
+
 pub const PATH_MAX: usize = 260;
 pub const MAX_NAME_LEN: usize = 256;
 pub const DIRENT_SIZE: usize = size_of::<LinuxDirent>();

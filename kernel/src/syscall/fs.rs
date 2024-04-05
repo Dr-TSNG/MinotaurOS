@@ -5,7 +5,7 @@ use core::ptr::copy_nonoverlapping;
 use log::{debug, warn};
 use crate::arch::VirtAddr;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, DIRENT_SIZE, DirentType, InodeMode, IoVec, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
+use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, DIRENT_SIZE, DirentType, InodeMode, IoVec, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
 use crate::processor::current_process;
@@ -67,6 +67,22 @@ pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<
         return Err(Errno::ENOTDIR);
     }
     inode.mkdir(name).await?;
+    Ok(0)
+}
+
+pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResult<usize> {
+    if flags & !AT_REMOVEDIR != 0 {
+        return Err(Errno::EINVAL);
+    }
+    let proc_inner = current_process().inner.lock();
+    let path = match path {
+        0 => ".",
+        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
+    };
+    debug!("unlinkat: dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
+    let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
+    let inode = resolve_path(&proc_inner, dirfd, parent).await?;
+    inode.unlink(name).await?;
     Ok(0)
 }
 

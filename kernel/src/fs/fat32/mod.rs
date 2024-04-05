@@ -8,7 +8,7 @@ use crate::driver::BlockDevice;
 use crate::fs::block_cache::BlockCache;
 use crate::fs::fat32::dir::FAT32Dirent;
 use crate::fs::fat32::fat::{FAT32Meta, FATEnt};
-use crate::fs::fat32::inode::FAT32Inode;
+use crate::fs::fat32::inode::{FAT32Child, FAT32Inode};
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::Inode;
@@ -117,8 +117,8 @@ impl FAT32FileSystem {
         parent: Arc<dyn Inode>,
         clusters: &[usize],
         occupy: &mut BitVec,
-    ) -> SyscallResult<Vec<Arc<FAT32Inode>>> {
-        let mut inodes = vec![];
+    ) -> SyscallResult<Vec<FAT32Child>> {
+        let mut children = vec![];
         let mut dir = FAT32Dirent::default();
         let mut dir_pos = 0;
         let mut dir_len = 0;
@@ -143,8 +143,8 @@ impl FAT32FileSystem {
                         dir.last(value);
                         let byte_offset = sector * BLOCK_SIZE + i;
                         trace!("Read FAT32 dirent: {} \tat {:#x} \tattr {:?}", dir.name, byte_offset, dir.attr);
-                        let inode = FAT32Inode::new(&self, parent.clone(), dir, dir_pos, dir_len).await?;
-                        inodes.push(inode);
+                        let inode = FAT32Inode::new(&self, parent.clone(), dir).await?;
+                        children.push(FAT32Child::new(inode, dir_pos, dir_len));
                         dir = FAT32Dirent::default();
                         dir_pos += dir_len;
                         dir_len = 0;
@@ -152,7 +152,7 @@ impl FAT32FileSystem {
                 }
             }
         }
-        Ok(inodes)
+        Ok(children)
     }
 
     pub async fn write_dir(&self, clusters: &[usize], pos: usize, dirent: &[u8; 32]) -> SyscallResult<()> {
@@ -171,7 +171,7 @@ impl FAT32FileSystem {
         clusters: &mut Vec<usize>,
         occupy: &mut BitVec,
         dirent: &FAT32Dirent,
-    ) -> SyscallResult {
+    ) -> SyscallResult<(usize, usize)> {
         let dirents_per_cluster = self.fat32meta.bytes_per_cluster / 32;
         let dirs = dirent.to_dirs();
         let mut left = 0;
@@ -202,7 +202,7 @@ impl FAT32FileSystem {
             occupy.set(left + i, true);
             self.write_dir(clusters, left + i, &dirs[i]).await?;
         }
-        Ok(())
+        Ok((left, dirs.len()))
     }
 
     pub async fn remove_dir(
