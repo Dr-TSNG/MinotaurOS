@@ -9,9 +9,12 @@ env:
 kernel:
 	@cargo task build kernel --board $(BOARD)
 
+user:
+	@cargo task build user
+
 debug:
 	@cargo task debug qemu
 
-all: kernel
+all: user kernel
 
-.PHONY: clean env kernel qemu all
+.PHONY: clean env kernel user qemu all

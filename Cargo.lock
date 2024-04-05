@@ -537,6 +537,7 @@ dependencies = [
 [[package]]
 name = "riscv"
 version = "0.11.1"
+source = "git+https://github.com/Dr-TSNG/riscv#7884787393fa4f9dfd6c97822c8691a46c9b8800"
 dependencies = [
  "critical-section",
  "embedded-hal",

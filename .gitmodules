@@ -1,3 +1,0 @@
-[submodule "vendor/riscv"]
-	path = vendor/riscv
-	url = https://github.com/Dr-TSNG/riscv
