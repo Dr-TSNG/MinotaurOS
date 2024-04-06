@@ -48,6 +48,8 @@ pub struct AddressSpace {
     regions: BTreeMap<VirtPageNum, Box<dyn ASRegion>>,
     /// 该地址空间关联的页表帧
     pt_dirs: Vec<HeapFrameTracker>,
+    /// 当前 brk 指针
+    brk: VirtAddr,
 }
 
 impl AddressSpace {
@@ -59,6 +61,7 @@ impl AddressSpace {
             asid: 0,
             regions: BTreeMap::new(),
             pt_dirs: vec![],
+            brk: VirtAddr(0),
         };
         addr_space.pt_dirs.push(root_pt_page);
         addr_space
@@ -159,6 +162,7 @@ impl AddressSpace {
             pages: (uheap_top_vpn - uheap_bottom_vpn).0,
         });
         addr_space.map_region(region);
+        addr_space.brk = VirtAddr::from(uheap_top_vpn);
         debug!("Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
 
         let mut auxv: Vec<Aux> = Vec::with_capacity(64);
@@ -267,23 +271,25 @@ impl AddressSpace {
     }
 
     pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult<usize> {
-        let (heap_start, heap_end) = self.regions
+        let heap_start = self.regions
             .values()
             .find(|region| region.metadata().name.as_deref() == Some("[heap]"))
-            .map(|region| (region.metadata().start, region.metadata().end()))
+            .map(|region| region.metadata().start)
             .unwrap();
         if addr.floor() < heap_start {
-            return Ok(VirtAddr::from(heap_end).0);
+            return Ok(self.brk.0);
         }
         if let Some((upper_vpn, _)) = self.regions.range(heap_start..).skip(1).next() {
             if addr.floor() >= *upper_vpn {
-                return Ok(VirtAddr::from(heap_end).0);
+                return Ok(self.brk.0);
             }
         }
         let mut brk = self.unmap_region(heap_start).unwrap();
         brk.resize((addr.ceil() - heap_start).0);
         self.map_region(brk);
-        Ok(addr.0)
+        let prev = self.brk;
+        self.brk = addr;
+        Ok(prev.0)
     }
 
     pub fn mmap(
