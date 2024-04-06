@@ -3,7 +3,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use bitflags::bitflags;
 use time::{Date, Month, Time};
-use crate::fs::ffi::TimeSpec;
+use crate::sched::ffi::TimeSpec;
 use crate::sched::time::current_time;
 
 /// 目录项偏移

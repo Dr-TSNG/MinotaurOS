@@ -11,11 +11,12 @@ use log::{debug, trace};
 use crate::fs::fat32::dir::{FAT32Dirent, FileAttr};
 use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::fat32::fat::FATEnt;
-use crate::fs::ffi::{InodeMode, TimeSpec};
+use crate::fs::ffi::InodeMode;
 use crate::fs::file::{File, FileMeta, RegularFile};
 use crate::fs::inode::{Inode, InodeMeta};
 use crate::fs::page_cache::PageCache;
 use crate::result::{Errno, SyscallResult};
+use crate::sched::ffi::TimeSpec;
 use crate::sched::time::current_time;
 use crate::sync::mutex::AsyncMutex;
 

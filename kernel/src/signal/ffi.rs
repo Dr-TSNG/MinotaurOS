@@ -123,7 +123,7 @@ pub struct UContext {
 
 #[repr(C)]
 #[derive(Default)]
-struct SignalStack {
+pub struct SignalStack {
     ss_sp: usize,
     ss_flags: i32,
     ss_size: usize,

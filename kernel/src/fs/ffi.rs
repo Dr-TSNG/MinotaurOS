@@ -1,29 +1,8 @@
 use core::mem::size_of;
-use core::time::Duration;
 use bitflags::bitflags;
 use lazy_static::lazy_static;
 use zerocopy::{AsBytes, FromZeroes};
-
-#[derive(Copy, Clone, Debug, Default, AsBytes)]
-#[repr(C)]
-pub struct TimeSpec {
-    pub sec: i64,
-    pub nsec: i64,
-}
-
-impl TimeSpec {
-    pub fn new(sec: i64, nsec: i64) -> Self {
-        Self { sec, nsec }
-    }
-}
-
-impl From<Duration> for TimeSpec {
-    fn from(d: Duration) -> Self {
-        let sec = d.as_secs() as i64;
-        let nsec = d.subsec_nanos() as i64;
-        Self { sec, nsec }
-    }
-}
+use crate::sched::ffi::TimeSpec;
 
 bitflags! {
     pub struct OpenFlags: u32 {

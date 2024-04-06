@@ -21,12 +21,11 @@ use crate::strace;
 macro_rules! syscall {
     ($handler: ident $(, $args:expr)*) => {
         {
-            use crate::processor::current_trap_ctx;
             strace!(
                 "{}, args: {:?}, sepc: {:#x}",
                 stringify!($handler),
                 ($($args,)*),
-                current_trap_ctx().sepc
+                crate::processor::current_trap_ctx().sepc
             );
             $handler($($args,)*)
         }
@@ -36,12 +35,11 @@ macro_rules! syscall {
 macro_rules! async_syscall {
     ($handler: ident $(, $args:expr)*) => {
         {
-            use crate::processor::current_trap_ctx;
             strace!(
                 "{}, args: {:?}, sepc: {:#x}",
                 stringify!($handler),
                 ($($args,)*),
-                current_trap_ctx().sepc
+                crate::processor::current_trap_ctx().sepc
             );
             $handler($($args,)*).await
         }
@@ -188,7 +186,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::RtSigprocmask => syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2]),
         // SyscallCode::RtSigtimedwait
         SyscallCode::RtSigreturn => syscall!(sys_rt_sigreturn),
-        // SyscallCode::Times
+        SyscallCode::Times => syscall!(sys_times, args[0]),
         SyscallCode::Uname => syscall!(sys_uname, args[0]),
         // SyscallCode::Getrusage
         // SyscallCode::Umask

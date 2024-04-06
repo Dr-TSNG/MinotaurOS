@@ -5,11 +5,12 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use async_trait::async_trait;
 use log::warn;
-use crate::fs::ffi::{InodeMode, TimeSpec};
+use crate::fs::ffi::InodeMode;
 use crate::fs::file::File;
 use crate::fs::page_cache::PageCache;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
+use crate::sched::ffi::TimeSpec;
 use crate::split_path;
 use crate::sync::mutex::Mutex;
 
