@@ -174,7 +174,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::ExitGroup
         SyscallCode::SetTidAddress => syscall!(sys_set_tid_address, args[0]),
         // SyscallCode::Futex
-        // SyscallCode::Nanosleep
+        SyscallCode::Nanosleep => async_syscall!(sys_nanosleep, args[0], args[1]),
         // SyscallCode::Setitimer
         // SyscallCode::ClockGettime
         // SyscallCode::Syslog

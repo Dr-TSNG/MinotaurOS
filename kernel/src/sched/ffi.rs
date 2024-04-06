@@ -1,7 +1,7 @@
 use core::time::Duration;
-use zerocopy::AsBytes;
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
-#[derive(Copy, Clone, Debug, Default, AsBytes)]
+#[derive(Copy, Clone, Debug, Default, AsBytes, FromZeroes, FromBytes)]
 #[repr(C)]
 pub struct TimeSpec {
     pub sec: i64,
@@ -19,6 +19,12 @@ impl From<Duration> for TimeSpec {
         let sec = d.as_secs() as i64;
         let nsec = d.subsec_nanos() as i64;
         Self { sec, nsec }
+    }
+}
+
+impl From<TimeSpec> for Duration {
+    fn from(ts: TimeSpec) -> Self {
+        Duration::new(ts.sec as u64, ts.nsec as u32)
     }
 }
 

@@ -7,6 +7,7 @@ use crate::config::TRAMPOLINE_BASE;
 use crate::mm::addr_space::ASPerms;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::sched::time::set_next_trigger;
+use crate::sched::timer::query_timer;
 use crate::sched::yield_now;
 use crate::signal::ffi::{Signal, UContext};
 use crate::signal::SignalHandler;
@@ -62,6 +63,7 @@ pub async fn trap_from_user() {
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             debug!("Timer interrupt");
+            query_timer();
             set_next_trigger();
             yield_now().await;
         }

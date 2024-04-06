@@ -1,15 +1,18 @@
 pub mod executor;
 pub mod ffi;
 pub mod time;
+pub mod timer;
 
 use alloc::sync::Arc;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use core::time::Duration;
 use pin_project::pin_project;
 use crate::process::thread::Thread;
 use crate::processor::context::{HartContext, UserTask};
 use crate::processor::hart::local_hart;
+use crate::sched::time::{current_time, TimeoutFuture};
 use crate::trap::user::{check_signal, trap_from_user, trap_return};
 
 #[pin_project]
@@ -63,6 +66,16 @@ impl Future for YieldFuture {
     }
 }
 
+struct IdleFuture;
+
+impl Future for IdleFuture {
+    type Output = !;
+
+    fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
+        Poll::Pending
+    }
+}
+
 async fn thread_loop(thread: Arc<Thread>) {
     loop {
         trap_return();
@@ -77,6 +90,11 @@ async fn thread_loop(thread: Arc<Thread>) {
 
 pub async fn yield_now() {
     YieldFuture(false).await;
+}
+
+pub async fn sleep_for(time: Duration) {
+    let now = current_time();
+    TimeoutFuture::new(now + time, IdleFuture).await;
 }
 
 pub fn spawn_kernel_thread<F: Future<Output=()> + Send + 'static>(kernel_thread: F) {

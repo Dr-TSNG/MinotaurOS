@@ -1,6 +1,7 @@
 use alloc::collections::VecDeque;
 use async_task::{Runnable, ScheduleInfo, Task, WithInfo};
 use core::future::Future;
+use crate::sched::timer::query_timer;
 use crate::sync::mutex::IrqMutex;
 
 struct TaskQueue {
@@ -46,7 +47,13 @@ pub fn spawn<F>(future: F) -> (Runnable, Task<F::Output>)
 
 /// 开始执行任务
 pub fn run_executor() {
-    while let Some(task) = TASK_QUEUE.take() {
-        task.run();
+    loop {
+        while let Some(task) = TASK_QUEUE.take() {
+            task.run();
+        }
+        if !query_timer() {
+            break;
+        }
+        core::hint::spin_loop();
     }
 }
