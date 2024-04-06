@@ -15,6 +15,7 @@ use crate::result::{Errno, SyscallResult};
 /// 地址空间区域
 ///
 /// 此区域仅对一个地址空间有意义
+#[allow(unused)]
 pub trait ASRegion: Send + Sync {
     fn metadata(&self) -> &ASRegionMeta;
 
@@ -25,7 +26,7 @@ pub trait ASRegion: Send + Sync {
     fn unmap(&self, root_pt: PageTable);
 
     /// 调整区域大小
-    /// 
+    ///
     /// SAFETY: 需要手动调用 `map` 或 `unmap` 来更新页表
     fn resize(&mut self, new_pages: usize);
 
@@ -33,7 +34,7 @@ pub trait ASRegion: Send + Sync {
     fn fork(&mut self, parent_pt: PageTable) -> Box<dyn ASRegion>;
 
     /// 错误处理
-    fn fault_handler(&mut self, _root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
+    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
         Err(Errno::EINVAL)
     }
 }

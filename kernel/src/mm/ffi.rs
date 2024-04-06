@@ -6,6 +6,7 @@ bitflags! {
         const MAP_SHARED  = 0x01;
         const MAP_PRIVATE = 0x02;
         const MAP_FIXED   = 0x10;
+        const MAP_ANONYMOUS = 0x20;
     }
     
     pub struct MapProt: u32 {

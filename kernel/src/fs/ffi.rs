@@ -92,6 +92,7 @@ bitflags! {
 
 /// Inode 类型
 #[derive(PartialEq, Debug, Clone, Copy)]
+#[repr(u32)]
 pub enum InodeMode {
     /// socket
     IFSOCK = 0xC000,
@@ -199,4 +200,24 @@ impl UtsName {
 
 lazy_static! {
     pub static ref UTS_NAME: UtsName = UtsName::new();
+}
+
+#[repr(C)]
+#[derive(Default, AsBytes)]
+pub struct KernelStat {
+    pub st_dev: u64,
+    pub st_ino: u64,
+    pub st_mode: u32,
+    pub st_nlink: u32,
+    pub st_uid: u32,
+    pub st_gid: u32,
+    pub st_rdev: u64,
+    pub __pad1: usize,
+    pub st_size: u64,
+    pub st_blksize: u32,
+    pub __pad2: u32,
+    pub st_blocks: u64,
+    pub st_atim: TimeSpec,
+    pub st_mtim: TimeSpec,
+    pub st_ctim: TimeSpec,
 }

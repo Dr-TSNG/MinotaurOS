@@ -3,9 +3,10 @@ use alloc::string::ToString;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
 use log::{debug, warn};
+use zerocopy::AsBytes;
 use crate::arch::VirtAddr;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, DIRENT_SIZE, DirentType, InodeMode, IoVec, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
+use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, DIRENT_SIZE, DirentType, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
 use crate::processor::current_process;
@@ -255,6 +256,28 @@ pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sys
     drop(proc_inner);
     let ret = fd_impl.file.pwrite(user_buf, offset).await?;
     Ok(ret as usize)
+}
+
+pub fn sys_fstat(fd: FdNum, stat_buf: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let inode = fd_impl.file.metadata().inode.clone();
+    let stat_buf = proc_inner.addr_space.user_slice_w(VirtAddr(stat_buf), size_of::<KernelStat>())?;
+    drop(proc_inner);
+    let mut stat = KernelStat::default();
+    if let Some(inode) = inode {
+        stat.st_dev = inode.metadata().dev as u64;
+        stat.st_ino = inode.metadata().ino as u64;
+        stat.st_mode = inode.metadata().mode as u32;
+        let inner = inode.metadata().inner.lock();
+        stat.st_nlink = inner.nlink as u32;
+        stat.st_size = inner.size as u64;
+        stat.st_atim = inner.atime;
+        stat.st_mtim = inner.mtime;
+        stat.st_ctim = inner.ctime;
+    }
+    stat_buf.copy_from_slice(stat.as_bytes());
+    Ok(0)
 }
 
 pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {

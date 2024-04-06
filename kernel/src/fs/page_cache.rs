@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use core::cmp::min;
-use crate::arch::PAGE_SIZE;
+use crate::arch::{PAGE_SIZE, PhysPageNum};
 use crate::fs::inode::Inode;
 use crate::mm::allocator::{alloc_user_frames, UserFrameTracker};
 use crate::result::SyscallResult;
@@ -35,6 +35,23 @@ impl PageCache {
 
     pub fn set_inode(&self, inode: Arc<dyn Inode>) {
         self.inode.init(Arc::downgrade(&inode));
+    }
+
+    pub fn ppn_of(&self, page_num: usize) -> Option<PhysPageNum> {
+        let pages = self.pages.lock();
+        pages.get(&page_num).map(|page| page.frame.ppn)
+    }
+
+    pub async fn load(&self, page_num: usize) -> SyscallResult {
+        let mut pages = self.pages.lock();
+        if pages.get(&page_num).is_none() {
+            let inode = self.inode.upgrade().unwrap();
+            let frame = alloc_user_frames(1)?;
+            let page_buf = frame.ppn.byte_array();
+            inode.read_direct(page_buf, (page_num * PAGE_SIZE) as isize).await?;
+            pages.insert(page_num, Page::new(frame));
+        }
+        Ok(())
     }
 
     pub async fn read(&self, mut buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
@@ -76,7 +93,7 @@ impl PageCache {
     pub async fn write(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
         let mut offset = offset as usize;
         let file_size = self.inode.upgrade().unwrap().metadata().inner.lock().size as usize;
-        if file_size > offset + buf.len() {
+        if offset + buf.len() > file_size {
             self.truncate((offset + buf.len()) as isize).await?;
         }
         let page_start = offset / PAGE_SIZE;

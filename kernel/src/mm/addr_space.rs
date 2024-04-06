@@ -1,13 +1,14 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::arch::asm;
 use core::cmp::min;
 use core::ffi::CStr;
 use bitflags::bitflags;
-use log::{debug, info};
+use log::{debug, info, warn};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
 use zerocopy::transmute;
@@ -15,10 +16,12 @@ use crate::arch::{paddr_to_kvaddr, PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum
 use crate::board::{GLOBAL_MAPPINGS, PHYS_MEMORY};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::fs::file_system::MountNamespace;
+use crate::fs::page_cache::PageCache;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::page_table::PageTable;
 use crate::mm::region::{ASRegion, ASRegionMeta};
 use crate::mm::region::direct::DirectRegion;
+use crate::mm::region::file::FileRegion;
 use crate::mm::region::lazy::LazyRegion;
 use crate::process::aux::{self, Aux};
 use crate::result::{Errno, SyscallResult};
@@ -283,7 +286,19 @@ impl AddressSpace {
         Ok(VirtAddr::from(addr.ceil()).0)
     }
 
-    pub fn create_region(&mut self, start: Option<VirtPageNum>, pages: usize, perms: ASPerms) -> SyscallResult<usize> {
+    pub fn mmap(
+        &mut self,
+        name: Option<String>,
+        start: Option<VirtPageNum>,
+        pages: usize,
+        perms: ASPerms,
+        page_cache: Option<Arc<PageCache>>,
+        offset: usize,
+        is_shared: bool,
+    ) -> SyscallResult<usize> {
+        if is_shared {
+            warn!("Shared mapping is not supported yet");
+        }
         let start = if let Some(start) = start {
             let end = start + pages;
             let is_overlap = self.regions
@@ -305,14 +320,27 @@ impl AddressSpace {
             }
             region_low.metadata().end()
         };
-        let region = LazyRegion::new_free(ASRegionMeta {
-            name: None,
-            perms,
-            start,
-            pages,
-        });
+        let metadata = ASRegionMeta { name, perms, start, pages };
+        let region: Box<dyn ASRegion> = match page_cache {
+            Some(page_cache) => FileRegion::new(metadata, Arc::downgrade(&page_cache), offset),
+            None => LazyRegion::new_free(metadata),
+        };
         self.map_region(region);
         Ok(VirtAddr::from(start).0)
+    }
+
+    pub fn munmap(&mut self, start: VirtPageNum, pages: usize) -> SyscallResult {
+        let mut regions = vec![];
+        for (vpn, region) in self.regions.range_mut(start..start + pages) {
+            if !region.metadata().perms.contains(ASPerms::U) {
+                return Err(Errno::EPERM);
+            }
+            regions.push(*vpn);
+        }
+        for vpn in regions {
+            self.unmap_region(vpn);
+        }
+        Ok(())
     }
 }
 

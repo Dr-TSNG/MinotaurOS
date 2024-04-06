@@ -196,8 +196,11 @@ impl Inode for FAT32Inode {
             }
         } else {
             let mut inner = self.inner.lock().await;
-            let cluster_start = file_size.div_ceil(fs.fat32meta.bytes_per_cluster);
+            let mut cluster_start = file_size.div_ceil(fs.fat32meta.bytes_per_cluster);
             let cluster_end = new_size.div_ceil(fs.fat32meta.bytes_per_cluster);
+            if cluster_start == 0 {
+                cluster_start = 1;
+            }
             if cluster_start < cluster_end {
                 let mut prev = inner.clusters[cluster_start - 1];
                 for _ in cluster_start..cluster_end {
