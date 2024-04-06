@@ -87,6 +87,16 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
     Ok(0)
 }
 
+pub async fn sys_umount2(target: usize, flags: u32) -> SyscallResult<usize> {
+    warn!("umount2 is not implemented");
+    Ok(0)
+}
+
+pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, data: usize) -> SyscallResult<usize> {
+    warn!("mount is not implemented");
+    Ok(0)
+}
+
 pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     if !fd_impl.flags.writable() {

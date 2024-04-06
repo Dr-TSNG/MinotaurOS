@@ -144,8 +144,8 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Ioctl => syscall!(sys_ioctl, args[0] as FdNum, args[1], args[2], args[3], args[4], args[5]),
         SyscallCode::Mkdirat => async_syscall!(sys_mkdirat, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Unlinkat => async_syscall!(sys_unlinkat, args[0] as FdNum, args[1], args[2] as u32),
-        // SyscallCode::Umount2
-        // SyscallCode::Mount
+        SyscallCode::Umount2 => async_syscall!(sys_umount2, args[0], args[1] as u32),
+        SyscallCode::Mount => async_syscall!(sys_mount, args[0], args[1], args[2], args[4] as u32, args[5]),
         // SyscallCode::Statfs
         SyscallCode::Ftruncate => async_syscall!(sys_ftruncate, args[0] as FdNum, args[1] as isize),
         // SyscallCode::Faccessat
