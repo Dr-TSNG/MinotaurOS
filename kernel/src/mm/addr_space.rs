@@ -283,7 +283,7 @@ impl AddressSpace {
         let mut brk = self.unmap_region(heap_start).unwrap();
         brk.resize((addr.ceil() - heap_start).0);
         self.map_region(brk);
-        Ok(VirtAddr::from(addr.ceil()).0)
+        Ok(addr.0)
     }
 
     pub fn mmap(

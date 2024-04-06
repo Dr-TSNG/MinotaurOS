@@ -9,6 +9,7 @@ use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, DIRENT_SIZE, DirentType, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
+use crate::fs::pipe::Pipe;
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 
@@ -139,6 +140,18 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
 
 pub fn sys_close(fd: FdNum) -> SyscallResult<usize> {
     current_process().inner.lock().fd_table.remove(fd)?;
+    Ok(0)
+}
+
+pub fn sys_pipe2(fds: usize, flags: u32) -> SyscallResult<usize> {
+    let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
+    let mut proc_inner = current_process().inner.lock();
+    let user_fds = proc_inner.addr_space.user_slice_w(VirtAddr(fds), size_of::<[FdNum; 2]>())?;
+    let (reader, writer) = Pipe::new();
+    let reader_fd = proc_inner.fd_table.put(FileDescriptor::new(reader, OpenFlags::O_RDONLY | flags.intersection(OpenFlags::O_CLOEXEC)))?;
+    let writer_fd = proc_inner.fd_table.put(FileDescriptor::new(writer, OpenFlags::O_WRONLY | flags.intersection(OpenFlags::O_CLOEXEC)))?;
+    drop(proc_inner);
+    user_fds.copy_from_slice(AsBytes::as_bytes(&[reader_fd, writer_fd]));
     Ok(0)
 }
 

@@ -152,7 +152,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Chdir => async_syscall!(sys_chdir, args[0]),
         SyscallCode::Openat => async_syscall!(sys_openat, args[0] as i32, args[1], args[2] as u32, args[3] as u32),
         SyscallCode::Close => syscall!(sys_close, args[0] as FdNum),
-        // SyscallCode::Pipe2
+        SyscallCode::Pipe2 => syscall!(sys_pipe2, args[0], args[1] as u32),
         SyscallCode::Getdents64 => async_syscall!(sys_getdents, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Lseek => async_syscall!(sys_lseek, args[0] as FdNum, args[1] as isize, args[2] as i32),
         SyscallCode::Read => async_syscall!(sys_read, args[0] as FdNum, args[1], args[2]),
