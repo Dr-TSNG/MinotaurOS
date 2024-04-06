@@ -28,12 +28,10 @@ impl<T, S: MutexStrategy> SpinMutex<T, S> {
         }
     }
 
-    #[inline(always)]
     pub fn is_locked(&self) -> bool {
         self.lock.load(Ordering::Relaxed)
     }
 
-    #[inline(always)]
     pub fn lock(&self) -> SpinMutexGuard<T, S> {
         let guard = S::new_guard();
         while self
@@ -69,21 +67,19 @@ impl<'a, T: ?Sized, S: MutexStrategy> SpinMutexGuard<'a, T, S> {
 
 impl<'a, T: ?Sized, S: MutexStrategy> Deref for SpinMutexGuard<'a, T, S> {
     type Target = T;
-    #[inline(always)]
+
     fn deref(&self) -> &T {
         unsafe { &*self.mutex.data.get() }
     }
 }
 
 impl<'a, T: ?Sized, S: MutexStrategy> DerefMut for SpinMutexGuard<'a, T, S> {
-    #[inline(always)]
     fn deref_mut(&mut self) -> &mut T {
         unsafe { &mut *self.mutex.data.get() }
     }
 }
 
 impl<'a, T: ?Sized, S: MutexStrategy> Drop for SpinMutexGuard<'a, T, S> {
-    #[inline(always)]
     fn drop(&mut self) {
         self.mutex.lock.store(false, Ordering::Release);
     }

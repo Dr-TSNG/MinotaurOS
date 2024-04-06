@@ -37,12 +37,10 @@ impl<T, S: MutexStrategy> AsyncMutex<T, S> {
         }
     }
 
-    #[inline(always)]
     pub fn is_locked(&self) -> bool {
         self.lock.load(Ordering::Relaxed)
     }
 
-    #[inline(always)]
     pub async fn lock(&self) -> AsyncMutexGuard<T, S> {
         let guard = S::new_guard();
         poll_fn(|cx| self.poll_lock(cx)).await;
@@ -78,21 +76,19 @@ impl<T: ?Sized + Default, S: MutexStrategy> Default for AsyncMutex<T, S> {
 
 impl<'a, T: ?Sized, S: MutexStrategy> Deref for AsyncMutexGuard<'a, T, S> {
     type Target = T;
-    #[inline(always)]
+
     fn deref(&self) -> &T {
         unsafe { &*self.mutex.data.get() }
     }
 }
 
 impl<'a, T: ?Sized, S: MutexStrategy> DerefMut for AsyncMutexGuard<'a, T, S> {
-    #[inline(always)]
     fn deref_mut(&mut self) -> &mut T {
         unsafe { &mut *self.mutex.data.get() }
     }
 }
 
 impl<'a, T: ?Sized, S: MutexStrategy> Drop for AsyncMutexGuard<'a, T, S> {
-    #[inline(always)]
     fn drop(&mut self) {
         self.mutex.lock.store(false, Ordering::Release);
         self.mutex.waker.wake();

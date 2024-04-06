@@ -6,6 +6,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use async_trait::async_trait;
+use log::debug;
 use crate::arch::VirtAddr;
 use crate::fs::file::{File, FileMeta};
 use crate::processor::current_process;
@@ -116,12 +117,16 @@ impl Future for PipeReadFuture<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut inner = self.pipe.inner.lock();
+        debug!("[pipe] read poll pos: {}, len: {}, buf.len: {}", self.pos, self.len, inner.buf.len());
         if self.pipe.other.strong_count() == 0 {
             return Poll::Ready(Err(Errno::EPIPE));
         }
         let read = min(self.len - self.pos, inner.buf.len());
         if read > 0 {
-            match current_process().inner.lock().addr_space.user_slice_w(VirtAddr(self.user_buf + self.pos), read) {
+            let user_buf = current_process().inner.lock().apply(|proc_inner| {
+                proc_inner.addr_space.user_slice_w(VirtAddr(self.user_buf + self.pos), read)
+            });
+            match user_buf {
                 Ok(user_buf) => {
                     for i in self.pos..self.pos + read {
                         user_buf[i] = inner.buf.pop_front().unwrap();
@@ -149,6 +154,7 @@ impl Future for PipeWriteFuture<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut inner = self.pipe.inner.lock();
+        debug!("[pipe] write poll pos: {}, len: {}, buf.len: {}", self.pos, self.len, inner.buf.len());
         let write = self.len - self.pos;
         if write == 0 && inner.transfer >= self.transfer {
             return Poll::Ready(Ok(self.len as isize));
@@ -157,7 +163,10 @@ impl Future for PipeWriteFuture<'_> {
             return Poll::Ready(Err(Errno::EPIPE));
         }
         if write > 0 {
-            match current_process().inner.lock().addr_space.user_slice_r(VirtAddr(self.user_buf + self.pos), write) {
+            let user_buf = current_process().inner.lock().apply(|proc_inner| {
+                proc_inner.addr_space.user_slice_r(VirtAddr(self.user_buf + self.pos), write)
+            });
+            match user_buf {
                 Ok(user_buf) => {
                     inner.buf.extend(&user_buf[self.pos..self.pos + write]);
                     self.pos += write;

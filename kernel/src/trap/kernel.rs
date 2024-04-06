@@ -1,4 +1,4 @@
-use log::{debug, error};
+use log::{debug, error, warn};
 use riscv::register::{scause, sepc, stval};
 use riscv::register::scause::{Exception, Trap};
 use crate::arch::VirtAddr;
@@ -38,6 +38,9 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
     let thread = local_hart()
         .current_thread()
         .expect("Page fault while running kernel thread");
+    if thread.process.inner.is_locked() {
+        warn!("Page fault while holding process lock");
+    }
     let mut proc_inner = thread.process.inner.lock();
     match proc_inner.addr_space.handle_page_fault(addr, perform) {
         Ok(()) => debug!("Page fault resolved"),

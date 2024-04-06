@@ -22,16 +22,15 @@ struct TakeWakerFuture;
 impl Future for TakeWakerFuture {
     type Output = Waker;
 
-    #[inline(always)]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Poll::Ready(cx.waker().clone())
     }
 }
 
 /// 阻塞当前线程直到 future 执行完成
-/// 
+///
 /// future 不会被调度，而是一直被轮询直到返回 Ready
-pub fn block_on<T>(fut: impl Future<Output = T>) -> T {
+pub fn block_on<T>(fut: impl Future<Output=T>) -> T {
     let mut fut = Box::pin(fut);
 
     let waker = Arc::new(BlockWaker).into();
@@ -46,7 +45,6 @@ pub fn block_on<T>(fut: impl Future<Output = T>) -> T {
 }
 
 /// 获取当前 async 上下文的 waker
-#[inline(always)]
 pub async fn take_waker() -> Waker {
     TakeWakerFuture.await
 }
