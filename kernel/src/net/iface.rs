@@ -1,11 +1,15 @@
+//！ 通过interface实现的方法来实现socket的获取。
+
 use crate::net::netaddress::IpAddr;
 use crate::sched::time::current_time;
 use alloc::vec;
-use smoltcp::iface::{Config, Interface, SocketSet};
+use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, Loopback, Medium};
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpCidr};
+use crate::net::tcp::TcpSocket;
 use crate::sync::mutex::Mutex;
+
 
 /*
     temp , used like this in https://github.com/smoltcp-rs/smoltcp/blob/main/examples/loopback.rs
@@ -142,6 +146,16 @@ impl<'a> NetInterface<'a> {
             &mut inner.sockets_set,
         );
     }
+
+    /// 将tcp socket加入到INTERFACE中，返回 handler给 tcp结构体使用
+    pub fn add_tcpsocket(socket: TcpSocket) -> SocketHandle{
+        todo!();
+    }
+
+    /// 将tcp socket加入到INTERFACE中，返回 handler给 udp结构体使用
+    pub fn add_udpsocket() -> SocketHandle{
+        todo!();
+    }
 }
 
 impl<'a> InterfaceInner<'a> {
@@ -152,8 +166,7 @@ impl<'a> InterfaceInner<'a> {
                 Config::new(EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]).into())
             }
             Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
-            // default to be Ethernet
-            _ => Config::new(EthernetAddress([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]).into()),
+            _ => {panic!("Not Impl Net Medium Type!")}
         };
         let mut i_face = Interface::new(
             config,

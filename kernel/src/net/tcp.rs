@@ -1,10 +1,16 @@
+use alloc::vec;
+use log::info;
 use smoltcp::phy::Medium;
 use smoltcp::wire::IpEndpoint;
 use smoltcp::{iface::SocketHandle, wire::IpListenEndpoint};
+use smoltcp::socket::tcp;
+use crate::fs::ffi::InodeMode::{FileFIFO, IFSOCK};
 
 use crate::fs::file::{File, FileMeta};
-use crate::net::socket::Socket;
-use crate::result::{MosResult, SyscallResult};
+use crate::net::iface::NET_INTERFACE;
+use crate::net::port::{PORT_ALLOCATOR, PortAllocator};
+use crate::net::socket::{BUFFER_SIZE, Socket};
+use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 
 pub struct TcpSocket {
@@ -22,18 +28,37 @@ struct TcpInner {
 }
 
 impl TcpSocket {
-    /// put this socket into INTERFACE's Sockets_Set and return a SocketHandle
-    pub fn new() -> SocketHandle {
-        todo!()
+    pub fn new() -> Self {
+        let tcp_rx_buffer = tcp::SocketBuffer::new(vec![0u8; BUFFER_SIZE]);
+        let tcp_tx_buffer = tcp::SocketBuffer::new(vec![0u8; BUFFER_SIZE]);
+        let socket = tcp::Socket::new(tcp_rx_buffer, tcp_tx_buffer);
+        // 将socket加入interface，返回handler
+        let handler = NET_INTERFACE.add_tcpsocket(socket);
+        info!("[TcpSocket::new] new{}",handler);
+        NET_INTERFACE.poll();
+        // 没有处理分配完port，不能再多分配，返回None的情况。。。
+        let port = PORT_ALLOCATOR.take().unwrap();
+        info!("[TcpSocket handle{} : port is {}]",handler,port);
+        Self{
+            socket_handle: handler,
+            inner: Mutex::new(TcpInner{
+                local_endpoint: IpListenEndpoint{addr:None,port,},
+                remote_endpoint: None,
+                last_state: tcp::State::Closed,
+                recv_buf_size: BUFFER_SIZE,
+                send_buf_size: BUFFER_SIZE,
+            }),
+            file_data: FileMeta::new(Some(IFSOCK)),
+        }
     }
 
     /// this tcp_socket to connect someone else tcp_socket
-    fn tcp_connect(&self, remote_endpoint: IpEndpoint) -> MosResult<()> {
+    fn tcp_connect(&self, remote_endpoint: IpEndpoint) -> SyscallResult<()> {
         todo!()
     }
 
     /// tcp_socket wait for a connection to it , if connected , return remote IpEndpoint
-    fn tcp_accept(&self) -> MosResult<IpEndpoint> {
+    fn tcp_accept(&self) -> SyscallResult<IpEndpoint> {
         todo!()
     }
 }
