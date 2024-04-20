@@ -3,9 +3,6 @@
 .section .text.entry
 .globl _start
 _start:
-    # 设置启动栈
-    la sp, boot_stack_top
-
     # 设置引导页表
     la t0, boot_page_table
     li t1, SV39_MODE << 60
@@ -13,13 +10,8 @@ _start:
     or t0, t0, t1
     csrw satp, t0
     sfence.vma
-
+    # 跳转到主函数
     call pspace_main
-
-.section .bss.stack
-boot_stack:
-    .space 4096 * 64
-boot_stack_top:
 
 .section .rodata
 .align 12

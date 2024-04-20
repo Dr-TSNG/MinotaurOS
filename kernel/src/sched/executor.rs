@@ -46,14 +46,12 @@ pub fn spawn<F>(future: F) -> (Runnable, Task<F::Output>)
 }
 
 /// 开始执行任务
-pub fn run_executor() {
+pub fn run_executor() -> ! {
     loop {
         while let Some(task) = TASK_QUEUE.take() {
             task.run();
         }
-        if !query_timer() {
-            break;
-        }
+        query_timer();
         core::hint::spin_loop();
     }
 }

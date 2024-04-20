@@ -27,7 +27,7 @@ SECTIONS
 
     . = ALIGN(4K);
     .bss : {
-        *(.bss.stack)
+        *(.bss.uninit)
         sbss = .;
         . = ALIGN(4K);
         *(.bss.heap)

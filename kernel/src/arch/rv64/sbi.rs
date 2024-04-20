@@ -1,18 +1,18 @@
-#![allow(unused)]
-
 use core::arch::asm;
+
+pub use sbi_spec::binary::Error as SBIError;
+use sbi_spec::binary::SbiRet;
 use sbi_spec::dbcn::{CONSOLE_READ, CONSOLE_WRITE, EID_DBCN};
+use sbi_spec::hsm::{EID_HSM, HART_GET_STATUS, HART_START, HART_STOP};
 use sbi_spec::srst::{EID_SRST, RESET_REASON_NO_REASON, RESET_TYPE_SHUTDOWN, SYSTEM_RESET};
 use sbi_spec::time::{EID_TIME, SET_TIMER};
 
-pub use sbi_spec::binary::Error as SBIError;
 use crate::arch::{kvaddr_to_paddr, VirtAddr};
 use crate::processor::hart::local_hart;
 
 #[inline(always)]
 fn sbi_call(eid: usize, fid: usize, arg0: usize, arg1: usize, arg2: usize) -> Result<usize, SBIError> {
-    let error: usize;
-    let value: usize;
+    let (error, value);
     unsafe {
         asm! {
         "ecall",
@@ -23,7 +23,7 @@ fn sbi_call(eid: usize, fid: usize, arg0: usize, arg1: usize, arg2: usize) -> Re
         in("a7") eid,
         };
     }
-    let ret = sbi_spec::binary::SbiRet { error, value };
+    let ret = SbiRet { error, value };
     ret.into_result()
 }
 
@@ -48,6 +48,18 @@ pub fn console_write(content: &str) -> Result<usize, SBIError> {
         None => kvaddr_to_paddr(vaddr),
     };
     sbi_call(EID_DBCN, CONSOLE_WRITE, content.len(), paddr.0, 0)
+}
+
+pub fn start_hart(hart_id: usize, start_paddr: usize) -> Result<(), SBIError> {
+    sbi_call(EID_HSM, HART_START, hart_id, start_paddr, 0).map(|_| ())
+}
+
+pub fn stop_hart(hart_id: usize) -> Result<(), SBIError> {
+    sbi_call(EID_HSM, HART_STOP, hart_id, 0, 0).map(|_| ())
+}
+
+pub fn hart_status(hart_id: usize) -> Result<usize, SBIError> {
+    sbi_call(EID_HSM, HART_GET_STATUS, hart_id, 0, 0)
 }
 
 pub fn shutdown() -> Result<!, SBIError> {

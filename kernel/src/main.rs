@@ -34,12 +34,17 @@ mod trap;
 
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
-use log::{error, info};
+use core::sync::atomic::{AtomicBool, Ordering};
+use log::{error, info, warn};
+use sbi_spec::hsm::hart_state;
 use arch::shutdown;
 use config::KERNEL_ADDR_OFFSET;
-use crate::config::{LINKAGE_EBSS, LINKAGE_SBSS};
+use crate::arch::sbi;
+use crate::board::BOARD_INFO;
+use crate::config::{KERNEL_PADDR_BASE, KERNEL_STACK_SIZE, LINKAGE_EBSS, LINKAGE_SBSS};
 use crate::process::Process;
 use crate::processor::hart;
+use crate::processor::hart::KERNEL_STACK;
 use crate::result::SyscallResult;
 use crate::sched::executor::run_executor;
 use crate::sched::spawn_kernel_thread;
@@ -48,6 +53,9 @@ global_asm!(include_str!("entry.asm"));
 
 const LOGO: &str = include_str!("../../logo.txt");
 
+#[link_section = ".bss.uninit"]
+static MAIN_HART: AtomicBool = AtomicBool::new(false);
+
 fn clear_bss() {
     unsafe {
         let len = LINKAGE_EBSS.0 - LINKAGE_SBSS.0;
@@ -55,16 +63,22 @@ fn clear_bss() {
     }
 }
 
-fn start_main_hart() -> SyscallResult {
+fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     clear_bss();
-    hart::init(0);
+    hart::init(hart_id);
     mm::allocator::init();
+    board::init(dtb_paddr);
     debug::logger::init();
-    println!("[kernel] Display Logo");
+
     println!("{}", LOGO);
+    println!("========================================");
+    println!("| boot hart id         | {:13} |", hart_id);
+    println!("| smp                  | {:13} |", BOARD_INFO.smp);
+    println!("| dtb physical address | {:#13x} |", dtb_paddr);
+    println!("----------------------------------------");
 
     trap::init();
-    mm::vm_init()?;
+    mm::vm_init(true)?;
     driver::init()?;
     builtin::init();
 
@@ -75,32 +89,61 @@ fn start_main_hart() -> SyscallResult {
         Process::new_initproc(mnt_ns, data).await.unwrap();
     });
 
+    for secondary in 0..BOARD_INFO.smp {
+        if secondary != hart_id {
+            if sbi::hart_status(secondary).unwrap() != hart_state::STOPPED {
+                warn!("Hart {} is already started?", secondary);
+            } else if let Err(e) = sbi::start_hart(secondary, KERNEL_PADDR_BASE.0) {
+                warn!("Failed to start hart {}: {:?}", secondary, e);
+            }
+        }
+    }
+
     sched::time::set_next_trigger();
     arch::enable_timer_interrupt();
-    Ok(())
+    run_executor();
+}
+
+fn start_secondary_hart(hart_id: usize) -> SyscallResult<!> {
+    hart::init(hart_id);
+    mm::vm_init(false)?;
+    info!("Start secondary hart {}", hart_id);
+
+    sched::time::set_next_trigger();
+    arch::enable_timer_interrupt();
+    run_executor();
 }
 
 #[naked]
 #[no_mangle]
 #[allow(undefined_naked_function_abi)]
-pub unsafe fn pspace_main(hart_id: usize) {
+pub unsafe fn pspace_main() {
     asm! {
+    "la t0, {0}",
+    "li t1, {1}",
+    "mul sp, a0, t1",
+    "add sp, sp, t0",
+    "add sp, sp, t1",
     "la t0, main",
-    "li t1, {}",
+    "li t1, {2}",
     "add sp, sp, t1",
     "add t0, t0, t1",
     "jalr zero, 0(t0)",
+    sym KERNEL_STACK,
+    const KERNEL_STACK_SIZE,
     const KERNEL_ADDR_OFFSET,
     options(noreturn),
     }
 }
 
 #[no_mangle]
-fn main() -> ! {
-    start_main_hart().unwrap();
-    run_executor();
-    info!("All task finished, shutdown");
-    shutdown()
+fn main(hart_id: usize, dtb_paddr: usize) -> ! {
+    if !MAIN_HART.load(Ordering::SeqCst) {
+        MAIN_HART.store(true, Ordering::SeqCst);
+        start_main_hart(hart_id, dtb_paddr).unwrap()
+    } else {
+        start_secondary_hart(hart_id).unwrap()
+    }
 }
 
 #[panic_handler]

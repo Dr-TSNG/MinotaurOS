@@ -26,10 +26,11 @@ impl log::Log for SimpleLogger {
             match local_hart().current_thread() {
                 Some(thread) => {
                     println!(
-                        "\x1b[{}m[{:6?}] [{:5}] [{}, {}] | {}\x1b[0m",
+                        "\x1b[{}m[{:6?}] [{:5}] [HART {}] [{}, {}] | {}\x1b[0m",
                         level_color(record.level()),
                         current_time(),
                         record.level(),
+                        local_hart().id,
                         thread.process.pid.0,
                         thread.tid.0,
                         record.args()
@@ -37,10 +38,11 @@ impl log::Log for SimpleLogger {
                 }
                 None => {
                     println!(
-                        "\x1b[{}m[{:6?}] [{:5}] kernel | {}\x1b[0m",
+                        "\x1b[{}m[{:6?}] [{:5}] [HART {}] kernel | {}\x1b[0m",
                         level_color(record.level()),
                         current_time(),
                         record.level(),
+                        local_hart().id,
                         record.args(),
                     );
                 }
@@ -82,9 +84,10 @@ macro_rules! strace {
             sched::time::current_time,
         };
         println!(
-            concat!("\x1b[{}m[{:6?}] [SCALL] [{}, {}] | ", $fmt ,"\x1b[0m"),
+            concat!("\x1b[{}m[{:6?}] [SCALL] [HART {}] [{}, {}] | ", $fmt ,"\x1b[0m"),
             STRACE_COLOR_CODE,
             current_time(),
+            local_hart().id,
             current_process().pid.0,
             current_thread().tid.0
             $(, $($arg)+)?,

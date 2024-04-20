@@ -16,11 +16,13 @@ pub mod region;
 
 pub static KERNEL_SPACE: LateInit<Mutex<AddressSpace>> = LateInit::new();
 
-pub fn vm_init() -> SyscallResult {
-    KERNEL_SPACE.init(Mutex::new(AddressSpace::new_kernel()));
+pub fn vm_init(primary: bool) -> SyscallResult {
+    if primary {
+        KERNEL_SPACE.init(Mutex::new(AddressSpace::new_kernel()));
+        vm_test()?;
+        info!("Kernel address space initialized");
+    }
     unsafe { KERNEL_SPACE.lock().activate(); }
-    info!("Kernel address space activated");
-    vm_test()?;
     Ok(())
 }
 

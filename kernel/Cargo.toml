@@ -12,13 +12,14 @@ bitvec-rs = "0.2"
 buddy_system_allocator = "0.9"
 bytemuck = "1.14"
 downcast-rs = { version = "1.2", default-features = false }
+fdt-rs = { version = "0.4", default-features = false }
 futures = { version = "0.3", default-features = false }
 lazy_static = { version = "1.4", features = ["spin_no_std"] }
 log = "0.4"
 lru = "0.12"
 num_enum = { version = "0.7.2", default-features = false }
 pin-project = "1.1.5"
-sbi-spec = "0.0.6"
+sbi-spec = "0.0.7"
 spin = "0.9"
 time = { version = "0.3", default-features = false }
 virtio-drivers = "0.7.1"

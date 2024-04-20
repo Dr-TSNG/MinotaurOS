@@ -18,6 +18,8 @@ pub struct RunConfig {
     pub smp: u8,
     #[clap(long, default_value = "128M")]
     pub mem: String,
+    #[clap(long, default_value = "prebuilts/rustsbi-qemu.bin")]
+    pub bios: String,
     #[clap(long, default_value = "prebuilts/pre-2024.img")]
     pub disk: String,
     #[clap(long)]
@@ -45,6 +47,7 @@ fn run_qemu(config: &RunConfig) -> Result<()> {
         .stderr(Stdio::inherit())
         .arg("-machine").arg("virt")
         .arg("-nographic")
+        .arg("-bios").arg(&config.bios)
         .arg("-kernel").arg(build::build_dir_file("kernel.bin", config.release)?)
         .arg("-smp").arg(format!("{}", config.smp))
         .arg("-m").arg(&config.mem)

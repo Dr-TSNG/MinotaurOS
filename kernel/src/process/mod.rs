@@ -12,6 +12,7 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
 use log::{info, warn};
+use crate::arch;
 use crate::arch::VirtAddr;
 use crate::fs::fd::FdTable;
 use crate::fs::file_system::MountNamespace;
@@ -311,6 +312,10 @@ impl Process {
             // 如果没有线程了，通知父进程
             if inner.threads.is_empty() {
                 inner.exit_code = Some(exit_code);
+                if self.pid.0 == 1 {
+                    info!("Init process exited, shutdown system");
+                    arch::shutdown();
+                }
                 if let Some(parent) = inner.parent.upgrade() {
                     parent.on_child_exit(self.pid.0, exit_code);
                 }

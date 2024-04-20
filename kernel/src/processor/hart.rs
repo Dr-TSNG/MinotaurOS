@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::arch::asm;
 use riscv::register::mstatus::FS;
 use riscv::register::sstatus;
-use crate::config::MAX_HARTS;
+use crate::config::{KERNEL_STACK_SIZE, MAX_HARTS};
 use crate::mm::KERNEL_SPACE;
 use crate::process::thread::Thread;
 use crate::processor::context::HartContext;
@@ -52,6 +52,9 @@ impl Hart {
 
 const HART_EACH: Hart = Hart::new();
 static mut HARTS: [Hart; MAX_HARTS] = [HART_EACH; MAX_HARTS];
+
+#[link_section = ".bss.uninit"]
+pub static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE * MAX_HARTS] = [0; KERNEL_STACK_SIZE * MAX_HARTS];
 
 pub fn local_hart() -> &'static mut Hart {
     unsafe {
