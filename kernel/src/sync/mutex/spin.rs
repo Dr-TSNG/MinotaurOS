@@ -2,6 +2,8 @@ use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
+use core::time::Duration;
+use crate::sched::time::current_time;
 use crate::sync::mutex::MutexStrategy;
 
 pub struct SpinMutex<T: ?Sized, S: MutexStrategy> {
@@ -32,19 +34,30 @@ impl<T, S: MutexStrategy> SpinMutex<T, S> {
         self.lock.load(Ordering::Relaxed)
     }
 
-    pub fn lock(&self) -> SpinMutexGuard<T, S> {
-        let guard = S::new_guard();
-        while self
+    pub fn try_lock(&self) -> Option<SpinMutexGuard<T, S>> {
+        if self
             .lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err() {
-            while self.is_locked() {
-                core::hint::spin_loop();
-            }
+            .is_ok() {
+            Some(SpinMutexGuard {
+                mutex: self,
+                guard: S::new_guard(),
+            })
+        } else {
+            None
         }
-        SpinMutexGuard {
-            mutex: self,
-            guard,
+    }
+    
+    pub fn lock(&self) -> SpinMutexGuard<T, S> {
+        let start_time = current_time();
+        loop {
+            if let Some(guard) = self.try_lock() {
+                return guard;
+            }
+            core::hint::spin_loop();
+            if current_time() - start_time > Duration::from_secs(5) {
+                panic!("SpinMutex deadlock");
+            }
         }
     }
 }

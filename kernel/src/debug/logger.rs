@@ -81,6 +81,7 @@ macro_rules! strace {
             debug::logger::STRACE_COLOR_CODE,
             println,
             processor::{current_process, current_thread},
+            processor::hart::local_hart,
             sched::time::current_time,
         };
         println!(

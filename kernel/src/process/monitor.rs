@@ -3,27 +3,25 @@ use alloc::sync::{Arc, Weak};
 use crate::process::{Pid, Process};
 use crate::sync::mutex::IrqMutex;
 
-pub static PROCESS_MONITOR: ProcessMonitor = ProcessMonitor::new();
+pub static PROCESS_MONITOR: ProcessMonitor = IrqMutex::new(ProcessMonitorInner(BTreeMap::new()));
 
-pub struct ProcessMonitor(IrqMutex<BTreeMap<Pid, Weak<Process>>>);
+pub type ProcessMonitor = IrqMutex<ProcessMonitorInner>;
 
-impl ProcessMonitor {
-    pub const fn new() -> Self {
-        Self(IrqMutex::new(BTreeMap::new()))
+pub struct ProcessMonitorInner(BTreeMap<Pid, Weak<Process>>);
+
+impl ProcessMonitorInner {
+    pub fn add(&mut self, pid: Pid, process: Weak<Process>) {
+        self.0.insert(pid, process);
     }
 
-    pub fn add(&self, pid: Pid, process: Weak<Process>) {
-        self.0.lock().insert(pid, process);
-    }
-
-    pub fn remove(&self, pid: Pid) {
-        self.0.lock().remove(&pid);
+    pub fn remove(&mut self, pid: Pid) {
+        self.0.remove(&pid);
     }
 
     pub fn get(&self, pid: Pid) -> Option<Arc<Process>> {
-        self.0.lock().get(&pid).and_then(|p| p.upgrade())
+        self.0.get(&pid).and_then(|p| p.upgrade())
     }
-    
+
     pub fn init_proc(&self) -> Arc<Process> {
         self.get(1).unwrap()
     }

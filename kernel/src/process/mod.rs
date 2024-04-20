@@ -88,7 +88,7 @@ impl Process {
         let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()));
         process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
 
-        PROCESS_MONITOR.add(pid.0, Arc::downgrade(&process));
+        PROCESS_MONITOR.lock().add(pid.0, Arc::downgrade(&process));
         spawn_user_thread(thread);
         info!("Init process created, pid: {}", pid.0);
         Ok(process.clone())
@@ -202,8 +202,9 @@ impl Process {
     }
 
     pub fn fork_process(self: &Arc<Self>, flags: CloneFlags, stack: usize) -> SyscallResult<Pid> {
+        let mut monitor = PROCESS_MONITOR.lock();
+        
         let new_pid = Arc::new(TidTracker::new());
-
         let new_thread = self.inner.lock().apply_mut(|proc_inner| {
             let new_process = Arc::new(Process {
                 pid: new_pid.clone(),
@@ -232,7 +233,7 @@ impl Process {
             new_thread
         });
 
-        PROCESS_MONITOR.add(new_pid.0, Arc::downgrade(&new_thread.process));
+        monitor.add(new_pid.0, Arc::downgrade(&new_thread.process));
         spawn_user_thread(new_thread);
         info!(
             "[fork_process] New process (pid = {}) created from parent process (pid = {}, tid = {})",
@@ -307,6 +308,7 @@ impl Process {
 
     pub fn on_thread_exit(&self, tid: Tid, exit_code: i8) {
         info!("Thread {} exited with code {}", tid, exit_code);
+        let monitor = PROCESS_MONITOR.lock();
         self.inner.lock().apply_mut(|inner| {
             inner.threads.remove(&tid);
             // 如果没有线程了，通知父进程
@@ -321,7 +323,7 @@ impl Process {
                 }
                 // 将子进程的父进程设置为 init
                 inner.children.iter_mut().for_each(|child| {
-                    child.inner.lock().parent = Arc::downgrade(&PROCESS_MONITOR.init_proc());
+                    child.inner.lock().parent = Arc::downgrade(&monitor.init_proc());
                 })
             }
         });
