@@ -241,6 +241,9 @@ impl FAT32Dirent {
         let mut short_name = [0x20; 11];
         let mut i = 0;
         for c in self.name.as_bytes() {
+            if i == 11 {
+                break;
+            }
             if *c == '.' as u8 {
                 i = 8;
                 continue;

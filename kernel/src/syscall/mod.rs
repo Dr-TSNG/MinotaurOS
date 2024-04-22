@@ -140,7 +140,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Getcwd => syscall!(sys_getcwd, args[0], args[1]),
         SyscallCode::Dup => syscall!(sys_dup, args[0] as FdNum),
         SyscallCode::Dup3 => syscall!(sys_dup3, args[0] as FdNum, args[1] as FdNum, args[2] as u32),
-        // SyscallCode::Fcntl
+        SyscallCode::Fcntl => syscall!(sys_fcntl, args[0] as FdNum, args[1], args[2]),
         SyscallCode::Ioctl => async_syscall!(sys_ioctl, args[0] as FdNum, args[1], args[2], args[3], args[4], args[5]),
         SyscallCode::Mkdirat => async_syscall!(sys_mkdirat, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Unlinkat => async_syscall!(sys_unlinkat, args[0] as FdNum, args[1], args[2] as u32),

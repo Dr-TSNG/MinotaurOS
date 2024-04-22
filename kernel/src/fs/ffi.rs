@@ -1,6 +1,7 @@
 use core::mem::size_of;
 use bitflags::bitflags;
 use lazy_static::lazy_static;
+use num_enum::TryFromPrimitive;
 use zerocopy::{AsBytes, FromZeroes};
 use crate::sched::ffi::TimeSpec;
 
@@ -25,6 +26,7 @@ bitflags! {
         const O_CLOEXEC   =  0o2000000;
         const O_SYNC      =  0o4010000;
         const O_PATH      = 0o10000000;
+        const O_STATUS    = Self::O_APPEND.bits | Self::O_ASYNC.bits | Self::O_DIRECT.bits | Self::O_NOATIME.bits | Self::O_NONBLOCK.bits;
     }
 }
 
@@ -67,6 +69,18 @@ bitflags! {
         /// Do not follow symlinks
         const ST_NOSYMFOLLOW = 1 << 13;
     }
+}
+
+#[allow(non_camel_case_types)]
+#[derive(PartialEq, Debug, Clone, Copy, TryFromPrimitive)]
+#[repr(usize)]
+pub enum FcntlCmd {
+    F_DUPFD = 0,
+    F_GETFD = 1,
+    F_SETFD = 2,
+    F_GETFL = 3,
+    F_SETFL = 4,
+    F_DUPFD_CLOEXEC = 1030,
 }
 
 /// Inode 类型

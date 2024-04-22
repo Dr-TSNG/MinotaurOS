@@ -6,7 +6,7 @@ use log::{debug, warn};
 use zerocopy::AsBytes;
 use crate::arch::VirtAddr;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, DIRENT_SIZE, DirentType, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
+use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
 use crate::fs::pipe::Pipe;
@@ -33,7 +33,7 @@ pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
 pub fn sys_dup(fd: FdNum) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?.dup(false);
-    proc_inner.fd_table.put(fd_impl).map(|fd| fd as usize)
+    proc_inner.fd_table.put(fd_impl, 0).map(|fd| fd as usize)
 }
 
 pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize> {
@@ -52,6 +52,42 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
     let fd_impl = proc_inner.fd_table.get(old_fd)?.dup(cloexec);
     proc_inner.fd_table.insert(new_fd, fd_impl)?;
     Ok(new_fd as usize)
+}
+
+pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
+    let mut proc_inner = current_process().inner.lock();
+    let mut fd_impl = proc_inner.fd_table.get(fd)?;
+    let cmd = FcntlCmd::try_from(cmd).map_err(|_| Errno::EINVAL)?;
+    match cmd {
+        FcntlCmd::F_DUPFD => {
+            return proc_inner.fd_table.put(fd_impl, arg2 as FdNum).map(|fd| fd as usize);
+        }
+        FcntlCmd::F_DUPFD_CLOEXEC => {
+            let fd_impl = fd_impl.dup(true);
+            return proc_inner.fd_table.put(fd_impl, arg2 as FdNum).map(|fd| fd as usize);
+        }
+        FcntlCmd::F_GETFD => {
+            let flags = fd_impl.flags & OpenFlags::O_CLOEXEC;
+            return Ok(flags.bits() as usize);
+        }
+        FcntlCmd::F_SETFD => {
+            let flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
+            let fd_impl = fd_impl.dup(flags.intersects(OpenFlags::O_CLOEXEC));
+            proc_inner.fd_table.insert(fd, fd_impl)?;
+        }
+        FcntlCmd::F_GETFL => {
+            let flags = fd_impl.flags & OpenFlags::O_STATUS;
+            return Ok(flags.bits() as usize);
+        }
+        FcntlCmd::F_SETFL => {
+            // TODO: Only change status flags
+            warn!("F_SETFL");
+            let flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
+            fd_impl.flags = flags;
+            proc_inner.fd_table.insert(fd, fd_impl)?;
+        }
+    }
+    Ok(0)
 }
 
 pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<usize> {
@@ -145,7 +181,7 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
     };
     let file = inode.open()?;
     let fd_impl = FileDescriptor::new(file, flags);
-    let fd = proc_inner.fd_table.put(fd_impl)?;
+    let fd = proc_inner.fd_table.put(fd_impl, 0)?;
     Ok(fd as usize)
 }
 
@@ -159,8 +195,8 @@ pub fn sys_pipe2(fds: usize, flags: u32) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let user_fds = proc_inner.addr_space.user_slice_w(VirtAddr(fds), size_of::<[FdNum; 2]>())?;
     let (reader, writer) = Pipe::new();
-    let reader_fd = proc_inner.fd_table.put(FileDescriptor::new(reader, OpenFlags::O_RDONLY | flags.intersection(OpenFlags::O_CLOEXEC)))?;
-    let writer_fd = proc_inner.fd_table.put(FileDescriptor::new(writer, OpenFlags::O_WRONLY | flags.intersection(OpenFlags::O_CLOEXEC)))?;
+    let reader_fd = proc_inner.fd_table.put(FileDescriptor::new(reader, OpenFlags::O_RDONLY | flags.intersection(OpenFlags::O_CLOEXEC)), 0)?;
+    let writer_fd = proc_inner.fd_table.put(FileDescriptor::new(writer, OpenFlags::O_WRONLY | flags.intersection(OpenFlags::O_CLOEXEC)), 0)?;
     drop(proc_inner);
     user_fds.copy_from_slice(AsBytes::as_bytes(&[reader_fd, writer_fd]));
     Ok(0)

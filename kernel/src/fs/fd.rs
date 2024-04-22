@@ -64,8 +64,8 @@ impl FdTable {
     }
 
     /// 插入一个文件描述符，返回位置
-    pub fn put(&mut self, fd_impl: FileDescriptor) -> SyscallResult<FdNum> {
-        let fd = self.find_slot();
+    pub fn put(&mut self, fd_impl: FileDescriptor, start: FdNum) -> SyscallResult<FdNum> {
+        let fd = self.find_slot(start as usize);
         if fd > MAX_FD_NUM {
             return Err(Errno::EMFILE);
         }
@@ -101,9 +101,12 @@ impl FdTable {
 }
 
 impl FdTable {
-    fn find_slot(&self) -> usize {
-        for (i, fd) in self.table.iter().enumerate() {
-            if fd.is_none() {
+    fn find_slot(&self, start: usize) -> usize {
+        if start >= self.table.len() {
+            return start;
+        }
+        for i in start..self.table.len() {
+            if self.table[i].is_none() {
                 return i;
             }
         }
