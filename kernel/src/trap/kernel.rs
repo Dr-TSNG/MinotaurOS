@@ -38,7 +38,7 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
     let thread = local_hart()
         .current_thread()
         .expect("Page fault while running kernel thread");
-    if thread.process.inner.is_locked() {
+    if thread.process.inner.is_locked() == Some(local_hart().id) {
         warn!("Page fault while holding process lock");
     }
     let mut proc_inner = thread.process.inner.lock();

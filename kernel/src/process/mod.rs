@@ -28,7 +28,7 @@ use crate::processor::hart::local_hart;
 use crate::result::SyscallResult;
 use crate::sched::spawn_user_thread;
 use crate::signal::ffi::Signal;
-use crate::sync::mutex::IrqMutex;
+use crate::sync::mutex::IrqReMutex;
 use crate::trap::context::TrapContext;
 
 pub type Tid = usize;
@@ -39,7 +39,7 @@ pub struct Process {
     /// 进程的 pid
     pub pid: Arc<TidTracker>,
     /// 可变数据
-    pub inner: IrqMutex<ProcessInner>,
+    pub inner: IrqReMutex<ProcessInner>,
 }
 
 pub struct ProcessInner {
@@ -71,7 +71,7 @@ impl Process {
 
         let process = Arc::new(Process {
             pid: pid.clone(),
-            inner: IrqMutex::new(ProcessInner {
+            inner: IrqReMutex::new(ProcessInner {
                 parent: Weak::new(),
                 children: Vec::new(),
                 pgid: pid.0,
@@ -208,7 +208,7 @@ impl Process {
         let new_thread = self.inner.lock().apply_mut(|proc_inner| {
             let new_process = Arc::new(Process {
                 pid: new_pid.clone(),
-                inner: IrqMutex::new(ProcessInner {
+                inner: IrqReMutex::new(ProcessInner {
                     parent: Arc::downgrade(self),
                     children: Vec::new(),
                     pgid: new_pid.0,

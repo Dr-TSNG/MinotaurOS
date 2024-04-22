@@ -19,6 +19,11 @@ pub fn sys_exit(exit_code: i8) -> SyscallResult<usize> {
     Ok(0)
 }
 
+pub fn sys_exit_group(exit_code: i8) -> SyscallResult<usize> {
+    current_process().terminate(exit_code);
+    Ok(0)
+}
+
 pub fn sys_set_tid_address(tidptr: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     if proc_inner.addr_space.user_slice_w(VirtAddr(tidptr), size_of::<usize>()).is_ok() {

@@ -1,5 +1,6 @@
 use riscv::register::sstatus;
 
+mod reentrant;
 mod spin;
 mod sync;
 // mod rwlock;
@@ -15,8 +16,9 @@ pub struct IrqStrategy;
 
 pub type Mutex<T> = spin::SpinMutex<T, DefaultStrategy>;
 pub type IrqMutex<T> = spin::SpinMutex<T, IrqStrategy>;
+pub type ReMutex<T> = reentrant::ReMutex<T, DefaultStrategy>;
+pub type IrqReMutex<T> = reentrant::ReMutex<T, IrqStrategy>;
 pub type AsyncMutex<T> = sync::AsyncMutex<T, DefaultStrategy>;
-pub type AsyncIrqMutex<T> = sync::AsyncMutex<T, IrqStrategy>;
 // TODO: Real RwLock
 pub type RwLock<T> = ::spin::RwLock<T>;
 
