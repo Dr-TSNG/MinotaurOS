@@ -1,8 +1,9 @@
 use alloc::boxed::Box;
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use async_trait::async_trait;
 use crate::arch::PAGE_SIZE;
+use crate::driver::CharacterDevice;
 use crate::fs::ffi::InodeMode;
 use crate::fs::inode::Inode;
 use crate::result::{Errno, SyscallResult};
@@ -74,6 +75,10 @@ pub trait File: Send + Sync {
         Err(Errno::ESPIPE)
     }
 
+    async fn ioctl(&self, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
+        Err(Errno::ENOTTY)
+    }
+
     async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         Err(Errno::ESPIPE)
     }
@@ -104,8 +109,8 @@ pub struct RegularFile {
 }
 
 impl RegularFile {
-    pub fn new(metadata: FileMeta) -> Self {
-        Self { metadata }
+    pub fn new(metadata: FileMeta) -> Arc<Self> {
+        Arc::new(Self { metadata })
     }
 }
 
@@ -200,4 +205,32 @@ impl File for RegularFile {
         self.seek(Seek::Set(old)).await?;
         ret
     }
+}
+
+pub struct CharacterFile {
+    metadata: FileMeta,
+    device: Weak<dyn CharacterDevice>,
+}
+
+impl CharacterFile {
+    pub fn new(metadata: FileMeta, device: Weak<dyn CharacterDevice>) -> Arc<Self> {
+        Arc::new(Self { metadata, device })
+    }
+}
+
+#[async_trait]
+impl File for CharacterFile {
+    fn metadata(&self) -> &FileMeta {
+        &self.metadata
+    }
+
+    async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
+        let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
+        device.read(buf).await
+    }
+
+    async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
+        let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
+        device.write(buf).await
+    }    
 }

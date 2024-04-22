@@ -1,8 +1,10 @@
 use alloc::vec::Vec;
+use core::cmp::max;
 use bitvec_rs::BitVec;
-use log::{trace, warn};
-use crate::arch::PhysPageNum;
-use crate::board::PHYS_MEMORY;
+use log::warn;
+use crate::arch::{kvaddr_to_paddr, PhysPageNum};
+use crate::config::LINKAGE_EKERNEL;
+use crate::driver::GLOBAL_MAPPINGS;
 use crate::println;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::IrqMutex;
@@ -16,7 +18,6 @@ pub struct UserFrameTracker {
 
 impl Drop for UserFrameTracker {
     fn drop(&mut self) {
-        trace!("UserFrameAllocator: dealloc user frame {:?} for {} pages", self.ppn, self.pages);
         USER_ALLOCATOR.lock().dealloc(&self);
     }
 }
@@ -115,8 +116,12 @@ pub fn alloc_user_frames(pages: usize) -> SyscallResult<UserFrameTracker> {
 
 pub fn init() {
     let mut allocator = USER_ALLOCATOR.lock();
-    PHYS_MEMORY.iter().for_each(|&(start, end)| {
-        allocator.add_to_heap(start.into(), end.into());
-        println!("[kernel] Initialize user memory: {:?} - {:?}", start, end);
-    });
+    for map in GLOBAL_MAPPINGS.iter() {
+        if map.name.starts_with("[memory") {
+            let start = max(map.phys_start, kvaddr_to_paddr(*LINKAGE_EKERNEL));
+            let end = map.phys_end();
+            allocator.add_to_heap(start.into(), end.into());
+            println!("[kernel] Initialize user memory: {:?} - {:?}", start, end);
+        }
+    }
 }

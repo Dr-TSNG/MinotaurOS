@@ -10,10 +10,11 @@ use crate::result::{Errno, SyscallResult};
 use crate::split_path;
 use crate::sync::mutex::Mutex;
 
+#[repr(u64)]
 pub enum FileSystemType {
-    FAT32,
-    TMPFS,
-    PROCFS,
+    FAT32 = 0x4d44,
+    TMPFS = 0x01021994,
+    PROCFS = 0x9fa0,
 }
 
 /// 文件系统元数据

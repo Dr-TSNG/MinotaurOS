@@ -1,14 +1,8 @@
 use std::process::{Command, Stdio};
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use crate::build::BuildConfig;
 use super::build;
-
-#[derive(Subcommand)]
-pub enum Run {
-    #[clap(name = "qemu")]
-    Qemu(RunConfig),
-}
 
 #[derive(Parser)]
 pub struct RunConfig {
@@ -26,18 +20,10 @@ pub struct RunConfig {
     pub features: Vec<String>,
 }
 
-pub fn run(command: Run) -> Result<()> {
-    match command {
-        Run::Qemu(config) => run_qemu(&config)?,
-    }
-    Ok(())
-}
-
-fn run_qemu(config: &RunConfig) -> Result<()> {
+pub fn run(config: &RunConfig) -> Result<()> {
     let build_config = BuildConfig {
         offline: false,
         release: config.release,
-        board: "qemu".to_string(),
         features: config.features.clone(),
     };
     build::run(build::Build::Kernel(build_config))?;

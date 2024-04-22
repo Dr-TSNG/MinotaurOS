@@ -1,7 +1,6 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
 use buddy_system_allocator::Heap;
-use log::trace;
 use crate::arch::{kvpn_to_ppn, PAGE_SIZE, PhysPageNum, ppn_to_kvpn, VirtAddr, VirtPageNum};
 use crate::config::KERNEL_HEAP_SIZE;
 use crate::println;
@@ -25,7 +24,6 @@ pub struct HeapFrameTracker {
 
 impl Drop for HeapFrameTracker {
     fn drop(&mut self) {
-        trace!("HeapFrameTracker: dealloc kernel frame {:?} for {} pages", self.ppn, self.pages);
         dealloc_kernel_pages(&self);
     }
 }

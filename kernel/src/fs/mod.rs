@@ -22,7 +22,7 @@ pub mod pipe;
 pub fn init() -> SyscallResult<Arc<MountNamespace>> {
     let root_dev = match DEVICES.read().get(&1) {
         Some(Device::Block(blk)) => blk.clone(),
-        None => panic!("Missing root block device"),
+        _ => panic!("Missing root block device"),
     };
     let mnt_ns = block_on(async_init(root_dev))?;
     info!("File systems initialized");

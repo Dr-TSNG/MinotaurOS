@@ -17,8 +17,6 @@ pub struct BuildConfig {
     pub offline: bool,
     #[clap(long)]
     pub release: bool,
-    #[clap(long, default_value = "qemu")]
-    pub board: String,
     #[clap(long)]
     pub features: Vec<String>,
 }
@@ -66,13 +64,10 @@ pub fn build_dir_file(name: &str, release: bool) -> Result<PathBuf> {
 fn build_kernel(config: &BuildConfig) -> Result<()> {
     Command::new("cargo")
         .current_dir("kernel")
-        .env("BOARD", &config.board)
         .arg("build")
         .offline(config.offline)
         .release(config.release)
         .features(&config.features)
-        .arg("--features")
-        .arg(format!("board_{}", config.board))
         .spawn()?.wait()?
         .exit_ok()?;
     Command::new("rust-objcopy")

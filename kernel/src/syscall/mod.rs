@@ -59,7 +59,7 @@ pub enum SyscallCode {
     Unlinkat = 35,
     Umount2 = 39,
     Mount = 40,
-    Statfs = 43,
+    Fstatfs = 44,
     Ftruncate = 46,
     Faccessat = 48,
     Chdir = 49,
@@ -141,12 +141,12 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Dup => syscall!(sys_dup, args[0] as FdNum),
         SyscallCode::Dup3 => syscall!(sys_dup3, args[0] as FdNum, args[1] as FdNum, args[2] as u32),
         // SyscallCode::Fcntl
-        SyscallCode::Ioctl => syscall!(sys_ioctl, args[0] as FdNum, args[1], args[2], args[3], args[4], args[5]),
+        SyscallCode::Ioctl => async_syscall!(sys_ioctl, args[0] as FdNum, args[1], args[2], args[3], args[4], args[5]),
         SyscallCode::Mkdirat => async_syscall!(sys_mkdirat, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Unlinkat => async_syscall!(sys_unlinkat, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Umount2 => async_syscall!(sys_umount2, args[0], args[1] as u32),
         SyscallCode::Mount => async_syscall!(sys_mount, args[0], args[1], args[2], args[4] as u32, args[5]),
-        // SyscallCode::Statfs
+        SyscallCode::Fstatfs => syscall!(sys_fstatfs, args[0] as FdNum, args[1]),
         SyscallCode::Ftruncate => async_syscall!(sys_ftruncate, args[0] as FdNum, args[1] as isize),
         // SyscallCode::Faccessat
         SyscallCode::Chdir => async_syscall!(sys_chdir, args[0]),

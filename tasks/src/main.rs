@@ -10,7 +10,7 @@ use anyhow::Result;
 use clap::Parser;
 use crate::build::Build;
 use crate::debug::Debug;
-use crate::run::Run;
+use crate::run::RunConfig;
 
 #[derive(Parser)]
 #[clap(name = "MOS configure")]
@@ -26,10 +26,7 @@ enum Commands {
         #[command(subcommand)]
         command: Build,
     },
-    Run {
-        #[command(subcommand)]
-        command: Run,
-    },
+    Run(RunConfig),
     Debug {
         #[command(subcommand)]
         command: Debug,
@@ -41,7 +38,7 @@ fn main() -> Result<()> {
     match Cli::parse().command {
         Commands::Build { command} => build::run(command),
         Commands::Env => env::run(),
-        Commands::Run { command } => run::run(command),
+        Commands::Run(config) => run::run(&config),
         Commands::Debug { command } => debug::run(command),
     }
 }

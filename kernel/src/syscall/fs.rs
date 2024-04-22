@@ -54,9 +54,10 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
     Ok(new_fd as usize)
 }
 
-pub fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<usize> {
-    warn!("ioctl is not implemented");
-    Ok(0)
+pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<usize> {
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
+    let ret = fd_impl.file.ioctl(request, arg2, arg3, arg4, arg5).await?;
+    Ok(ret as usize)
 }
 
 pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
@@ -95,6 +96,16 @@ pub async fn sys_umount2(target: usize, flags: u32) -> SyscallResult<usize> {
 
 pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, data: usize) -> SyscallResult<usize> {
     warn!("mount is not implemented");
+    Ok(0)
+}
+
+pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
+    let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
+    if inode.metadata().mode != InodeMode::DIR {
+        return Err(Errno::ENOTDIR);
+    }
+    // TODO: fstatfs
     Ok(0)
 }
 
@@ -281,11 +292,11 @@ pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sys
     Ok(ret as usize)
 }
 
-pub fn sys_fstat(fd: FdNum, stat_buf: usize) -> SyscallResult<usize> {
+pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
     let inode = fd_impl.file.metadata().inode.clone();
-    let stat_buf = proc_inner.addr_space.user_slice_w(VirtAddr(stat_buf), size_of::<KernelStat>())?;
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStat>())?;
     drop(proc_inner);
     let mut stat = KernelStat::default();
     if let Some(inode) = inode {
@@ -299,7 +310,7 @@ pub fn sys_fstat(fd: FdNum, stat_buf: usize) -> SyscallResult<usize> {
         stat.st_mtim = inner.mtime;
         stat.st_ctim = inner.ctime;
     }
-    stat_buf.copy_from_slice(stat.as_bytes());
+    user_buf.copy_from_slice(stat.as_bytes());
     Ok(0)
 }
 

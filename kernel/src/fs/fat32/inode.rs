@@ -123,7 +123,7 @@ impl Inode for FAT32Inode {
     }
 
     fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
-        Ok(Arc::new(RegularFile::new(FileMeta::new(Some(self)))))
+        Ok(RegularFile::new(FileMeta::new(Some(self))))
     }
 
     async fn read_direct(&self, mut buf: &mut [u8], offset: isize) -> SyscallResult<isize> {

@@ -11,6 +11,10 @@ impl<T> LateInit<T> {
         Self(Once::new())
     }
 
+    pub fn is_initialized(&self) -> bool {
+        self.0.is_completed()
+    }
+
     pub fn get(&self) -> &T {
         self.0.get().unwrap()
     }

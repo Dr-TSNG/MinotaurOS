@@ -16,7 +16,6 @@
 extern crate alloc;
 
 mod arch;
-mod board;
 mod builtin;
 mod config;
 mod debug;
@@ -40,8 +39,8 @@ use sbi_spec::hsm::hart_state;
 use arch::shutdown;
 use config::KERNEL_ADDR_OFFSET;
 use crate::arch::sbi;
-use crate::board::BOARD_INFO;
 use crate::config::{KERNEL_PADDR_BASE, KERNEL_STACK_SIZE, LINKAGE_EBSS, LINKAGE_SBSS};
+use crate::driver::BOARD_INFO;
 use crate::process::Process;
 use crate::processor::hart;
 use crate::processor::hart::KERNEL_STACK;
@@ -66,20 +65,22 @@ fn clear_bss() {
 fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     clear_bss();
     hart::init(hart_id);
-    mm::allocator::init();
-    board::init(dtb_paddr);
+    mm::allocator::init_heap();
+    driver::init_dtb(dtb_paddr);
+    mm::allocator::init_user();
     debug::logger::init();
 
     println!("{}", LOGO);
     println!("========================================");
     println!("| boot hart id         | {:13} |", hart_id);
     println!("| smp                  | {:13} |", BOARD_INFO.smp);
+    println!("| cpu frequency        | {:13} |", BOARD_INFO.freq);
     println!("| dtb physical address | {:#13x} |", dtb_paddr);
     println!("----------------------------------------");
 
     trap::init();
     mm::vm_init(true)?;
-    driver::init()?;
+    driver::init_driver()?;
     builtin::init();
 
     let data = builtin::builtin_app("init").unwrap();

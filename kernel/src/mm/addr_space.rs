@@ -12,9 +12,9 @@ use log::{debug, info, warn};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
 use zerocopy::transmute;
-use crate::arch::{paddr_to_kvaddr, PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
-use crate::board::{GLOBAL_MAPPINGS, PHYS_MEMORY};
+use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::driver::GLOBAL_MAPPINGS;
 use crate::fs::file_system::MountNamespace;
 use crate::fs::page_cache::PageCache;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
@@ -356,27 +356,11 @@ impl AddressSpace {
             debug!("Copy global mappings: {} from {:?} to {:?}", map.name, map.phys_start, map.phys_end());
             let ppn_start = PhysPageNum::from(map.phys_start);
             let vpn_start = VirtPageNum::from(map.virt_start);
-            let vpn_end = VirtPageNum::from(map.virt_end);
+            let vpn_end = VirtPageNum::from(map.virt_end());
 
             let metadata = ASRegionMeta {
                 name: Some(map.name.to_string()),
                 perms: map.perms,
-                start: vpn_start,
-                pages: (vpn_end - vpn_start).0,
-            };
-            let region = DirectRegion::new(metadata, ppn_start);
-            self.map_region(region);
-        }
-
-        for (paddr_start, paddr_end) in PHYS_MEMORY.iter() {
-            debug!("Copy global mappings: [physical] from {:?} to {:?}", paddr_start, paddr_end);
-            let ppn_start = PhysPageNum::from(*paddr_start);
-            let vpn_start = VirtPageNum::from(paddr_to_kvaddr(*paddr_start));
-            let vpn_end = VirtPageNum::from(paddr_to_kvaddr(*paddr_end));
-
-            let metadata = ASRegionMeta {
-                name: Some("[physical]".to_string()),
-                perms: ASPerms::R | ASPerms::W,
                 start: vpn_start,
                 pages: (vpn_end - vpn_start).0,
             };

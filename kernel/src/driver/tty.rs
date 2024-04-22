@@ -1,39 +1,34 @@
 use alloc::boxed::Box;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use async_trait::async_trait;
-use lazy_static::lazy_static;
 use crate::arch::sbi;
-use crate::fs::file::{File, FileMeta};
+use crate::driver::{CharacterDevice, DeviceMeta};
+use crate::fs::file::File;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::yield_now;
 use crate::sync::mutex::AsyncMutex;
+use crate::sync::once::LateInit;
 
-pub struct TtyFile {
-    metadata: FileMeta,
+pub static DEFAULT_TTY: LateInit<Arc<dyn File>> = LateInit::new();
+
+pub struct SBITtyDevice {
+    metadata: DeviceMeta,
     mutex: AsyncMutex<()>,
 }
 
-lazy_static! {
-    pub static ref TTY: Arc<TtyFile> = Arc::new(TtyFile::new());
-}
-
-impl TtyFile {
-    fn new() -> Self {
-        TtyFile {
-            metadata: FileMeta {
-                inode: None,
-                prw_lock: Default::default(),
-                inner: Default::default(),
-            },
+impl SBITtyDevice {
+    pub fn new() -> Self {
+        Self {
+            metadata: DeviceMeta::new("sbi_tty".to_string()),
             mutex: AsyncMutex::new(()),
         }
     }
 }
 
 #[async_trait]
-impl File for TtyFile {
-    fn metadata(&self) -> &FileMeta {
+impl CharacterDevice for SBITtyDevice {
+    fn metadata(&self) -> &DeviceMeta {
         &self.metadata
     }
 

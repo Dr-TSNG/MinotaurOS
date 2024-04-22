@@ -7,8 +7,8 @@ use crate::run::RunConfig;
 
 #[derive(Subcommand)]
 pub enum Debug {
-    #[clap(name = "qemu")]
-    Qemu(RunConfig),
+    #[clap(name = "server")]
+    Server(RunConfig),
     #[clap(name = "attach")]
     Attach(AttachConfig),
 }
@@ -21,17 +21,16 @@ pub struct AttachConfig {
 
 pub fn run(command: Debug) -> Result<()> {
     match command {
-        Debug::Qemu(config) => debug_qemu(&config)?,
+        Debug::Server(config) => debug_server(&config)?,
         Debug::Attach(config) => debug_attach(&config)?,
     }
     Ok(())
 }
 
-fn debug_qemu(config: &RunConfig) -> Result<()> {
+fn debug_server(config: &RunConfig) -> Result<()> {
     let build_config = BuildConfig {
         offline: false,
         release: config.release,
-        board: "qemu".to_string(),
         features: config.features.clone(),
     };
     build::run(build::Build::Kernel(build_config))?;
@@ -40,6 +39,7 @@ fn debug_qemu(config: &RunConfig) -> Result<()> {
         .stderr(Stdio::inherit())
         .arg("-machine").arg("virt")
         .arg("-nographic")
+        .arg("-bios").arg(&config.bios)
         .arg("-kernel").arg(build::build_dir_file("kernel.bin", config.release)?)
         .arg("-smp").arg(format!("{}", config.smp))
         .arg("-m").arg(&config.mem)

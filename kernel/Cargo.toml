@@ -41,8 +41,6 @@ smoltcp = { version = "0.10.0", default-features = false, features = [
 ] }
 
 [features]
-board_qemu = []
-board_fu740 = []
 error = []
 warn = []
 info = []

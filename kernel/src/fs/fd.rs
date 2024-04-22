@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use crate::config::MAX_FD_NUM;
-use crate::fs::devfs::tty::TTY;
+use crate::driver::tty::DEFAULT_TTY;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::File;
 use crate::result::{Errno, SyscallResult};
@@ -38,9 +38,9 @@ impl FileDescriptor {
 impl FdTable {
     pub fn new() -> Self {
         let mut table = vec![];
-        let stdin = FileDescriptor::new(TTY.clone(), OpenFlags::O_RDONLY);
-        let stdout = FileDescriptor::new(TTY.clone(), OpenFlags::O_WRONLY);
-        let stderr = FileDescriptor::new(TTY.clone(), OpenFlags::O_WRONLY);
+        let stdin = FileDescriptor::new(DEFAULT_TTY.clone(), OpenFlags::O_RDONLY);
+        let stdout = FileDescriptor::new(DEFAULT_TTY.clone(), OpenFlags::O_WRONLY);
+        let stderr = FileDescriptor::new(DEFAULT_TTY.clone(), OpenFlags::O_WRONLY);
         table.push(Some(stdin));
         table.push(Some(stdout));
         table.push(Some(stderr));
