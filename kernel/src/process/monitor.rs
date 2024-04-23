@@ -1,5 +1,5 @@
 use alloc::collections::BTreeMap;
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Weak;
 use crate::process::{Pid, Process};
 use crate::sync::mutex::IrqMutex;
 
@@ -18,11 +18,11 @@ impl ProcessMonitorInner {
         self.0.remove(&pid);
     }
 
-    pub fn get(&self, pid: Pid) -> Option<Arc<Process>> {
-        self.0.get(&pid).and_then(|p| p.upgrade())
+    pub fn get(&self, pid: Pid) -> Weak<Process> {
+        self.0.get(&pid).cloned().unwrap_or(Weak::new())
     }
 
-    pub fn init_proc(&self) -> Arc<Process> {
-        self.get(1).unwrap()
+    pub fn init_proc(&self) -> Weak<Process> {
+        self.get(1)
     }
 }

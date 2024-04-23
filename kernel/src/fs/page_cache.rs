@@ -160,3 +160,13 @@ impl PageCache {
         Ok(())
     }
 }
+
+impl Drop for PageCache {
+    fn drop(&mut self) {
+        for page in self.pages.lock().values() {
+            if page.dirty {
+                panic!("Dirty page dropped");
+            }
+        }
+    }
+}

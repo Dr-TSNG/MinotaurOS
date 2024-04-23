@@ -12,7 +12,6 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
 use log::{info, warn};
-use crate::arch;
 use crate::arch::VirtAddr;
 use crate::fs::fd::FdTable;
 use crate::fs::file_system::MountNamespace;
@@ -28,6 +27,7 @@ use crate::processor::hart::local_hart;
 use crate::result::SyscallResult;
 use crate::sched::spawn_user_thread;
 use crate::signal::ffi::Signal;
+use crate::signal::SignalController;
 use crate::sync::mutex::IrqReMutex;
 use crate::trap::context::TrapContext;
 
@@ -85,7 +85,7 @@ impl Process {
         });
 
         let trap_ctx = TrapContext::new(entry, user_sp);
-        let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()));
+        let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()), SignalController::new());
         process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
 
         PROCESS_MONITOR.lock().add(pid.0, Arc::downgrade(&process));
@@ -203,7 +203,7 @@ impl Process {
 
     pub fn fork_process(self: &Arc<Self>, flags: CloneFlags, stack: usize) -> SyscallResult<Pid> {
         let mut monitor = PROCESS_MONITOR.lock();
-        
+
         let new_pid = Arc::new(TidTracker::new());
         let new_thread = self.inner.lock().apply_mut(|proc_inner| {
             let new_process = Arc::new(Process {
@@ -226,7 +226,8 @@ impl Process {
             if stack != 0 {
                 trap_ctx.set_sp(stack);
             }
-            let new_thread = Thread::new(new_process.clone(), trap_ctx, Some(new_pid.clone()));
+            let signals = current_thread().signals.clone();
+            let new_thread = Thread::new(new_process.clone(), trap_ctx, Some(new_pid.clone()), signals);
             new_process.inner.lock().threads.insert(new_pid.0, Arc::downgrade(&new_thread));
             proc_inner.children.push(new_process.clone());
 
@@ -264,8 +265,9 @@ impl Process {
             trap_ctx.set_sp(stack);
             trap_ctx.user_x[10] = args_addr;
             trap_ctx.user_x[4] = tls;
+            let signals = current_thread().signals.clone();
 
-            let new_thread = Thread::new(self.clone(), trap_ctx, None);
+            let new_thread = Thread::new(self.clone(), trap_ctx, None, signals);
             let new_tid = new_thread.tid.0;
             proc_inner.threads.insert(new_tid, Arc::downgrade(&new_thread));
 
@@ -314,16 +316,12 @@ impl Process {
             // 如果没有线程了，通知父进程
             if inner.threads.is_empty() {
                 inner.exit_code = Some(exit_code);
-                if self.pid.0 == 1 {
-                    info!("Init process exited, shutdown system");
-                    arch::shutdown();
-                }
                 if let Some(parent) = inner.parent.upgrade() {
                     parent.on_child_exit(self.pid.0, exit_code);
                 }
                 // 将子进程的父进程设置为 init
                 inner.children.iter_mut().for_each(|child| {
-                    child.inner.lock().parent = Arc::downgrade(&monitor.init_proc());
+                    child.inner.lock().parent = monitor.init_proc();
                 })
             }
         });

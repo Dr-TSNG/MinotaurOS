@@ -43,7 +43,7 @@ impl SignalHandler {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SignalQueue {
     queue: VecDeque<Signal>,
     set: SigSet,
@@ -72,6 +72,7 @@ impl Extend<Signal> for SignalQueue {
 
 pub struct SignalController(Mutex<SignalControllerInner>);
 
+#[derive(Clone)]
 struct SignalControllerInner {
     pending: SignalQueue,
     blocked: SigSet,
@@ -83,6 +84,12 @@ pub struct SignalPoll {
     pub signal: Signal,
     pub handler: SignalHandler,
     pub blocked_before: SigSet,
+}
+
+impl Clone for SignalController {
+    fn clone(&self) -> Self {
+        Self(Mutex::new(self.0.lock().clone()))
+    }
 }
 
 impl SignalController {

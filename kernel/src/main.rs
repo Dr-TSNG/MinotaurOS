@@ -103,6 +103,9 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     sched::time::set_next_trigger();
     arch::enable_timer_interrupt();
     run_executor();
+
+    info!("Init process exited, shutdown system");
+    shutdown();
 }
 
 fn start_secondary_hart(hart_id: usize) -> SyscallResult<!> {
@@ -113,6 +116,10 @@ fn start_secondary_hart(hart_id: usize) -> SyscallResult<!> {
     sched::time::set_next_trigger();
     arch::enable_timer_interrupt();
     run_executor();
+
+    info!("Stop hart {}", hart_id);
+    sbi::stop_hart(hart_id).unwrap();
+    unreachable!()
 }
 
 #[naked]

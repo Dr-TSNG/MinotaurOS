@@ -1,6 +1,7 @@
 use alloc::collections::VecDeque;
 use async_task::{Runnable, ScheduleInfo, Task, WithInfo};
 use core::future::Future;
+use crate::process::monitor::PROCESS_MONITOR;
 use crate::sched::timer::query_timer;
 use crate::sync::mutex::IrqMutex;
 
@@ -46,12 +47,15 @@ pub fn spawn<F>(future: F) -> (Runnable, Task<F::Output>)
 }
 
 /// 开始执行任务
-pub fn run_executor() -> ! {
+pub fn run_executor() {
     loop {
         while let Some(task) = TASK_QUEUE.take() {
             task.run();
         }
         query_timer();
         core::hint::spin_loop();
+        if PROCESS_MONITOR.lock().init_proc().strong_count() == 0 {
+            break;
+        }
     }
 }

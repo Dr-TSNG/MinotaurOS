@@ -30,7 +30,7 @@ pub async fn trap_from_user() {
     let stval = stval::read();
     let sepc = sepc::read();
     let trap = scause::read().cause();
-    debug!("Trap {:?} from user at {:#x} for {:#x}", trap, sepc, stval);
+    trace!("Trap {:?} from user at {:#x} for {:#x}", trap, sepc, stval);
     match trap {
         Trap::Exception(Exception::UserEnvCall) => {
             let ctx = current_trap_ctx();
@@ -62,7 +62,6 @@ pub async fn trap_from_user() {
             handle_page_fault(VirtAddr(sepc), ASPerms::X);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
-            debug!("Timer interrupt");
             query_timer();
             set_next_trigger();
             yield_now().await;
@@ -109,7 +108,7 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
     match proc_inner.addr_space.handle_page_fault(addr, perform) {
         Ok(()) => debug!("Page fault resolved"),
         Err(e) => {
-            error!("Fatal page fault failed, send SIGSEGV: {:?}", e);
+            info!("Failed to resolve page fault, send SIGSEGV: {:?}", e);
             current_thread().signals.recv_signal(Signal::SIGSEGV);
         }
     }

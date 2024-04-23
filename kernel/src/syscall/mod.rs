@@ -165,7 +165,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Pselect6
         // SyscallCode::Ppoll
         // SyscallCode::Readlinkat
-        // SyscallCode::Newfstatat
+        SyscallCode::Newfstatat => async_syscall!(sys_newfstatat, args[0] as FdNum, args[1], args[2], args[3] as u32),
         SyscallCode::Fstat => syscall!(sys_fstat, args[0] as FdNum, args[1]),
         // SyscallCode::Sync
         SyscallCode::Fsync => async_syscall!(sys_fsync, args[0] as FdNum),
@@ -179,8 +179,8 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::ClockGettime
         // SyscallCode::Syslog
         SyscallCode::SchedYield => async_syscall!(sys_yield),
-        // SyscallCode::Kill
-        // SyscallCode::Tkill
+        SyscallCode::Kill => syscall!(sys_kill, args[0], args[1]),
+        SyscallCode::Tkill => syscall!(sys_tkill, args[0], args[1], args[2]),
         SyscallCode::RtSigsupend => async_syscall!(sys_rt_sigsuspend, args[0]),
         SyscallCode::RtSigaction => syscall!(sys_rt_sigaction, args[0] as i32, args[1], args[2]),
         SyscallCode::RtSigprocmask => syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2]),

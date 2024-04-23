@@ -8,11 +8,13 @@ use crate::arch::VirtAddr;
 use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::process::ffi::{CloneFlags, WaitOptions};
-use crate::process::Pid;
+use crate::process::monitor::PROCESS_MONITOR;
+use crate::process::{Pid, Tid};
 use crate::process::thread::wait::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::yield_now;
+use crate::signal::ffi::Signal;
 
 pub fn sys_exit(exit_code: i8) -> SyscallResult<usize> {
     current_thread().terminate(exit_code);
@@ -35,6 +37,35 @@ pub fn sys_set_tid_address(tidptr: usize) -> SyscallResult<usize> {
 pub async fn sys_yield() -> SyscallResult<usize> {
     yield_now().await;
     Ok(0)
+}
+
+pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
+    let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
+    let monitor = PROCESS_MONITOR.lock();
+    if let Some(process) = monitor.get(pid).upgrade() {
+        for thread in process.inner.lock().threads.values() {
+            if let Some(thread) = thread.upgrade() {
+                thread.signals.recv_signal(signal);
+                break;
+            }
+        }
+        return Ok(0);
+    }
+    Err(Errno::EINVAL)
+}
+
+pub fn sys_tkill(pid: Pid, tid: Tid, signal: usize) -> SyscallResult<usize> {
+    let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
+    let monitor = PROCESS_MONITOR.lock();
+    if let Some(process) = monitor.get(pid).upgrade() {
+        if let Some(thread) = process.inner.lock().threads.get(&tid) {
+            if let Some(thread) = thread.upgrade() {
+                thread.signals.recv_signal(signal);
+                return Ok(0);
+            }
+        }
+    }
+    Err(Errno::EINVAL)
 }
 
 pub fn sys_getpid() -> SyscallResult<usize> {

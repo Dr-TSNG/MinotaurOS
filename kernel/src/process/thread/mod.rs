@@ -41,6 +41,7 @@ impl Thread {
         process: Arc<Process>,
         trap_ctx: TrapContext,
         tid: Option<Arc<TidTracker>>,
+        signals: SignalController,
     ) -> Arc<Self> {
         let tid = tid.unwrap_or(Arc::new(TidTracker::new()));
         let inner = ThreadInner {
@@ -52,7 +53,7 @@ impl Thread {
         let thread = Thread {
             tid,
             process,
-            signals: SignalController::new(),
+            signals,
             event_bus: EventBus::default(),
             inner: UnsafeCell::new(inner),
         };

@@ -293,3 +293,9 @@ impl FAT32FileSystem {
         Ok(cluster)
     }
 }
+
+impl Drop for FAT32FileSystem {
+    fn drop(&mut self) {
+        info!("FAT32FileSystem dropped");
+    }
+}

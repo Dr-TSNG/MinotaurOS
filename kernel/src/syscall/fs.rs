@@ -328,6 +328,29 @@ pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sys
     Ok(ret as usize)
 }
 
+pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, _flags: u32) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let path = match path {
+        0 => ".",
+        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
+    };
+    let inode = resolve_path(&proc_inner, dirfd, path).await?;
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStat>())?;
+    drop(proc_inner);
+    let mut stat = KernelStat::default();
+    stat.st_dev = inode.metadata().dev as u64;
+    stat.st_ino = inode.metadata().ino as u64;
+    stat.st_mode = inode.metadata().mode as u32;
+    let inner = inode.metadata().inner.lock();
+    stat.st_nlink = inner.nlink as u32;
+    stat.st_size = inner.size as u64;
+    stat.st_atim = inner.atime;
+    stat.st_mtim = inner.mtime;
+    stat.st_ctim = inner.ctime;
+    user_buf.copy_from_slice(stat.as_bytes());
+    Ok(0)
+}
+
 pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;

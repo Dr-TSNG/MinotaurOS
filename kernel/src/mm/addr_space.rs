@@ -218,7 +218,7 @@ impl AddressSpace {
         let result = if region.metadata().perms.contains(perform) {
             region.fault_handler(self.root_pt, vpn)
         } else {
-            info!("Page access violation: {:?} - {:?}", addr, perform);
+            info!("Page access violation: {:?} - {:?} / {:?}", addr, perform, region.metadata().perms);
             Err(Errno::EACCES)
         };
         result
