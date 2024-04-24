@@ -134,15 +134,22 @@ impl FAT32FileSystem {
                         break 'outer;
                     } else if FAT32Dirent::is_empty(value) {
                         occupy.push(false);
+                        dir_pos += 1;
+                        if dir_len > 0 {
+                            warn!("Broken FAT32 dirent");
+                            dir = FAT32Dirent::default();
+                            dir_pos += dir_len;
+                            dir_len = 0;
+                        }
                     } else if FAT32Dirent::is_long_dirent(value) {
                         occupy.push(true);
                         dir_len += 1;
-                        dir.append(value);
+                        dir.append_long(value);
                     } else {
+                        occupy.push(true);
                         dir_len += 1;
-                        dir.last(value);
-                        let byte_offset = sector * BLOCK_SIZE + i;
-                        trace!("Read FAT32 dirent: {} \tat {:#x} \tattr {:?}", dir.name, byte_offset, dir.attr);
+                        dir.append_short(value);
+                        trace!("Read FAT32 dirent: {:<24} at {}-{} attr {:?}", dir.name, dir_pos, dir_len, dir.attr);
                         let inode = FAT32Inode::new(&self, parent.clone(), dir).await?;
                         children.push(FAT32Child::new(inode, dir_pos, dir_len));
                         dir = FAT32Dirent::default();
@@ -157,11 +164,12 @@ impl FAT32FileSystem {
 
     pub async fn write_dir(&self, clusters: &[usize], pos: usize, dirent: &[u8; 32]) -> SyscallResult<()> {
         let dirents_per_cluster = self.fat32meta.bytes_per_cluster / 32;
+        let dirents_per_sector = BLOCK_SIZE / 32;
         let cluster = clusters[pos / dirents_per_cluster];
         let sector_start = self.fat32meta.data_sector_for_cluster(cluster);
-        let sector_offset = (pos % dirents_per_cluster) / self.fat32meta.sectors_per_cluster;
+        let sector_offset = (pos % dirents_per_cluster) / dirents_per_sector;
         let sector = sector_start + sector_offset;
-        let block_offset = (pos % dirents_per_cluster) % self.fat32meta.sectors_per_cluster * 32;
+        let block_offset = (pos % dirents_per_cluster) % dirents_per_sector * 32;
         self.cache.write_block(sector, dirent, block_offset).await?;
         Ok(())
     }
@@ -189,6 +197,7 @@ impl FAT32FileSystem {
                 break;
             }
         }
+        trace!("Append FAT32 dirent: {:<8} at {}-{} attr {:?}", dirent.name, left, dirs.len(), dirent.attr);
         if right == occupy.len() {
             occupy.resize(left + dirs.len(), false);
             if occupy.len().div_ceil(dirents_per_cluster) > clusters.len() {

@@ -7,6 +7,7 @@ use crate::sched::ffi::TimeSpec;
 use crate::sched::time::current_time;
 
 /// 目录项偏移
+#[allow(unused)]
 enum DirOffset {
     /// 短文件名
     Name = 0,
@@ -74,6 +75,7 @@ impl DirOffset {
 const LAST_LONG_ENTRY: u8 = 0x40;
 
 /// 长目录项偏移
+#[allow(unused)]
 enum LongDirOffset {
     /// 该长目录项在本组中的序号
     ///
@@ -179,13 +181,13 @@ impl FAT32Dirent {
     }
 
     /// 添加一个长目录项
-    pub fn append(&mut self, long_dir: &[u8]) {
+    pub fn append_long(&mut self, long_dir: &[u8]) {
         assert!(Self::is_long_dirent(long_dir));
         self.name = LongDirOffset::name(long_dir) + &self.name;
     }
 
     /// 添加最后的短目录项
-    pub fn last(&mut self, short_dir: &[u8]) {
+    pub fn append_short(&mut self, short_dir: &[u8]) {
         assert!(!Self::is_long_dirent(short_dir));
         self.attr = FileAttr::from_bits_truncate(short_dir[DirOffset::Attr as usize]);
         let acc_time = DirOffset::acc_time(short_dir);

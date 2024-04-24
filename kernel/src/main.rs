@@ -46,7 +46,7 @@ use crate::processor::hart;
 use crate::processor::hart::KERNEL_STACK;
 use crate::result::SyscallResult;
 use crate::sched::executor::run_executor;
-use crate::sched::spawn_kernel_thread;
+use crate::sync::block_on;
 
 global_asm!(include_str!("entry.asm"));
 
@@ -86,9 +86,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     let data = builtin::builtin_app("init").unwrap();
     let mnt_ns = fs::init()?;
     info!("Spawn init process");
-    spawn_kernel_thread(async move {
-        Process::new_initproc(mnt_ns, data).await.unwrap();
-    });
+    block_on(Process::new_initproc(mnt_ns, data))?;
 
     for secondary in 0..BOARD_INFO.smp {
         if secondary != hart_id {
