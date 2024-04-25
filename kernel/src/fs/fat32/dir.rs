@@ -207,12 +207,15 @@ impl FAT32Dirent {
         });
         let mut dirs = VecDeque::new();
         let mut name: Vec<u16> = self.name.encode_utf16().collect();
-        for _ in name.len() % 13..13 {
+        if name.len() % 13 != 0 {
             name.push(0);
+        }
+        for _ in name.len() % 13..13 {
+            name.push(0xFFFF);
         }
         for i in 0..name.len() / 13 {
             let mut long_dir = [0; 32];
-            long_dir[LongDirOffset::Ord as usize] = LAST_LONG_ENTRY | (i + 1) as u8;
+            long_dir[LongDirOffset::Ord as usize] = (i + 1) as u8;
             let slice = &name[i * 13..(i + 1) * 13];
             long_dir[LongDirOffset::Name1 as usize..LongDirOffset::Attr as usize]
                 .copy_from_slice(bytemuck::cast_slice(&slice[..5]));
@@ -224,6 +227,7 @@ impl FAT32Dirent {
             long_dir[LongDirOffset::Chksum as usize] = checksum;
             dirs.push_front(long_dir);
         }
+        dirs[0][LongDirOffset::Ord as usize] |= LAST_LONG_ENTRY;
 
         let mut short_dir = [0; 32];
         short_dir[DirOffset::Name as usize..DirOffset::Attr as usize]
@@ -240,19 +244,29 @@ impl FAT32Dirent {
     }
 
     fn short_name(&self) -> [u8; 11] {
-        let mut short_name = [0x20; 11];
-        let mut i = 0;
-        for c in self.name.as_bytes() {
-            if i == 11 {
-                break;
-            }
-            if *c == '.' as u8 {
-                i = 8;
-                continue;
-            }
-            short_name[i] = *c;
-            i += 1;
+        let mut short_name = [b' '; 11];
+        let parts: Vec<&str> = self.name.split('.').collect();
+
+        // Process the file name
+        let file_name = parts[0].chars().take(8).collect::<String>().to_uppercase();
+        for (i, c) in file_name.chars().enumerate() {
+            short_name[i] = c as u8;
         }
+
+        // Process the extension if it exists
+        if parts.len() > 1 {
+            let extension = parts[1].chars().take(3).collect::<String>().to_uppercase();
+            for (i, c) in extension.chars().enumerate() {
+                short_name[8 + i] = c as u8;
+            }
+        }
+
+        // If the filename is too long, truncate and append "~1"
+        if parts[0].len() > 8 {
+            short_name[6] = b'~';
+            short_name[7] = b'1';
+        }
+
         short_name
     }
 
