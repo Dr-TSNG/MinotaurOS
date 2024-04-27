@@ -50,7 +50,7 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
         }
         Err(e) => {
             error!("Page fault failed: {:?}, send SIGSEGV", e);
-            current_thread().signals.recv_signal(Signal::SIGSEGV);
+            current_thread().recv_signal(Signal::SIGSEGV);
         }
     }
 }

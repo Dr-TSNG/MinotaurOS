@@ -96,7 +96,7 @@ impl DeviceMeta {
 /// 块设备
 #[async_trait]
 pub trait BlockDevice: Send + Sync {
-    /// 块元数据
+    /// 设备元数据
     fn metadata(&self) -> &DeviceMeta;
 
     /// 从块设备读取数据
@@ -108,10 +108,13 @@ pub trait BlockDevice: Send + Sync {
 
 #[async_trait]
 pub trait CharacterDevice: Send + Sync {
+    /// 设备元数据
     fn metadata(&self) -> &DeviceMeta;
 
+    /// 从字符设备读取数据
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize>;
 
+    /// 向字符设备写入数据
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize>;
 }
 

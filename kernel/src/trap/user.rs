@@ -6,8 +6,8 @@ use crate::arch::VirtAddr;
 use crate::config::TRAMPOLINE_BASE;
 use crate::mm::addr_space::ASPerms;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
+use crate::result::Errno;
 use crate::sched::time::set_next_trigger;
-use crate::sched::timer::query_timer;
 use crate::sched::yield_now;
 use crate::signal::ffi::{Signal, UContext};
 use crate::signal::SignalHandler;
@@ -62,7 +62,6 @@ pub async fn trap_from_user() {
             handle_page_fault(VirtAddr(sepc), ASPerms::X);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
-            query_timer();
             set_next_trigger();
             yield_now().await;
         }
@@ -107,9 +106,13 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
     let mut proc_inner = current_process().inner.lock();
     match proc_inner.addr_space.handle_page_fault(addr, perform) {
         Ok(()) => debug!("Page fault resolved"),
+        Err(Errno::ENOSPC) => {
+            error!("Fatal page fault: Out of memory, kill process");
+            current_process().terminate(-1);
+        }
         Err(e) => {
             info!("Failed to resolve page fault, send SIGSEGV: {:?}", e);
-            current_thread().signals.recv_signal(Signal::SIGSEGV);
+            current_thread().recv_signal(Signal::SIGSEGV);
         }
     }
 }

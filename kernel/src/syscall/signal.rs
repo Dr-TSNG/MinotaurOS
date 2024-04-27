@@ -1,5 +1,6 @@
 use core::mem::size_of;
 use crate::arch::VirtAddr;
+use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::result::{Errno, SyscallResult};
 use crate::signal::ffi::{SIG_DFL, SIG_IGN, SigAction, Signal, SigSet, SigSetOp, UContext};
@@ -10,7 +11,7 @@ pub async fn sys_rt_sigsuspend(mask: usize) -> SyscallResult<usize> {
     let mask = unsafe { mask.as_ptr().cast::<SigSet>().read() };
     let mask_bak = current_thread().signals.get_mask();
     current_thread().signals.set_mask(mask);
-    current_thread().signals.suspend().await;
+    current_thread().event_bus.wait(Event::all()).await;
     // todo: 立即恢复 mask 是否正确？
     current_thread().signals.set_mask(mask_bak);
     Err(Errno::EINTR)

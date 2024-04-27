@@ -21,7 +21,6 @@ use crate::process::ffi::CloneFlags;
 use crate::process::monitor::PROCESS_MONITOR;
 use crate::process::thread::Thread;
 use crate::process::thread::tid::TidTracker;
-use crate::process::thread::wait::Event;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::processor::hart::local_hart;
 use crate::result::SyscallResult;
@@ -332,8 +331,7 @@ impl Process {
         self.inner.lock().apply_mut(|inner| {
             inner.threads.values().for_each(|thread| {
                 if let Some(thread) = thread.upgrade() {
-                    thread.signals.recv_signal(Signal::SIGCHLD);
-                    thread.event_bus.recv_event(Event::CHILD_EXIT);
+                    thread.recv_signal(Signal::SIGCHLD);
                 }
             })
         });

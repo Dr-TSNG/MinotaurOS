@@ -1,8 +1,5 @@
 use alloc::collections::VecDeque;
 use alloc::vec;
-use core::future::Future;
-use core::pin::Pin;
-use core::task::{Context, Poll, Waker};
 use log::{debug, info};
 use crate::processor::current_thread;
 use crate::signal::ffi::{SIG_MAX, SigAction, Signal, SigSet};
@@ -76,7 +73,6 @@ pub struct SignalController(Mutex<SignalControllerInner>);
 struct SignalControllerInner {
     pending: SignalQueue,
     blocked: SigSet,
-    waker: Option<Waker>,
     handlers: [SignalHandler; SIG_MAX],
 }
 
@@ -97,20 +93,14 @@ impl SignalController {
         let inner = SignalControllerInner {
             pending: SignalQueue::default(),
             blocked: SigSet::default(),
-            waker: None,
             handlers: core::array::from_fn(|signal| SignalHandler::kernel(signal.try_into().unwrap())),
         };
         Self(Mutex::new(inner))
     }
 
-    pub fn recv_signal(&self, signal: Signal) {
-        debug!("Receive signal {:?}", signal);
-        let mut inner = self.0.lock();
-        inner.pending.push(signal);
-        if let Some(waker) = inner.waker.take() {
-            debug!("Invoke signal waker");
-            waker.wake_by_ref();
-        }
+    /// SAFETY: 该函数只应该由 [Thread::recv_signal] 调用
+    pub fn push(&self, signal: Signal) {
+        self.0.lock().pending.push(signal);
     }
 
     pub fn get_mask(&self) -> SigSet {
@@ -152,24 +142,5 @@ impl SignalController {
 
         inner.pending.extend(popped);
         return None;
-    }
-
-    pub async fn suspend(&self) {
-        WaitSignalFuture(self).await;
-    }
-}
-
-struct WaitSignalFuture<'a>(&'a SignalController);
-
-impl<'a> Future for WaitSignalFuture<'a> {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut inner = self.0.0.lock();
-        if !inner.pending.set.is_empty() {
-            return Poll::Ready(());
-        }
-        inner.waker.replace(cx.waker().clone());
-        Poll::Pending
     }
 }

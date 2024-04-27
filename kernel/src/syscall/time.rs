@@ -4,7 +4,7 @@ use core::time::Duration;
 use futures::future::{Either, select};
 use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
-use crate::process::thread::wait::Event;
+use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::{TimeSpec, TMS};

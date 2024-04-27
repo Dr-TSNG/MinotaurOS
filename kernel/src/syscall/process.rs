@@ -10,7 +10,7 @@ use crate::fs::path::resolve_path;
 use crate::process::ffi::{CloneFlags, WaitOptions};
 use crate::process::monitor::PROCESS_MONITOR;
 use crate::process::{Pid, Tid};
-use crate::process::thread::wait::{Event, WaitPidFuture};
+use crate::process::thread::event_bus::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::yield_now;
@@ -45,7 +45,7 @@ pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
     if let Some(process) = monitor.get(pid).upgrade() {
         for thread in process.inner.lock().threads.values() {
             if let Some(thread) = thread.upgrade() {
-                thread.signals.recv_signal(signal);
+                thread.recv_signal(signal);
                 break;
             }
         }
@@ -60,7 +60,7 @@ pub fn sys_tkill(pid: Pid, tid: Tid, signal: usize) -> SyscallResult<usize> {
     if let Some(process) = monitor.get(pid).upgrade() {
         if let Some(thread) = process.inner.lock().threads.get(&tid) {
             if let Some(thread) = thread.upgrade() {
-                thread.signals.recv_signal(signal);
+                thread.recv_signal(signal);
                 return Ok(0);
             }
         }

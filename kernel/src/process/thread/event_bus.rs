@@ -18,6 +18,8 @@ bitflags! {
     #[derive(Default)]
     pub struct Event: u32 {
         const CHILD_EXIT = 1 << 0;
+        const KILL_PROCESS = 1 << 2;
+        const COMMON_SIGNAL = 1 << 3;
     }
 }
 
@@ -31,7 +33,11 @@ struct EventBusInner {
 }
 
 impl EventBus {
-    pub fn recv_event(&self, event: Event) {
+    pub async fn wait(&self, event: Event) -> Event {
+        WaitForEventFuture::new(self, event).await
+    }
+
+    pub(super) fn recv_event(&self, event: Event) {
         debug!("Receive event {:?}", event);
         let mut inner = self.0.lock();
         inner.event |= event;
@@ -46,7 +52,7 @@ impl EventBus {
         });
     }
 
-    pub fn register_callback(&self, mut event: Event, waker: Waker) {
+    fn register_callback(&self, mut event: Event, waker: Waker) {
         let mut inner = self.0.lock();
         inner.callbacks.retain(|(e, w)| {
             if w.will_wake(&waker) {
@@ -57,10 +63,6 @@ impl EventBus {
             }
         });
         inner.callbacks.push((event, waker));
-    }
-
-    pub async fn wait(&self, event: Event) -> Event {
-        WaitForEventFuture::new(self, event).await
     }
 }
 
