@@ -1,9 +1,8 @@
 use alloc::ffi::CString;
 use alloc::string::ToString;
 use core::mem::size_of;
-use core::ptr::copy_nonoverlapping;
 use log::{debug, warn};
-use zerocopy::AsBytes;
+use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
 use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
@@ -12,6 +11,8 @@ use crate::fs::path::resolve_path;
 use crate::fs::pipe::Pipe;
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
+use crate::sched::ffi::{TimeSpec, UTIME_NOW, UTIME_OMIT};
+use crate::sched::time::current_time;
 
 pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
     if buf == 0 || size == 0 {
@@ -388,5 +389,44 @@ pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
 pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     fd_impl.file.sync().await?;
+    Ok(0)
+}
+
+pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, _flags: u32) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let path = match path {
+        0 => ".",
+        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
+    };
+    let inode = resolve_path(&proc_inner, dirfd, path).await?;
+    let now = TimeSpec::from(current_time());
+    let (atime, mtime) = match times {
+        0 => (Some(now), Some(now)),
+        _ => {
+            let times = proc_inner.addr_space.user_slice_r(VirtAddr(times), 2 * size_of::<TimeSpec>())?;
+            let atime = TimeSpec::ref_from(&times[0..size_of::<TimeSpec>()]).unwrap();
+            let mtime = TimeSpec::ref_from(&times[size_of::<TimeSpec>()..]).unwrap();
+            let atime = match atime.nsec {
+                UTIME_NOW => Some(now),
+                UTIME_OMIT => None,
+                _ => Some(*atime),
+            };
+            let mtime = match mtime.nsec {
+                UTIME_NOW => Some(now),
+                UTIME_OMIT => None,
+                _ => Some(*mtime),
+            };
+            (atime, mtime)
+        }
+    };
+    inode.metadata().inner.lock().apply_mut(|inner| {
+        if let Some(atime) = atime {
+            inner.atime = atime;
+        }
+        if let Some(mtime) = mtime {
+            inner.mtime = mtime;
+        }
+        inner.ctime = now;
+    });
     Ok(0)
 }

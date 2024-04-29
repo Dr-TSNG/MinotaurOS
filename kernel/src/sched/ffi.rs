@@ -1,6 +1,9 @@
 use core::time::Duration;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
+pub const UTIME_NOW: i64 = 1073741823;
+pub const UTIME_OMIT: i64 = 1073741822;
+
 #[derive(Copy, Clone, Debug, Default, AsBytes, FromZeroes, FromBytes)]
 #[repr(C)]
 pub struct TimeSpec {
