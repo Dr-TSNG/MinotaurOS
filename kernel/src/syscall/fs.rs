@@ -6,7 +6,7 @@ use log::{debug, warn};
 use zerocopy::AsBytes;
 use crate::arch::VirtAddr;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
+use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
 use crate::fs::pipe::Pipe;
@@ -214,31 +214,33 @@ pub fn sys_pipe2(fds: usize, flags: u32) -> SyscallResult<usize> {
 
 pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
-    let file_inner = fd_impl.file.metadata().inner.lock().await;
+    let mut file_inner = fd_impl.file.metadata().inner.lock().await;
     let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
     if inode.metadata().mode != InodeMode::DIR {
         return Err(Errno::ENOTDIR);
     }
     let mut cur = buf;
     for child in inode.list(file_inner.pos as usize).await? {
-        if cur + DIRENT_SIZE > buf + count as usize {
-            break;
-        }
         let name = CString::new(child.metadata().name.as_str()).unwrap();
         let name_bytes = name.as_bytes_with_nul();
+        let dirent_size = MAX_DIRENT_SIZE - (MAX_NAME_LEN - name_bytes.len());
+        if cur + dirent_size > buf + count as usize {
+            break;
+        }
         let mut dirent = LinuxDirent {
             d_ino: child.metadata().ino as u64,
             d_off: 0,
-            d_reclen: DIRENT_SIZE as u16 - (MAX_NAME_LEN - name_bytes.len()) as u16,
+            d_reclen: dirent_size as u16,
             d_type: DirentType::from(child.metadata().mode).bits(),
             d_name: [0; 256],
         };
         dirent.d_name[..name_bytes.len()].copy_from_slice(name_bytes);
-        let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(cur), DIRENT_SIZE)?;
+        let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(cur), dirent_size)?;
         unsafe {
-            copy_nonoverlapping(&dirent, user_buf.as_mut_ptr() as *mut LinuxDirent, 1);
+            user_buf.as_mut_ptr().cast::<LinuxDirent>().write(dirent);
         }
-        cur += DIRENT_SIZE;
+        file_inner.pos += 1;
+        cur += dirent_size;
     }
 
     Ok(cur - buf)
