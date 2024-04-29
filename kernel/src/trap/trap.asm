@@ -44,31 +44,31 @@ __trap_from_user:
     csrr t2, sepc
     sd t0, 64*8(sp)
     sd t1, 65*8(sp)
-    sd t2, 66*8(sp)
+    sd t2, 0*8(sp)
 
     # 保存用户栈指针
     csrr t2, sscratch
     sd t2, 2*8(sp)
 
     # 恢复内核 callee-saved 寄存器
-    ld ra, 70*8(sp)
-    ld s0, 71*8(sp)
-    ld s1, 72*8(sp)
-    ld s2, 73*8(sp)
-    ld s3, 74*8(sp)
-    ld s4, 75*8(sp)
-    ld s5, 76*8(sp)
-    ld s6, 77*8(sp)
-    ld s7, 78*8(sp)
-    ld s8, 79*8(sp)
-    ld s9, 80*8(sp)
-    ld s10, 81*8(sp)
-    ld s11, 82*8(sp)
+    ld ra, 69*8(sp)
+    ld s0, 70*8(sp)
+    ld s1, 71*8(sp)
+    ld s2, 72*8(sp)
+    ld s3, 73*8(sp)
+    ld s4, 74*8(sp)
+    ld s5, 75*8(sp)
+    ld s6, 76*8(sp)
+    ld s7, 77*8(sp)
+    ld s8, 78*8(sp)
+    ld s9, 79*8(sp)
+    ld s10, 80*8(sp)
+    ld s11, 81*8(sp)
 
     # 恢复内核栈指针和 tp(hart)
-    ld tp, 67*8(sp)
-    ld fp, 68*8(sp)
-    ld sp, 69*8(sp)
+    ld tp, 66*8(sp)
+    ld fp, 67*8(sp)
+    ld sp, 68*8(sp)
 
     # 返回内核调用函数
     ret
@@ -79,24 +79,24 @@ __restore_to_user:
     csrw sscratch, a0
 
     # 保存内核 callee-saved 寄存器
-    sd ra, 70*8(a0)
-    sd s0, 71*8(a0)
-    sd s1, 72*8(a0)
-    sd s2, 73*8(a0)
-    sd s3, 74*8(a0)
-    sd s4, 75*8(a0)
-    sd s5, 76*8(a0)
-    sd s6, 77*8(a0)
-    sd s7, 78*8(a0)
-    sd s8, 79*8(a0)
-    sd s9, 80*8(a0)
-    sd s10, 81*8(a0)
-    sd s11, 82*8(a0)
+    sd ra, 69*8(a0)
+    sd s0, 70*8(a0)
+    sd s1, 71*8(a0)
+    sd s2, 72*8(a0)
+    sd s3, 73*8(a0)
+    sd s4, 74*8(a0)
+    sd s5, 75*8(a0)
+    sd s6, 76*8(a0)
+    sd s7, 77*8(a0)
+    sd s8, 78*8(a0)
+    sd s9, 79*8(a0)
+    sd s10, 80*8(a0)
+    sd s11, 81*8(a0)
 
     # 保存内核栈指针和 tp(hart)
-    sd tp, 67*8(a0)
-    sd fp, 68*8(a0)
-    sd sp, 69*8(a0)
+    sd tp, 66*8(a0)
+    sd fp, 67*8(a0)
+    sd sp, 68*8(a0)
 
     # 现在 sp 指向 &TrapContext
     mv sp, a0
@@ -104,7 +104,7 @@ __restore_to_user:
     # 恢复 fcsr/sstatus/sepc
     ld t0, 64*8(sp)
     ld t1, 65*8(sp)
-    ld t2, 66*8(sp)
+    ld t2, 0*8(sp)
     csrw fcsr, t0
     csrw sstatus, t1
     csrw sepc, t2

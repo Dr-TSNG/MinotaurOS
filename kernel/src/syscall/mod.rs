@@ -22,10 +22,10 @@ macro_rules! syscall {
     ($handler: ident $(, $args:expr)*) => {
         {
             strace!(
-                "{}, args: {:?}, sepc: {:#x}",
+                "{}, args: {:?}, pc: {:#x}",
                 stringify!($handler),
                 ($($args,)*),
-                crate::processor::current_trap_ctx().sepc
+                crate::processor::current_trap_ctx().get_pc()
             );
             $handler($($args,)*)
         }
@@ -36,10 +36,10 @@ macro_rules! async_syscall {
     ($handler: ident $(, $args:expr)*) => {
         {
             strace!(
-                "{}, args: {:?}, sepc: {:#x}",
+                "{}, args: {:?}, pc: {:#x}",
                 stringify!($handler),
                 ($($args,)*),
-                crate::processor::current_trap_ctx().sepc
+                crate::processor::current_trap_ctx().get_pc()
             );
             $handler($($args,)*).await
         }

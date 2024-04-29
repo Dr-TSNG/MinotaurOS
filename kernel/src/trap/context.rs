@@ -8,12 +8,11 @@ pub struct TrapContext {
     /* 32 */ pub user_f: [usize; 32],
     /* 64 */ pub fcsr: usize,
     /* 65 */ pub sstatus: Sstatus,
-    /* 66 */ pub sepc: usize,
-    /* 67 */ pub kernel_tp: usize,
-    /* 68 */ pub kernel_fp: usize,
-    /* 69 */ pub kernel_sp: usize,
-    /* 70 */ pub kernel_ra: usize,
-    /* 71 */ pub kernel_s: [usize; 12],
+    /* 66 */ pub kernel_tp: usize,
+    /* 67 */ pub kernel_fp: usize,
+    /* 68 */ pub kernel_sp: usize,
+    /* 69 */ pub kernel_ra: usize,
+    /* 70 */ pub kernel_s: [usize; 12],
 }
 
 impl TrapContext {
@@ -28,15 +27,23 @@ impl TrapContext {
             user_f: [0; 32],
             fcsr: 0,
             sstatus,
-            sepc: entry,
             kernel_tp: 0,
             kernel_fp: 0,
             kernel_sp: 0,
             kernel_ra: 0,
             kernel_s: [0; 12],
         };
+        ctx.set_pc(entry);
         ctx.set_sp(sp);
         ctx
+    }
+
+    pub fn get_pc(&self) -> usize {
+        self.user_x[0]
+    }
+
+    pub fn set_pc(&mut self, sepc: usize) {
+        self.user_x[0] = sepc;
     }
 
     pub fn get_sp(&self) -> usize {

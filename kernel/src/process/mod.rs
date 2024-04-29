@@ -260,7 +260,7 @@ impl Process {
                 *(ptr as *const usize)
             };
             let mut trap_ctx = current_trap_ctx().clone();
-            trap_ctx.sepc = entry;
+            trap_ctx.set_pc(entry);
             trap_ctx.set_sp(stack);
             trap_ctx.user_x[10] = args_addr;
             trap_ctx.user_x[4] = tls;

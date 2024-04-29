@@ -130,7 +130,7 @@ pub struct SignalStack {
 }
 
 impl UContext {
-    pub fn new(sigmask: SigSet, trap_ctx: TrapContext) -> Self {
+    pub fn new(sigmask: SigSet, trap_ctx: &TrapContext) -> Self {
         Self {
             uc_flags: 0,
             uc_link: 0,
