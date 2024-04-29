@@ -154,6 +154,16 @@ pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
     Ok(0)
 }
 
+pub async fn sys_faccessat(fd: FdNum, path: usize, _mode: u32, _flags: u32) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let path = match path {
+        0 => ".",
+        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
+    };
+    resolve_path(&proc_inner, fd, path).await?;
+    Ok(0)
+}
+
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
