@@ -18,6 +18,7 @@ use crate::fs::page_cache::PageCache;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::sched::time::current_time;
+use crate::sync::block_on;
 use crate::sync::mutex::AsyncMutex;
 
 pub struct FAT32Inode {
@@ -111,7 +112,6 @@ impl FAT32Inode {
                 children_loaded: false,
             }),
         });
-        inode.metadata.page_cache.as_ref().inspect(|cache| cache.set_inode(inode.clone()));
         Ok(inode)
     }
 }
@@ -295,7 +295,6 @@ impl Inode for FAT32Inode {
                 children_loaded: false,
             }),
         });
-        inode.metadata.page_cache.as_ref().unwrap().set_inode(inode.clone());
         inner.children.push(FAT32Child::new(inode.clone(), dir_pos, dir_len));
         Ok(inode)
     }
@@ -382,5 +381,13 @@ impl FAT32Inode {
         }
         inner.children_loaded = true;
         Ok(())
+    }
+}
+
+impl Drop for FAT32Inode {
+    fn drop(&mut self) {
+        if let Some(page_cache) = self.metadata.page_cache.as_ref() {
+            block_on(page_cache.sync_all(self)).unwrap();
+        }
     }
 }

@@ -33,6 +33,9 @@ pub trait ASRegion: Send + Sync {
     /// 拷贝区域
     fn fork(&mut self, parent_pt: PageTable) -> Box<dyn ASRegion>;
 
+    /// 同步区域
+    fn sync(&self) {}
+
     /// 错误处理
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
         Err(Errno::EINVAL)

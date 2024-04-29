@@ -16,7 +16,7 @@ use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::driver::GLOBAL_MAPPINGS;
 use crate::fs::file_system::MountNamespace;
-use crate::fs::page_cache::PageCache;
+use crate::fs::inode::Inode;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::page_table::PageTable;
 use crate::mm::region::{ASRegion, ASRegionMeta};
@@ -298,7 +298,7 @@ impl AddressSpace {
         start: Option<VirtPageNum>,
         pages: usize,
         perms: ASPerms,
-        page_cache: Option<Arc<PageCache>>,
+        inode: Option<Arc<dyn Inode>>,
         offset: usize,
         is_shared: bool,
     ) -> SyscallResult<usize> {
@@ -327,8 +327,8 @@ impl AddressSpace {
             region_low.metadata().end()
         };
         let metadata = ASRegionMeta { name, perms, start, pages };
-        let region: Box<dyn ASRegion> = match page_cache {
-            Some(page_cache) => FileRegion::new(metadata, Arc::downgrade(&page_cache), offset),
+        let region: Box<dyn ASRegion> = match inode {
+            Some(inode) => FileRegion::new(metadata, Arc::downgrade(&inode), offset),
             None => LazyRegion::new_free(metadata),
         };
         self.map_region(region);

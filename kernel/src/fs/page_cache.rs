@@ -1,15 +1,12 @@
 use alloc::collections::BTreeMap;
-use alloc::sync::{Arc, Weak};
 use core::cmp::min;
 use crate::arch::{PAGE_SIZE, PhysPageNum};
 use crate::fs::inode::Inode;
 use crate::mm::allocator::{alloc_user_frames, UserFrameTracker};
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
-use crate::sync::once::LateInit;
 
 pub struct PageCache {
-    inode: LateInit<Weak<dyn Inode>>,
     pages: Mutex<BTreeMap<usize, Page>>,
 }
 
@@ -25,16 +22,10 @@ impl Page {
 }
 
 impl PageCache {
-    pub fn new() -> Arc<Self> {
-        let page_cache = Self {
-            inode: LateInit::new(),
+    pub fn new() -> Self {
+        Self {
             pages: Mutex::new(BTreeMap::new()),
-        };
-        Arc::new(page_cache)
-    }
-
-    pub fn set_inode(&self, inode: Arc<dyn Inode>) {
-        self.inode.init(Arc::downgrade(&inode));
+        }
     }
 
     pub fn ppn_of(&self, page_num: usize) -> Option<PhysPageNum> {
@@ -42,10 +33,9 @@ impl PageCache {
         pages.get(&page_num).map(|page| page.frame.ppn)
     }
 
-    pub async fn load(&self, page_num: usize) -> SyscallResult {
+    pub async fn load(&self, inode: &dyn Inode, page_num: usize) -> SyscallResult {
         let mut pages = self.pages.lock();
         if pages.get(&page_num).is_none() {
-            let inode = self.inode.upgrade().unwrap();
             let frame = alloc_user_frames(1)?;
             let page_buf = frame.ppn.byte_array();
             inode.read_direct(page_buf, (page_num * PAGE_SIZE) as isize).await?;
@@ -54,9 +44,9 @@ impl PageCache {
         Ok(())
     }
 
-    pub async fn read(&self, mut buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
+    pub async fn read(&self, inode: &dyn Inode, mut buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         let mut offset = offset as usize;
-        let file_size = self.inode.upgrade().unwrap().metadata().inner.lock().size as usize;
+        let file_size = inode.metadata().inner.lock().size as usize;
         if offset >= file_size {
             return Ok(0);
         }
@@ -73,7 +63,6 @@ impl PageCache {
             let page = match pages.get(&page_num) {
                 Some(frame) => frame,
                 None => {
-                    let inode = self.inode.upgrade().unwrap();
                     let frame = alloc_user_frames(1)?;
                     let page_buf = frame.ppn.byte_array();
                     inode.read_direct(page_buf, (page_num * PAGE_SIZE) as isize).await?;
@@ -90,11 +79,11 @@ impl PageCache {
         Ok(cur as isize)
     }
 
-    pub async fn write(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
+    pub async fn write(&self, inode: &dyn Inode, buf: &[u8], offset: isize) -> SyscallResult<isize> {
         let mut offset = offset as usize;
-        let file_size = self.inode.upgrade().unwrap().metadata().inner.lock().size as usize;
+        let file_size = inode.metadata().inner.lock().size as usize;
         if offset + buf.len() > file_size {
-            self.truncate((offset + buf.len()) as isize).await?;
+            self.truncate(inode, (offset + buf.len()) as isize).await?;
         }
         let page_start = offset / PAGE_SIZE;
         let page_end = (offset + buf.len()).div_ceil(PAGE_SIZE);
@@ -121,8 +110,7 @@ impl PageCache {
         Ok(cur as isize)
     }
 
-    pub async fn truncate(&self, size: isize) -> SyscallResult {
-        let inode = self.inode.upgrade().unwrap();
+    pub async fn truncate(&self, inode: &dyn Inode, size: isize) -> SyscallResult {
         inode.truncate_direct(size).await?;
         let mut pages = self.pages.lock();
 
@@ -136,14 +124,13 @@ impl PageCache {
         Ok(())
     }
 
-    pub async fn sync(&self, offset: usize, len: usize) -> SyscallResult<()> {
-        let file_size = self.inode.upgrade().unwrap().metadata().inner.lock().size as usize;
+    pub async fn sync(&self, inode: &dyn Inode, offset: usize, len: usize) -> SyscallResult<()> {
+        let file_size = inode.metadata().inner.lock().size as usize;
         let page_start = offset / PAGE_SIZE;
         let page_end = min(file_size, offset + len).div_ceil(PAGE_SIZE);
         let mut pages = self.pages.lock();
         for (page_num, page) in pages.range_mut(page_start..page_end) {
             if page.dirty {
-                let inode = self.inode.upgrade().unwrap();
                 let mut page_buf = page.frame.ppn.byte_array();
                 if *page_num == file_size / PAGE_SIZE {
                     page_buf = &mut page_buf[..file_size % PAGE_SIZE];
@@ -155,8 +142,8 @@ impl PageCache {
         Ok(())
     }
 
-    pub async fn sync_all(&self) -> SyscallResult {
-        self.sync(0, usize::MAX).await?;
+    pub async fn sync_all(&self, inode: &dyn Inode) -> SyscallResult {
+        self.sync(inode, 0, usize::MAX).await?;
         Ok(())
     }
 }

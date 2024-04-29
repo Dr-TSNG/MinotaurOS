@@ -2,6 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
+use core::mem::ManuallyDrop;
 use bitvec_rs::BitVec;
 use log::{info, trace, warn};
 use crate::driver::BlockDevice;
@@ -37,7 +38,7 @@ pub struct FAT32FileSystem {
     vfsmeta: FileSystemMeta,
     fat32meta: FAT32Meta,
     cache: BlockCache<BLOCK_SIZE>,
-    root: LateInit<Arc<FAT32Inode>>,
+    root: ManuallyDrop<LateInit<Arc<FAT32Inode>>>,
 }
 
 impl FAT32FileSystem {
@@ -52,7 +53,7 @@ impl FAT32FileSystem {
             vfsmeta: FileSystemMeta::new(FileSystemType::FAT32, flags),
             fat32meta: FAT32Meta::new(&boot_sector)?,
             cache: BlockCache::new(device, BLOCK_CACHE_CAP),
-            root: LateInit::new(),
+            root: ManuallyDrop::new(LateInit::new()),
         });
         let root_cluster = fs.fat32meta.root_cluster as u32;
         fs.root.init(FAT32Inode::root(&fs, None, root_cluster).await?);
@@ -305,6 +306,7 @@ impl FAT32FileSystem {
 
 impl Drop for FAT32FileSystem {
     fn drop(&mut self) {
+        unsafe { ManuallyDrop::drop(&mut self.root) };
         info!("FAT32FileSystem dropped");
     }
 }

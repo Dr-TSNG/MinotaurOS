@@ -3,7 +3,7 @@ use alloc::sync::Weak;
 use alloc::vec;
 use alloc::vec::Vec;
 use crate::arch::{PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtPageNum};
-use crate::fs::page_cache::PageCache;
+use crate::fs::inode::Inode;
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::page_table::{PageTable, SlotType};
@@ -14,7 +14,7 @@ use crate::sync::block_on;
 #[derive(Clone)]
 pub struct FileRegion {
     metadata: ASRegionMeta,
-    page_cache: Weak<PageCache>,
+    inode: Weak<dyn Inode>,
     pages: Vec<PageState>,
     offset: usize,
 }
@@ -58,6 +58,12 @@ impl ASRegion for FileRegion {
         Box::new(self.clone())
     }
 
+    fn sync(&self) {
+        let inode = self.inode.upgrade().unwrap();
+        let page_cache = inode.page_cache().unwrap();
+        block_on(page_cache.sync_all(inode.as_ref())).unwrap()
+    }
+
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
         let page_num = (vpn - self.metadata.start).0;
         self.pages[page_num] = match self.pages[page_num] {
@@ -71,9 +77,9 @@ impl ASRegion for FileRegion {
 }
 
 impl FileRegion {
-    pub fn new(metadata: ASRegionMeta, page_cache: Weak<PageCache>, offset: usize) -> Box<Self> {
+    pub fn new(metadata: ASRegionMeta, inode: Weak<dyn Inode>, offset: usize) -> Box<Self> {
         let pages = vec![PageState::Free; metadata.pages];
-        let region = Self { metadata, page_cache, pages, offset };
+        let region = Self { metadata, inode, pages, offset };
         Box::new(region)
     }
 
@@ -94,8 +100,9 @@ impl FileRegion {
                 let (ppn, flags) = match self.pages[page_num] {
                     PageState::Free => (PhysPageNum(0), PTEFlags::empty()),
                     PageState::Clean => {
-                        let page_cache = self.page_cache.upgrade().unwrap();
-                        block_on(page_cache.load(page_num + self.offset)).unwrap();
+                        let inode = self.inode.upgrade().unwrap();
+                        let page_cache = inode.page_cache().unwrap();
+                        block_on(page_cache.load(inode.as_ref(), page_num + self.offset)).unwrap();
                         let page = page_cache.ppn_of(page_num + self.offset).unwrap();
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
                         if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
@@ -104,8 +111,9 @@ impl FileRegion {
                         (page, flags)
                     }
                     PageState::Dirty => {
-                        let page_cache = self.page_cache.upgrade().unwrap();
-                        block_on(page_cache.load(page_num + self.offset)).unwrap();
+                        let inode = self.inode.upgrade().unwrap();
+                        let page_cache = inode.page_cache().unwrap();
+                        block_on(page_cache.load(inode.as_ref(), page_num + self.offset)).unwrap();
                         let page = page_cache.ppn_of(page_num + self.offset).unwrap();
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
                         if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
@@ -133,8 +141,9 @@ impl FileRegion {
     }
 
     fn unmap_one(&self, mut pt: PageTable, page_num: usize) {
-        let page_cache = self.page_cache.upgrade().unwrap();
-        block_on(page_cache.sync((page_num + self.offset) * PAGE_SIZE, PAGE_SIZE)).unwrap();
+        let inode = self.inode.upgrade().unwrap();
+        let page_cache = inode.page_cache().unwrap();
+        block_on(page_cache.sync(inode.as_ref(), (page_num + self.offset) * PAGE_SIZE, PAGE_SIZE)).unwrap();
         let vpn = self.metadata.start + page_num;
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
@@ -149,5 +158,11 @@ impl FileRegion {
                 }
             }
         }
+    }
+}
+
+impl Drop for FileRegion {
+    fn drop(&mut self) {
+        self.sync();
     }
 }

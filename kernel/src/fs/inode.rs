@@ -26,7 +26,7 @@ pub struct InodeMeta {
     /// 文件系统路径
     pub path: String,
     /// 页面缓存
-    pub page_cache: Option<Arc<PageCache>>,
+    pub page_cache: Option<PageCache>,
     /// 可变数据
     pub inner: Mutex<InodeMetaInner>,
 }
@@ -62,7 +62,7 @@ impl InodeMeta {
         mode: InodeMode,
         name: String,
         path: String,
-        page_cache: Option<Arc<PageCache>>,
+        page_cache: Option<PageCache>,
         atime: TimeSpec,
         mtime: TimeSpec,
         ctime: TimeSpec,
@@ -140,30 +140,34 @@ pub trait Inode: Send + Sync {
 }
 
 impl dyn Inode {
+    pub fn page_cache(&self) -> Option<&PageCache> {
+        self.metadata().page_cache.as_ref()
+    }
+
     pub async fn read(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         match &self.metadata().page_cache {
-            Some(cache) => cache.read(buf, offset).await,
+            Some(cache) => cache.read(self, buf, offset).await,
             None => self.read_direct(buf, offset).await,
         }
     }
 
     pub async fn write(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
         match &self.metadata().page_cache {
-            Some(cache) => cache.write(buf, offset).await,
+            Some(cache) => cache.write(self, buf, offset).await,
             None => self.write_direct(buf, offset).await,
         }
     }
-    
+
     pub async fn truncate(&self, size: isize) -> SyscallResult {
         match &self.metadata().page_cache {
-            Some(cache) => cache.truncate(size).await,
+            Some(cache) => cache.truncate(self, size).await,
             None => self.truncate_direct(size).await,
         }
     }
 
     pub async fn sync(&self) -> SyscallResult<isize> {
         if let Some(page_cache) = &self.metadata().page_cache {
-            page_cache.sync_all().await?;
+            page_cache.sync_all(self).await?;
         }
         Ok(0)
     }
