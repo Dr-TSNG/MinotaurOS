@@ -14,7 +14,7 @@ pub struct RunConfig {
     pub mem: String,
     #[clap(long, default_value = "prebuilts/rustsbi-qemu.bin")]
     pub bios: String,
-    #[clap(long, default_value = "prebuilts/pre-2024.img")]
+    #[clap(long, default_value = "prebuilts/disk.img")]
     pub disk: String,
     #[clap(long)]
     pub features: Vec<String>,

@@ -2,7 +2,6 @@ use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::arch::asm;
 use bitflags::bitflags;
-use crate::println;
 use crate::syscall::SyscallCode::*;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -162,18 +161,34 @@ macro_rules! syscall_asm {
     }};
 }
 
+pub fn sys_mkdir(path: &str, mode: u32) -> isize {
+    let path = CString::new(path).unwrap();
+    syscall!(Mkdirat, AT_FDCWD as usize, path.as_ptr() as usize, mode)
+}
+
 pub fn sys_getcwd(buf: usize, len: usize) -> isize {
     syscall!(Getcwd, buf, len)
 }
 
-pub fn sys_exit(exit_code: i32) -> isize {
+pub fn sys_exit(exit_code: i32) -> ! {
     let exit_code = exit_code as usize;
-    syscall!(Exit, exit_code)
+    syscall!(Exit, exit_code);
+    unreachable!()
+}
+
+pub fn sys_exit_group(exit_code: i32) -> ! {
+    let exit_code = exit_code as usize;
+    syscall!(ExitGroup, exit_code);
+    unreachable!()
 }
 
 pub fn sys_open(path: &str, flags: OpenFlags) -> i32 {
     let path = CString::new(path).unwrap();
     syscall!(Openat, AT_FDCWD as usize, path.as_ptr() as usize, flags.bits, 0) as i32
+}
+
+pub fn sys_close(fd: i32) -> isize {
+    syscall!(Close, fd as usize)
 }
 
 pub fn sys_read(fd: i32, buf: &mut [u8]) -> isize {
