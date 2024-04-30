@@ -194,8 +194,8 @@ impl Process {
         trap_ctx.user_x[13] = auxv_base;
 
         info!(
-            "[execve] Execve process (pid: {}): argc {:#x}, argv {:#x}, envp {:#x}, auxv {:#x}, sp {:#x}",
-            current_process().pid.0, args.len(), argv_base, envp_base, auxv_base, user_sp,
+            "[execve] Execve process (pid: {}): args {:?}, env {:?}",
+            current_process().pid.0, args, envs,
         );
         Ok(args.len())
     }

@@ -1,12 +1,11 @@
 use core::mem::size_of;
 use core::pin::pin;
 use core::time::Duration;
-use futures::future::{Either, select};
 use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
-use crate::result::{Errno, SyscallResult};
+use crate::result::SyscallResult;
 use crate::sched::ffi::{TimeSpec, TMS};
 use crate::sched::sleep_for;
 use crate::sched::time::current_time;
@@ -15,13 +14,8 @@ pub async fn sys_nanosleep(req: usize, _rem: usize) -> SyscallResult<usize> {
     let user_buf = current_process().inner.lock().addr_space.user_slice_r(VirtAddr(req), size_of::<TimeSpec>())?;
     let ts = TimeSpec::ref_from(user_buf).unwrap();
     let duration = Duration::from(*ts);
-    match select(
-        pin!(sleep_for(duration)),
-        pin!(current_thread().event_bus.wait(Event::all())),
-    ).await {
-        Either::Left((_, _)) => Ok(0),
-        Either::Right(_) => Err(Errno::EINTR),
-    }
+    current_thread().event_bus.suspend_with(Event::all(), pin!(sleep_for(duration))).await?;
+    Ok(0)
 }
 
 pub fn sys_times(buf: usize) -> SyscallResult<usize> {

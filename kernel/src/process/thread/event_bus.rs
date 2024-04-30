@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
 use core::future::Future;
 use core::mem::size_of;
-use core::pin::Pin;
+use core::pin::{Pin, pin};
 use core::task::{Context, Poll, Waker};
 use bitflags::bitflags;
+use futures::future::{Either, select};
 use log::debug;
 use crate::arch::VirtAddr;
 use crate::process::ffi::WaitOptions;
@@ -34,6 +35,14 @@ struct EventBusInner {
 impl EventBus {
     pub async fn wait(&self, event: Event) -> Event {
         WaitForEventFuture::new(self, event).await
+    }
+
+    pub async fn suspend_with<T, F>(&self, event: Event, fut: F) -> SyscallResult<T>
+        where F: Future<Output=SyscallResult<T>> + Unpin {
+        match select(fut, pin!(self.wait(event))).await {
+            Either::Left((ret, _)) => ret,
+            Either::Right(_) => Err(Errno::EINTR),
+        }
     }
 
     pub(super) fn recv_event(&self, event: Event) {

@@ -12,6 +12,7 @@ use pin_project::pin_project;
 use crate::process::thread::Thread;
 use crate::processor::context::{HartContext, UserTask};
 use crate::processor::hart::local_hart;
+use crate::result::SyscallResult;
 use crate::sched::time::{current_time, TimeoutFuture};
 use crate::trap::user::{check_signal, trap_from_user, trap_return};
 
@@ -92,9 +93,10 @@ pub async fn yield_now() {
     YieldFuture(false).await;
 }
 
-pub async fn sleep_for(time: Duration) {
+pub async fn sleep_for(time: Duration) -> SyscallResult<()> {
     let now = current_time();
     TimeoutFuture::new(now + time, IdleFuture).await;
+    Ok(())
 }
 
 pub fn spawn_kernel_thread<F: Future<Output=()> + Send + 'static>(kernel_thread: F) {

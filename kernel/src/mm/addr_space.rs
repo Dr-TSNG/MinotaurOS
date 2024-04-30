@@ -246,12 +246,18 @@ impl AddressSpace {
     }
 
     pub fn user_slice_r(&self, addr: VirtAddr, len: usize) -> SyscallResult<&'static [u8]> {
+        if len == 0 {
+            return Ok(&mut []);
+        }
         self.check_addr_valid(addr, addr + len, ASPerms::R | ASPerms::U)?;
         let data = unsafe { core::slice::from_raw_parts(addr.as_ptr(), len) };
         Ok(data)
     }
 
     pub fn user_slice_w(&self, addr: VirtAddr, len: usize) -> SyscallResult<&'static mut [u8]> {
+        if len == 0 {
+            return Ok(&mut []);
+        }
         self.check_addr_valid(addr, addr + len, ASPerms::W | ASPerms::U)?;
         let data = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), len) };
         Ok(data)

@@ -1,8 +1,6 @@
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use core::pin::pin;
-use futures::future::{Either, select};
 use log::{debug, info};
 use crate::arch::VirtAddr;
 use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
@@ -154,13 +152,10 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
 pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
     info!("[sys_wait4] pid: {:?}, wstatus: {:?}, options: {:?}", pid as isize, wstatus, options);
     let options = WaitOptions::from_bits(options).ok_or(Errno::EINVAL)?;
-    let ret = match select(
+    let ret = current_thread().event_bus.suspend_with(
+        Event::all().difference(Event::CHILD_EXIT),
         WaitPidFuture::new(pid, options, wstatus),
-        pin!(current_thread().event_bus.wait(Event::all().difference(Event::CHILD_EXIT))),
-    ).await {
-        Either::Left((pid, _)) => pid,
-        Either::Right(_) => Err(Errno::EINTR),
-    };
+    ).await;
     info!("[sys_wait4] ret: {:?}", ret);
     ret
 }
