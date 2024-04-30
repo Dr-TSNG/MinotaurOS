@@ -1,9 +1,11 @@
 use alloc::ffi::CString;
 use alloc::string::ToString;
+use alloc::vec;
+use core::cmp::min;
 use core::mem::size_of;
 use log::{debug, warn};
 use zerocopy::{AsBytes, FromBytes};
-use crate::arch::VirtAddr;
+use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
 use crate::fs::file::Seek;
@@ -339,6 +341,46 @@ pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sys
     drop(proc_inner);
     let ret = fd_impl.file.pwrite(user_buf, offset).await?;
     Ok(ret as usize)
+}
+
+pub async fn sys_sendfile(out_fd: FdNum, in_fd: FdNum, offset: usize, count: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let out_fd_impl = proc_inner.fd_table.get(out_fd)?;
+    let in_fd_impl = proc_inner.fd_table.get(in_fd)?;
+    if !out_fd_impl.flags.writable() || !in_fd_impl.flags.readable() {
+        return Err(Errno::EBADF);
+    }
+    drop(proc_inner);
+    let mut buf = vec![0; PAGE_SIZE];
+    if offset == 0 {
+        let mut sent = 0;
+        while sent < count {
+            let end = min(count - sent, buf.len());
+            let read = in_fd_impl.file.read(&mut buf[..end]).await? as usize;
+            if read == 0 {
+                break;
+            }
+            out_fd_impl.file.write(&buf[..read]).await?;
+            sent += read;
+        }
+        Ok(sent)
+    } else {
+        let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(offset), size_of::<usize>())?;
+        let offset: usize = bytemuck::pod_read_unaligned(user_buf);
+        let mut sent = 0;
+        while sent < count {
+            let end = min(count - sent, buf.len());
+            let read = in_fd_impl.file.pread(&mut buf[..end], (offset + sent) as isize).await? as usize;
+            if read == 0 {
+                break;
+            }
+            out_fd_impl.file.write(&buf[..read]).await?;
+            sent += read;
+        }
+        let write: [u8; size_of::<usize>()] = bytemuck::cast(offset + sent);
+        user_buf.copy_from_slice(&write);
+        Ok(sent)
+    }
 }
 
 pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, _flags: u32) -> SyscallResult<usize> {

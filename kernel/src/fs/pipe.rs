@@ -21,6 +21,14 @@ pub struct Pipe {
     inner: Arc<Mutex<PipeInner>>,
 }
 
+#[derive(Default)]
+struct PipeInner {
+    buf: VecDeque<u8>,
+    transfer: usize,
+    readers: VecDeque<Waker>,
+    writers: VecDeque<Waker>,
+}
+
 impl Drop for Pipe {
     fn drop(&mut self) {
         let mut inner = self.inner.lock();
@@ -55,14 +63,6 @@ impl Pipe {
         writer.other.init(Arc::downgrade(&reader));
         (reader, writer)
     }
-}
-
-#[derive(Default)]
-struct PipeInner {
-    buf: VecDeque<u8>,
-    transfer: usize,
-    readers: VecDeque<Waker>,
-    writers: VecDeque<Waker>,
 }
 
 #[async_trait]
@@ -128,8 +128,8 @@ impl Future for PipeReadFuture<'_> {
             });
             match user_buf {
                 Ok(user_buf) => {
-                    for i in self.pos..self.pos + read {
-                        user_buf[i] = inner.buf.pop_front().unwrap();
+                    for (i, b) in inner.buf.drain(..read).enumerate() {
+                        user_buf[i] = b;
                     }
                     self.pos += read;
                     inner.transfer += read;
@@ -168,7 +168,7 @@ impl Future for PipeWriteFuture<'_> {
             });
             match user_buf {
                 Ok(user_buf) => {
-                    inner.buf.extend(&user_buf[self.pos..self.pos + write]);
+                    inner.buf.extend(user_buf);
                     self.pos += write;
                     self.transfer = inner.transfer + write;
                 }

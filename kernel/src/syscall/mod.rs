@@ -161,7 +161,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Writev => async_syscall!(sys_writev, args[0] as FdNum, args[1], args[2]),
         SyscallCode::Pread64 => async_syscall!(sys_pread, args[0] as FdNum, args[1], args[2], args[3] as isize),
         SyscallCode::Pwrite64 => async_syscall!(sys_pwrite, args[0] as FdNum, args[1], args[2], args[3] as isize),
-        // SyscallCode::Sendfile
+        SyscallCode::Sendfile => async_syscall!(sys_sendfile, args[0] as FdNum, args[1] as FdNum, args[2], args[3]),
         // SyscallCode::Pselect6
         // SyscallCode::Ppoll
         // SyscallCode::Readlinkat

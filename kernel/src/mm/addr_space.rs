@@ -11,7 +11,6 @@ use bitflags::bitflags;
 use log::{debug, info, warn};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
-use zerocopy::transmute;
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::driver::GLOBAL_MAPPINGS;
@@ -371,7 +370,7 @@ impl AddressSpace {
 
     fn map_trampoline(&mut self) -> SyscallResult {
         // li a7, 139; ecall
-        let trampoline: [u8; 8] = transmute!([0x08b00893, 0x00000073]);
+        let trampoline: [u8; 8] = bytemuck::cast([0x08b00893, 0x00000073]);
         let region = LazyRegion::new_framed(
             ASRegionMeta {
                 name: Some("[trampoline]".to_string()),

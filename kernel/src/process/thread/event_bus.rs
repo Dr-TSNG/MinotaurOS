@@ -5,7 +5,6 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use bitflags::bitflags;
 use log::debug;
-use zerocopy::transmute_ref;
 use crate::arch::VirtAddr;
 use crate::process::ffi::WaitOptions;
 use crate::process::monitor::PROCESS_MONITOR;
@@ -131,7 +130,7 @@ impl Future for WaitPidFuture {
                 let addr = proc_inner.addr_space.user_slice_w(VirtAddr(self.wstatus), size_of::<i32>())?;
                 drop(proc_inner);
                 let exit_status = (child.inner.lock().exit_code.unwrap() as i32) << 8;
-                let exit_status: &[u8; size_of::<i32>()] = transmute_ref!(&exit_status);
+                let exit_status: &[u8; size_of::<i32>()] = bytemuck::cast_ref(&exit_status);
                 addr.copy_from_slice(exit_status);
             }
             Poll::Ready(Ok(child.pid.0))
