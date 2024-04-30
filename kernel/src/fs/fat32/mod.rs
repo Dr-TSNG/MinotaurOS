@@ -9,10 +9,10 @@ use crate::driver::BlockDevice;
 use crate::fs::block_cache::BlockCache;
 use crate::fs::fat32::dir::FAT32Dirent;
 use crate::fs::fat32::fat::{FAT32Meta, FATEnt};
-use crate::fs::fat32::inode::{FAT32Child, FAT32Inode};
+use crate::fs::fat32::inode::{FAT32ChildExt, FAT32Inode};
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
-use crate::fs::inode::Inode;
+use crate::fs::inode::{Inode, InodeChild};
 use crate::result::{Errno, SyscallResult};
 use crate::sync::once::LateInit;
 
@@ -118,7 +118,7 @@ impl FAT32FileSystem {
         parent: Arc<dyn Inode>,
         clusters: &[usize],
         occupy: &mut BitVec,
-    ) -> SyscallResult<Vec<FAT32Child>> {
+    ) -> SyscallResult<Vec<InodeChild>> {
         let mut children = vec![];
         let mut dir = FAT32Dirent::default();
         let mut dir_pos = 0;
@@ -152,7 +152,7 @@ impl FAT32FileSystem {
                         dir.append_short(value);
                         trace!("Read FAT32 dirent: {:<24} at {}-{} attr {:?}", dir.name, dir_pos, dir_len, dir.attr);
                         let inode = FAT32Inode::new(&self, parent.clone(), dir).await?;
-                        children.push(FAT32Child::new(inode, dir_pos, dir_len));
+                        children.push(InodeChild::new(inode, FAT32ChildExt::new(dir_pos, dir_len)));
                         dir = FAT32Dirent::default();
                         dir_pos += dir_len;
                         dir_len = 0;
@@ -245,7 +245,7 @@ impl FileSystem for FAT32FileSystem {
         &self.vfsmeta
     }
 
-    fn root(self: Arc<Self>) -> Arc<dyn Inode> {
+    fn root(&self) -> Arc<dyn Inode> {
         self.root.clone()
     }
 }

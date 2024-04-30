@@ -20,19 +20,13 @@ pub async fn resolve_path(proc_inner: &ProcessInner, dirfd: FdNum, path: &str) -
     let path = path.as_ref();
     debug!("[resolve_path] dirfd: {}, path: {:?}", dirfd, path);
     if is_absolute_path(path) {
-        let (fs, path) = proc_inner.mnt_ns.resolve(path)?;
-        fs.lookup_from_root(path).await
+        proc_inner.mnt_ns.lookup_absolute(path).await
+    } else if dirfd == AT_FDCWD {
+        let inode = proc_inner.mnt_ns.lookup_absolute(&proc_inner.cwd).await?;
+        inode.lookup_relative(path).await
     } else {
-        let inode = match dirfd {
-            AT_FDCWD => {
-                let (fs, path) = proc_inner.mnt_ns.resolve(&proc_inner.cwd)?;
-                fs.lookup_from_root(path).await?
-            },
-            _ => {
-                let fd_impl = proc_inner.fd_table.get(dirfd)?;
-                fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?
-            }
-        };
+        let fd_impl = proc_inner.fd_table.get(dirfd)?;
+        let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
         inode.lookup_relative(path).await
     }
 }

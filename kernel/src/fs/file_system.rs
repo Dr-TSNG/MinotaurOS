@@ -1,13 +1,11 @@
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
-use core::ops::Deref;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::fs::ffi::VfsFlags;
 use crate::fs::inode::Inode;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
-use crate::split_path;
 use crate::sync::mutex::Mutex;
 
 #[repr(u64)]
@@ -34,26 +32,12 @@ pub trait FileSystem: Send + Sync {
     fn metadata(&self) -> &FileSystemMeta;
 
     /// 根 Inode
-    fn root(self: Arc<Self>) -> Arc<dyn Inode>;
+    fn root(&self) -> Arc<dyn Inode>;
 }
 
 impl FileSystemMeta {
     pub fn new(fstype: FileSystemType, flags: VfsFlags) -> Self {
         Self { fstype, flags }
-    }
-}
-
-impl dyn FileSystem {
-    /// 从根目录开始查找 Inode，忽略挂载点
-    /// 
-    /// 调用此方法时，需保证 `absolute_path` 不含有挂载点，否则应该调用 [Inode::lookup_with_mount]。
-    pub async fn lookup_from_root(self: Arc<Self>, absolute_path: &str) -> SyscallResult<Arc<dyn Inode>> {
-        assert!(is_absolute_path(absolute_path));
-        let mut inode = self.root();
-        for name in split_path!(absolute_path) {
-            inode = inode.lookup(name).await?;
-        }
-        Ok(inode)
     }
 }
 
@@ -88,28 +72,10 @@ impl MountNamespace {
         Self { mnt_ns_id, tree }
     }
 
-    pub fn resolve<'a>(&self, absolute_path: &'a str) -> SyscallResult<(Arc<dyn FileSystem>, &'a str)> {
-        assert!(is_absolute_path(absolute_path));
-        let tree = self.tree.lock();
-        let mut tree = tree.deref();
-        let mut path = absolute_path;
-        'l: loop {
-            for (k, v) in tree.sub_trees.iter() {
-                // Example: path = "/mnt", k = "/mnt"
-                if path == k {
-                    return Ok((v.fs.clone(), "/"));
-                }
-                // Example: path = "/proc/1/cmdline", k = "/proc"
-                if path.starts_with(k) && path.trim_start_matches(k).starts_with('/') {
-                    // Example: path = "/1/cmdline"
-                    path = &path[k.len()..];
-                    tree = v;
-                    continue 'l;
-                }
-            }
-            // Example: path = "/", no matched subtree
-            return Ok((tree.fs.clone(), path));
-        }
+    pub async fn lookup_absolute(&self, path: &str) -> SyscallResult<Arc<dyn Inode>> {
+        assert!(is_absolute_path(path));
+        let root = self.tree.lock().fs.root();
+        root.lookup_relative(&path[1..]).await
     }
 
     // TODO: Add to Inode's `mounts` field

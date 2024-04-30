@@ -386,8 +386,7 @@ impl AddressSpace {
     }
 
     async fn load_linker(&mut self, mnt_ns: &MountNamespace, offset: usize) -> SyscallResult<usize> {
-        let (fs, path) = mnt_ns.resolve("/libc.so").unwrap();
-        let inode = fs.lookup_from_root(&path).await.unwrap();
+        let inode = mnt_ns.lookup_absolute("/libc.so").await?;
         let file = inode.open().unwrap();
         let elf_data = file.read_all().await.unwrap();
         let elf = ElfFile::new(&elf_data).map_err(|_| Errno::ENOEXEC)?;

@@ -108,7 +108,7 @@ pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<
     if inode.metadata().mode != InodeMode::DIR {
         return Err(Errno::ENOTDIR);
     }
-    inode.mkdir(name).await?;
+    inode.create(InodeMode::DIR, name).await?;
     Ok(0)
 }
 
@@ -123,8 +123,21 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
     };
     debug!("unlinkat: dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
     let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
-    let inode = resolve_path(&proc_inner, dirfd, parent).await?;
-    inode.unlink(name).await?;
+    let parent = resolve_path(&proc_inner, dirfd, parent).await?;
+    let inode = parent.clone().lookup_name(name).await?;
+    if inode.metadata().mode == InodeMode::DIR {
+        if flags & AT_REMOVEDIR == 0 {
+            return Err(Errno::EISDIR);
+        }
+        if inode.clone().lookup_idx(0).await.is_ok() {
+            return Err(Errno::ENOTEMPTY);
+        }
+    } else {
+        if flags & AT_REMOVEDIR != 0 {
+            return Err(Errno::ENOTDIR);
+        }
+    }
+    parent.unlink(name).await?;
     Ok(0)
 }
 
@@ -188,7 +201,7 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
         Err(Errno::ENOENT) if flags.contains(OpenFlags::O_CREAT) => {
             let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
             let parent_inode = resolve_path(&mut proc_inner, dirfd, parent).await?;
-            parent_inode.create(name).await?
+            parent_inode.create(InodeMode::IFREG, name).await?
         }
         Err(e) => return Err(e),
     };

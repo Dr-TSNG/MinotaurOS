@@ -1,8 +1,8 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
-use alloc::vec::Vec;
+use core::any::Any;
 use async_trait::async_trait;
 use log::warn;
 use crate::fs::ffi::InodeMode;
@@ -12,7 +12,7 @@ use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::split_path;
-use crate::sync::mutex::Mutex;
+use crate::sync::mutex::{Mutex, MutexGuard};
 
 pub struct InodeMeta {
     /// 结点编号
@@ -25,10 +25,12 @@ pub struct InodeMeta {
     pub name: String,
     /// 文件系统路径
     pub path: String,
+    /// 父目录
+    pub parent: Option<Weak<dyn Inode>>,
     /// 页面缓存
     pub page_cache: Option<PageCache>,
     /// 可变数据
-    pub inner: Mutex<InodeMetaInner>,
+    pub inner: Arc<Mutex<InodeMetaInner>>,
 }
 
 pub struct InodeMetaInner {
@@ -46,10 +48,23 @@ pub struct InodeMetaInner {
     pub ctime: TimeSpec,
     /// 文件大小
     pub size: isize,
-    /// 父目录
-    pub parent: Weak<dyn Inode>,
+    /// 是否加载了子目录
+    pub children_loaded: bool,
+    /// 子目录
+    pub children: BTreeMap<String, InodeChild>,
     /// 挂载点
     pub mounts: BTreeMap<String, Arc<dyn Inode>>,
+}
+
+pub struct InodeChild {
+    pub inode: Arc<dyn Inode>,
+    pub ext: Box<dyn Any + Send + Sync>,
+}
+
+impl InodeChild {
+    pub(crate) fn new(inode: Arc<dyn Inode>, ext: Box<dyn Any + Send + Sync>) -> Self {
+        Self { inode, ext }
+    }
 }
 
 impl InodeMeta {
@@ -62,14 +77,14 @@ impl InodeMeta {
         mode: InodeMode,
         name: String,
         path: String,
+        parent: Option<Arc<dyn Inode>>,
         page_cache: Option<PageCache>,
         atime: TimeSpec,
         mtime: TimeSpec,
         ctime: TimeSpec,
         size: isize,
-        parent: Option<Weak<dyn Inode>>,
     ) -> Self {
-        let mut inner = InodeMetaInner {
+        let inner = InodeMetaInner {
             uid: 0,
             gid: 0,
             nlink: 1,
@@ -77,13 +92,12 @@ impl InodeMeta {
             mtime,
             ctime,
             size,
-            parent: Weak::<FakeInode>::new(),
+            children_loaded: false,
+            children: BTreeMap::new(),
             mounts: BTreeMap::new(),
         };
-        if let Some(parent) = parent {
-            inner.parent = parent;
-        }
-        Self { ino, dev, mode, name, path, page_cache, inner: Mutex::new(inner) }
+        let parent = parent.map(|parent| Arc::downgrade(&parent));
+        Self { ino, dev, mode, name, path, parent, page_cache, inner: Arc::new(Mutex::new(inner)) }
     }
 }
 
@@ -113,28 +127,30 @@ pub trait Inode: Send + Sync {
         Err(Errno::EPERM)
     }
 
-    /// 在当前目录下查找文件
-    async fn lookup(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    /// 加载子目录
+    async fn load_children(
+        self: Arc<Self>,
+        inner: &mut InodeMetaInner,
+    ) -> SyscallResult {
         Err(Errno::EPERM)
     }
 
-    /// 列出目录下编号从 `index` 开始的文件
-    async fn list(self: Arc<Self>, index: usize) -> SyscallResult<Vec<Arc<dyn Inode>>> {
-        Err(Errno::EPERM)
-    }
-
-    /// 在当前目录下创建文件
-    async fn create(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
-        Err(Errno::EPERM)
-    }
-
-    /// 在当前目录下创建目录
-    async fn mkdir(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    /// 在当前目录下创建文件/目录
+    async fn do_create(
+        self: Arc<Self>,
+        inner: &mut InodeMetaInner,
+        mode: InodeMode,
+        name: &str,
+    ) -> SyscallResult<InodeChild> {
         Err(Errno::EPERM)
     }
 
     /// 在当前目录下删除文件
-    async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult {
+    async fn do_unlink(
+        self: Arc<Self>,
+        inner: &mut InodeMetaInner,
+        name: &str,
+    ) -> SyscallResult {
         Err(Errno::EPERM)
     }
 }
@@ -172,21 +188,40 @@ impl dyn Inode {
         Ok(0)
     }
 
-    pub async fn lookup_with_mount(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
-        let inode = self.metadata().inner.lock().mounts.get(name).map(Arc::clone);
-        match inode {
-            Some(inode) => Ok(inode),
-            None => self.lookup(name).await,
+    pub async fn list<'a>(self: &'a Arc<Self>, idx: usize) -> SyscallResult<ChildIter<'a>> {
+        let mut inner = self.metadata().inner.lock();
+        if !inner.children_loaded {
+            self.clone().load_children(&mut inner).await?;
         }
+        Ok(ChildIter { inner, idx })
+    }
+
+    pub async fn lookup_name(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+        let mut inner = self.metadata().inner.lock();
+        if !inner.children_loaded {
+            self.clone().load_children(&mut inner).await?;
+        }
+        let mount = inner.mounts.get(name).map(Arc::clone);
+        match mount {
+            Some(inode) => Ok(inode),
+            None => inner.children.get(name).map(|child| child.inode.clone()).ok_or(Errno::ENOENT),
+        }
+    }
+
+    pub async fn lookup_idx(self: Arc<Self>, idx: usize) -> SyscallResult<Arc<dyn Inode>> {
+        let mut inner = self.metadata().inner.lock();
+        if !inner.children_loaded {
+            self.clone().load_children(&mut inner).await?;
+        }
+        inner.children.values().nth(idx).map(|child| child.inode.clone()).ok_or(Errno::ENOENT)
     }
 
     pub async fn lookup_relative(self: Arc<Self>, relative_path: &str) -> SyscallResult<Arc<dyn Inode>> {
         assert!(!is_absolute_path(relative_path));
         let mut inode = self;
         for name in split_path!(relative_path) {
-            match name {
-                ".." => {
-                    let parent = inode.metadata().inner.lock().parent.clone();
+            if name == ".." {
+                if let Some(parent) = inode.metadata().parent.clone() {
                     inode = match parent.upgrade() {
                         Some(parent) => parent,
                         None => {
@@ -198,17 +233,40 @@ impl dyn Inode {
                         }
                     }
                 }
-                _ => inode = inode.lookup_with_mount(name).await?,
+            } else {
+                inode = inode.lookup_name(name).await?;
             }
         }
         Ok(inode)
     }
+
+    pub async fn create(self: Arc<Self>, mode: InodeMode, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+        let mut inner = self.metadata().inner.lock();
+        let child = self.clone().do_create(&mut inner, mode, name).await?;
+        let inode = child.inode.clone();
+        inner.children.insert(name.to_string(), child);
+        Ok(inode)
+    }
+
+    pub async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult {
+        let mut inner = self.metadata().inner.lock();
+        self.clone().do_unlink(&mut inner, name).await?;
+        inner.children.remove(name);
+        Ok(())
+    }
 }
 
-struct FakeInode;
+pub struct ChildIter<'a> {
+    inner: MutexGuard<'a, InodeMetaInner>,
+    idx: usize,
+}
 
-impl Inode for FakeInode {
-    fn metadata(&self) -> &InodeMeta {
-        unimplemented!("Fake")
+impl Iterator for ChildIter<'_> {
+    type Item = Arc<dyn Inode>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let inode = self.inner.children.values().nth(self.idx).map(|child| child.inode.clone());
+        self.idx += 1;
+        inode
     }
 }
