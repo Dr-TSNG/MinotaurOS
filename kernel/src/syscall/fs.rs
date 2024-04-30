@@ -7,7 +7,7 @@ use log::{debug, warn};
 use zerocopy::{AsBytes, FromBytes};
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX};
+use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
 use crate::fs::pipe::Pipe;
@@ -483,5 +483,56 @@ pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, _flags: u32)
         }
         inner.ctime = now;
     });
+    Ok(0)
+}
+
+pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, new_path: usize, flags: u32) -> SyscallResult<usize> {
+    let flags = RenameFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
+    let proc_inner = current_process().inner.lock();
+    let old_path = match old_path {
+        0 => ".",
+        _ => proc_inner.addr_space.user_slice_str(VirtAddr(old_path), PATH_MAX)?,
+    };
+    let new_path = match new_path {
+        0 => ".",
+        _ => proc_inner.addr_space.user_slice_str(VirtAddr(new_path), PATH_MAX)?,
+    };
+    debug!(
+        "renameat: old_dirfd: {}, old_path: {:?}, new_dirfd: {}, new_path: {:?}, flags: {:?}",
+        old_dirfd, old_path, new_dirfd, new_path, flags,
+    );
+    let (old_parent, old_name) = old_path.rsplit_once('/').unwrap_or((".", old_path));
+    let (new_parent, new_name) = new_path.rsplit_once('/').unwrap_or((".", new_path));
+    let old_parent = resolve_path(&proc_inner, old_dirfd, old_parent).await?;
+    let new_parent = resolve_path(&proc_inner, new_dirfd, new_parent).await?;
+    let old_inode = old_parent.clone().lookup_name(old_name).await?;
+    let new_inode = new_parent.clone().lookup_name(new_name).await;
+    match flags {
+        RenameFlags::RENAME_DEFAULT => {
+            if new_inode.is_ok() {
+                new_parent.clone().unlink(new_name).await?;
+            }
+            old_parent.unlink(old_name).await?;
+            new_parent.movein(new_name, old_inode).await?;
+        }
+        RenameFlags::RENAME_NOREPLACE => {
+            if new_inode.is_ok() {
+                return Err(Errno::EEXIST);
+            }
+            old_parent.unlink(old_name).await?;
+            new_parent.movein(new_name, old_inode).await?;
+        }
+        RenameFlags::RENAME_EXCHANGE => {
+            let new_inode = new_inode?;
+            old_parent.clone().unlink(old_name).await?;
+            new_parent.clone().unlink(new_name).await?;
+            old_parent.movein(new_name, new_inode).await?;
+            new_parent.movein(old_name, old_inode).await?;
+        }
+        _ => {
+            warn!("[renameat] Invalid flags: {:?}", flags);
+            return Err(Errno::EINVAL);
+        }
+    }
     Ok(0)
 }

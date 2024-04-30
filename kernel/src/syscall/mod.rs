@@ -210,7 +210,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Madvise
         SyscallCode::Wait4 => async_syscall!(sys_wait4, args[0], args[1], args[2] as u32, args[3]),
         // SyscallCode::Prlimit
-        // SyscallCode::Renameat2
+        SyscallCode::Renameat2 => async_syscall!(sys_renameat2, args[0] as FdNum, args[1], args[2] as FdNum, args[3], args[4] as u32),
         // SyscallCode::Seccomp
         // SyscallCode::Getrandom
         // SyscallCode::MemfdCreate

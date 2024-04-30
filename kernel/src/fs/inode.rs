@@ -4,6 +4,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use core::any::Any;
 use async_trait::async_trait;
+use downcast_rs::{DowncastSync, impl_downcast};
 use log::warn;
 use crate::fs::ffi::InodeMode;
 use crate::fs::file::File;
@@ -28,7 +29,7 @@ pub struct InodeMeta {
     /// 父目录
     pub parent: Option<Weak<dyn Inode>>,
     /// 页面缓存
-    pub page_cache: Option<PageCache>,
+    pub page_cache: Option<Arc<PageCache>>,
     /// 可变数据
     pub inner: Arc<Mutex<InodeMetaInner>>,
 }
@@ -78,7 +79,7 @@ impl InodeMeta {
         name: String,
         path: String,
         parent: Option<Arc<dyn Inode>>,
-        page_cache: Option<PageCache>,
+        page_cache: Option<Arc<PageCache>>,
         atime: TimeSpec,
         mtime: TimeSpec,
         ctime: TimeSpec,
@@ -99,19 +100,29 @@ impl InodeMeta {
         let parent = parent.map(|parent| Arc::downgrade(&parent));
         Self { ino, dev, mode, name, path, parent, page_cache, inner: Arc::new(Mutex::new(inner)) }
     }
+
+    pub fn movein(
+        inode: &dyn Inode,
+        name: String,
+        path: String,
+        parent: Arc<dyn Inode>,
+    ) -> Self {
+        Self {
+            ino: inode.metadata().ino,
+            dev: inode.metadata().dev,
+            mode: inode.metadata().mode,
+            name,
+            path,
+            parent: Some(Arc::downgrade(&parent)),
+            page_cache: inode.page_cache().clone(),
+            inner: inode.metadata().inner.clone(),
+        }
+    }
 }
 
 #[allow(unused)]
 #[async_trait]
-pub trait Inode: Send + Sync {
-    /// 获取 Inode 元数据
-    fn metadata(&self) -> &InodeMeta;
-
-    /// 打开一个 Inode，返回打开的文件
-    fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
-        Err(Errno::EPERM)
-    }
-
+pub(super) trait InodeInternal {
     /// 从 `offset` 处读取 `buf`，绕过缓存
     async fn read_direct(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         Err(Errno::EPERM)
@@ -145,6 +156,16 @@ pub trait Inode: Send + Sync {
         Err(Errno::EPERM)
     }
 
+    /// 将文件移动到当前目录下
+    async fn do_movein(
+        self: Arc<Self>,
+        inner: &mut InodeMetaInner,
+        name: &str,
+        inode: Arc<dyn Inode>,
+    ) -> SyscallResult<InodeChild> {
+        Err(Errno::EPERM)
+    }
+
     /// 在当前目录下删除文件
     async fn do_unlink(
         self: Arc<Self>,
@@ -155,9 +176,22 @@ pub trait Inode: Send + Sync {
     }
 }
 
+#[allow(private_bounds)]
+#[async_trait]
+pub trait Inode: DowncastSync + InodeInternal {
+    /// 获取 Inode 元数据
+    fn metadata(&self) -> &InodeMeta;
+
+    /// 打开一个 Inode，返回打开的文件
+    fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
+        Err(Errno::EPERM)
+    }
+}
+impl_downcast!(sync Inode);
+
 impl dyn Inode {
-    pub fn page_cache(&self) -> Option<&PageCache> {
-        self.metadata().page_cache.as_ref()
+    pub fn page_cache(&self) -> Option<Arc<PageCache>> {
+        self.metadata().page_cache.clone()
     }
 
     pub async fn read(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
@@ -248,7 +282,14 @@ impl dyn Inode {
         Ok(inode)
     }
 
-    pub async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult {
+    pub async fn movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>) -> SyscallResult {
+        let mut inner = self.metadata().inner.lock();
+        let child = self.clone().do_movein(&mut inner, name, inode).await?;
+        inner.children.insert(child.inode.metadata().name.clone(), child);
+        Ok(())
+    }
+
+    pub async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult<()> {
         let mut inner = self.metadata().inner.lock();
         self.clone().do_unlink(&mut inner, name).await?;
         inner.children.remove(name);

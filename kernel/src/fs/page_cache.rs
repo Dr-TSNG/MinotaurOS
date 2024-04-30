@@ -1,4 +1,5 @@
 use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
 use core::cmp::min;
 use crate::arch::{PAGE_SIZE, PhysPageNum};
 use crate::fs::inode::Inode;
@@ -22,10 +23,10 @@ impl Page {
 }
 
 impl PageCache {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
             pages: Mutex::new(BTreeMap::new()),
-        }
+        })
     }
 
     pub fn ppn_of(&self, page_num: usize) -> Option<PhysPageNum> {
