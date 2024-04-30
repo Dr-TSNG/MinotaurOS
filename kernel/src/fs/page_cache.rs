@@ -116,7 +116,7 @@ impl PageCache {
         let mut pages = self.pages.lock();
 
         let page_num = size as usize / PAGE_SIZE;
-        pages.retain(|&k, _| k < page_num);
+        pages.retain(|&k, _| k <= page_num);
         if let Some(page) = pages.get_mut(&page_num) {
             let page_buf = page.frame.ppn.byte_array();
             page_buf[size as usize % PAGE_SIZE..].fill(0);
