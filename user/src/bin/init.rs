@@ -26,7 +26,7 @@ fn execute_cmd(cmd: &[u8]) {
 }
 
 fn busybox_test() {
-    let busybox_cmd = include_bytes!("../test/busybox_cmd.txt");
+    let busybox_cmd = include_bytes!("../test/busybox_cmd.sh");
     execute_cmd(busybox_cmd);
 }
 

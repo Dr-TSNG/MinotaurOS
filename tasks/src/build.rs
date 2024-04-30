@@ -86,7 +86,7 @@ fn build_user(config: &BuildConfig) -> Result<()> {
         .current_dir("user")
         .arg("build")
         .offline(config.offline)
-        .release(config.release)
+        .release(true)
         .spawn()?.wait()?
         .exit_ok()?;
     Ok(())

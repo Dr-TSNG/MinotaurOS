@@ -2,10 +2,6 @@ use alloc::vec::Vec;
 use core::arch::global_asm;
 use crate::sync::once::LateInit;
 
-#[cfg(debug_assertions)]
-global_asm!(include_str!("debug.asm"));
-
-#[cfg(not(debug_assertions))]
 global_asm!(include_str!("release.asm"));
 
 extern {
