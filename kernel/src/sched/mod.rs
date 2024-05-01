@@ -13,7 +13,8 @@ use crate::process::thread::Thread;
 use crate::processor::context::{HartContext, UserTask};
 use crate::processor::hart::local_hart;
 use crate::result::SyscallResult;
-use crate::sched::time::{current_time, TimeoutFuture};
+use crate::sched::ffi::{CLOCK_MONOTONIC, CLOCK_REALTIME};
+use crate::sched::time::{current_time, GLOBAL_CLOCK, TimeoutFuture};
 use crate::trap::user::{check_signal, trap_from_user, trap_return};
 
 #[pin_project]
@@ -111,4 +112,9 @@ pub fn spawn_user_thread(thread: Arc<Thread>) {
     let (runnable, task) = executor::spawn(future);
     runnable.schedule();
     task.detach();
+}
+
+pub fn init() {
+    GLOBAL_CLOCK.set(CLOCK_REALTIME, Duration::ZERO);
+    GLOBAL_CLOCK.set(CLOCK_MONOTONIC, Duration::ZERO);
 }

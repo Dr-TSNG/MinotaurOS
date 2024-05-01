@@ -78,6 +78,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     println!("| dtb physical address | {:#13x} |", dtb_paddr);
     println!("----------------------------------------");
 
+    sched::init();
     trap::init();
     mm::vm_init(true)?;
     driver::init_driver()?;

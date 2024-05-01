@@ -4,6 +4,11 @@ use zerocopy::{AsBytes, FromBytes, FromZeroes};
 pub const UTIME_NOW: i64 = 1073741823;
 pub const UTIME_OMIT: i64 = 1073741822;
 
+pub const CLOCK_REALTIME: usize = 0;
+pub const CLOCK_MONOTONIC: usize = 1;
+pub const CLOCK_PROCESS_CPUTIME_ID: usize = 2;
+pub const CLOCK_THREAD_CPUTIME_ID: usize = 3;
+
 #[derive(Copy, Clone, Debug, Default, AsBytes, FromZeroes, FromBytes)]
 #[repr(C)]
 pub struct TimeSpec {
