@@ -4,7 +4,7 @@ use alloc::vec;
 use core::cmp::min;
 use core::mem::size_of;
 use log::{debug, warn};
-use zerocopy::{AsBytes, FromBytes};
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags};
@@ -58,9 +58,10 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
 }
 
 pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
+    let cmd = FcntlCmd::try_from(cmd).map_err(|_| Errno::EINVAL)?;
+    debug!("[fcntl] fd: {}, cmd: {:?}, arg2: {}", fd, cmd, arg2);
     let mut proc_inner = current_process().inner.lock();
     let mut fd_impl = proc_inner.fd_table.get(fd)?;
-    let cmd = FcntlCmd::try_from(cmd).map_err(|_| Errno::EINVAL)?;
     match cmd {
         FcntlCmd::F_DUPFD => {
             return proc_inner.fd_table.put(fd_impl, arg2 as FdNum).map(|fd| fd as usize);
@@ -102,13 +103,13 @@ pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4
 pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
-    debug!("mkdirat: fd: {}, path: {:?}, mode: {:?}", dirfd, path, mode);
+    debug!("[mkdirat] fd: {}, path: {:?}, mode: {:?}", dirfd, path, mode);
     let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
     let inode = resolve_path(&mut proc_inner, dirfd, parent).await?;
-    if inode.metadata().mode != InodeMode::DIR {
+    if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
     }
-    inode.create(InodeMode::DIR, name).await?;
+    inode.create(InodeMode::IFDIR, name).await?;
     Ok(0)
 }
 
@@ -121,11 +122,11 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
         0 => ".",
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
     };
-    debug!("unlinkat: dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
+    debug!("[unlinkat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
     let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
     let parent = resolve_path(&proc_inner, dirfd, parent).await?;
     let inode = parent.clone().lookup_name(name).await?;
-    if inode.metadata().mode == InodeMode::DIR {
+    if inode.metadata().mode == InodeMode::IFDIR {
         if flags & AT_REMOVEDIR == 0 {
             return Err(Errno::EISDIR);
         }
@@ -154,7 +155,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
 pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
-    if inode.metadata().mode != InodeMode::DIR {
+    if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
     }
     // TODO: fstatfs
@@ -195,7 +196,7 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
         0 => ".",
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
     };
-    debug!("openat: dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
+    debug!("[openat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
     let inode = match resolve_path(&mut proc_inner, dirfd, path).await {
         Ok(inode) => inode,
         Err(Errno::ENOENT) if flags.contains(OpenFlags::O_CREAT) => {
@@ -238,29 +239,28 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     let mut file_inner = fd_impl.file.metadata().inner.lock().await;
     let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
-    if inode.metadata().mode != InodeMode::DIR {
+    if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
     }
     let mut cur = buf;
-    for child in inode.list(file_inner.pos as usize).await? {
-        let name = CString::new(child.metadata().name.as_str()).unwrap();
+    for (idx, child) in inode.list(file_inner.pos as usize).await?.enumerate() {
+        let name = match idx {
+            0 => CString::new(".").unwrap(),
+            1 => CString::new("..").unwrap(),
+            _ => CString::new(child.metadata().name.as_str()).unwrap(),
+        };
         let name_bytes = name.as_bytes_with_nul();
         let dirent_size = MAX_DIRENT_SIZE - (MAX_NAME_LEN - name_bytes.len());
         if cur + dirent_size > buf + count as usize {
             break;
         }
-        let mut dirent = LinuxDirent {
-            d_ino: child.metadata().ino as u64,
-            d_off: 0,
-            d_reclen: dirent_size as u16,
-            d_type: DirentType::from(child.metadata().mode).bits(),
-            d_name: [0; 256],
-        };
+        let mut dirent: LinuxDirent = FromZeroes::new_zeroed();
+        dirent.d_ino = child.metadata().ino as u64;
+        dirent.d_reclen = dirent_size as u16;
+        dirent.d_type = DirentType::from(child.metadata().mode).bits();
         dirent.d_name[..name_bytes.len()].copy_from_slice(name_bytes);
         let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(cur), dirent_size)?;
-        unsafe {
-            user_buf.as_mut_ptr().cast::<LinuxDirent>().write(dirent);
-        }
+        user_buf.copy_from_slice(&dirent.as_bytes()[..dirent_size]);
         file_inner.pos += 1;
         cur += dirent_size;
     }
@@ -504,7 +504,7 @@ pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, 
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(new_path), PATH_MAX)?,
     };
     debug!(
-        "renameat: old_dirfd: {}, old_path: {:?}, new_dirfd: {}, new_path: {:?}, flags: {:?}",
+        "[renameat] old_dirfd: {}, old_path: {:?}, new_dirfd: {}, new_path: {:?}, flags: {:?}",
         old_dirfd, old_path, new_dirfd, new_path, flags,
     );
     let (old_parent, old_name) = old_path.rsplit_once('/').unwrap_or((".", old_path));

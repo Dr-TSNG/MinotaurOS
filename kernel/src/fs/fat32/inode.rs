@@ -55,7 +55,7 @@ impl FAT32Inode {
             metadata: InodeMeta::new(
                 INO_POOL.fetch_add(1, Ordering::Acquire),
                 fs.device.metadata().dev_id,
-                InodeMode::DIR,
+                InodeMode::IFDIR,
                 "/".to_string(),
                 "/".to_string(),
                 parent,
@@ -80,7 +80,7 @@ impl FAT32Inode {
         dir: FAT32Dirent,
     ) -> SyscallResult<Arc<Self>> {
         let (mode, page_cache) = match dir.attr.contains(FileAttr::ATTR_DIRECTORY) {
-            true => (InodeMode::DIR, None),
+            true => (InodeMode::IFDIR, None),
             false => (InodeMode::IFREG, Some(PageCache::new())),
         };
         let path = format!("{}/{}", parent.metadata().path, dir.name);
@@ -245,7 +245,7 @@ impl InodeInternal for FAT32Inode {
         }
         let ext = &mut *self.ext.lock().await;
         let cluster = fs.alloc_cluster().await?;
-        let attr = if mode == InodeMode::DIR { FileAttr::ATTR_DIRECTORY } else { FileAttr::empty() };
+        let attr = if mode == InodeMode::IFDIR { FileAttr::ATTR_DIRECTORY } else { FileAttr::empty() };
         let dirent = FAT32Dirent::new(name.to_string(), attr, cluster as u32, 0);
         let (dir_pos, dir_len) = fs.append_dir(&mut ext.clusters, &mut ext.dir_occupy, &dirent).await?;
         let now = current_time();
@@ -269,7 +269,7 @@ impl InodeInternal for FAT32Inode {
                 clusters: vec![cluster],
             })),
         });
-        if mode == InodeMode::DIR {
+        if mode == InodeMode::IFDIR {
             let child_ext = &mut *inode.ext.lock().await;
             let parent_dir = FAT32Dirent::new("..".to_string(), FileAttr::ATTR_DIRECTORY, ext.clusters[0] as u32, 0);
             let mut child_dir = dirent.clone();
@@ -297,7 +297,7 @@ impl InodeInternal for FAT32Inode {
 
         match inode.downcast_arc::<FAT32Inode>() {
             Ok(inode) => {
-                let attr = if inode.metadata().mode == InodeMode::DIR { FileAttr::ATTR_DIRECTORY } else { FileAttr::empty() };
+                let attr = if inode.metadata().mode == InodeMode::IFDIR { FileAttr::ATTR_DIRECTORY } else { FileAttr::empty() };
                 let cluster = inode.ext.lock().await.clusters[0];
                 let dirent = FAT32Dirent::new(name.to_string(), attr, cluster as u32, 0);
                 let (dir_pos, dir_len) = fs.append_dir(&mut ext.clusters, &mut ext.dir_occupy, &dirent).await?;

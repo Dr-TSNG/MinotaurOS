@@ -97,7 +97,6 @@ pub fn sys_gettid() -> SyscallResult<usize> {
 
 pub fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize) -> SyscallResult<usize> {
     let flags = CloneFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
-    debug!("[sys_clone] flags: {:?}", flags);
     if flags.contains(CloneFlags::CLONE_VM) {
         current_process().clone_thread(flags, stack, tls, ptid, ctid)
     } else {
@@ -108,7 +107,6 @@ pub fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize)
 pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let mut path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
-    debug!("[sys_execve] path: {:?}", path);
 
     let mut args_vec: Vec<CString> = Vec::new();
     let mut envs_vec: Vec<CString> = Vec::new();
@@ -138,7 +136,7 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     envs_vec.push(CString::new("LD_LIBRARY_PATH=/").unwrap());
 
     let inode = resolve_path(&proc_inner, AT_FDCWD, path).await?;
-    if inode.metadata().mode == InodeMode::DIR {
+    if inode.metadata().mode == InodeMode::IFDIR {
         return Err(Errno::EISDIR);
     }
 
@@ -150,12 +148,12 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
 }
 
 pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
-    info!("[sys_wait4] pid: {:?}, wstatus: {:?}, options: {:?}", pid as isize, wstatus, options);
+    info!("[wait4] pid: {:?}, wstatus: {:?}, options: {:?}", pid as isize, wstatus, options);
     let options = WaitOptions::from_bits(options).ok_or(Errno::EINVAL)?;
     let ret = current_thread().event_bus.suspend_with(
         Event::all().difference(Event::CHILD_EXIT),
         WaitPidFuture::new(pid, options, wstatus),
     ).await;
-    info!("[sys_wait4] ret: {:?}", ret);
+    info!("[wait4] ret: {:?}", ret);
     ret
 }

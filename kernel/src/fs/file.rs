@@ -122,7 +122,7 @@ impl File for RegularFile {
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::DIR {
+        if inode.metadata().mode == InodeMode::IFDIR {
             return Err(Errno::EISDIR);
         }
         let mut inner = self.metadata.inner.lock().await;
@@ -133,7 +133,7 @@ impl File for RegularFile {
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::DIR {
+        if inode.metadata().mode == InodeMode::IFDIR {
             return Err(Errno::EISDIR);
         }
         let mut inner = self.metadata.inner.lock().await;
@@ -144,7 +144,7 @@ impl File for RegularFile {
 
     async fn truncate(&self, size: isize) -> SyscallResult {
         let inode = self.metadata.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::DIR {
+        if inode.metadata().mode == InodeMode::IFDIR {
             return Err(Errno::EISDIR);
         }
         inode.truncate(size).await?;
@@ -160,7 +160,7 @@ impl File for RegularFile {
 
     async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::DIR {
+        if inode.metadata().mode == InodeMode::IFDIR {
             return Err(Errno::EISDIR);
         }
         let mut inner = self.metadata.inner.lock().await;

@@ -100,27 +100,27 @@ pub enum FcntlCmd {
 #[derive(PartialEq, Debug, Clone, Copy)]
 #[repr(u32)]
 pub enum InodeMode {
-    /// socket
-    IFSOCK = 0xC000,
-    /// 符号链接
-    IFLNK = 0xA000,
-    /// 一般文件
-    IFREG = 0x8000,
+    /// FIFO
+    IFIFO = 0x1000,
+    /// 字符设备
+    IFCHR = 0x2000,
+    /// 目录
+    IFDIR = 0x4000,
     /// 块设备
     IFBLK = 0x6000,
-    /// 目录
-    DIR = 0x4000,
-    /// 字符设备
-    CHR = 0x2000,
-    /// FIFO
-    FileFIFO = 0x1000,
+    /// 一般文件
+    IFREG = 0x8000,
+    /// 符号链接
+    IFLNK = 0xA000,
+    /// socket
+    IFSOCK = 0xC000,
 }
 
 pub const AT_FDCWD: i32 = -100;
 pub const AT_REMOVEDIR: u32 = 0x200;
 
 pub const PATH_MAX: usize = 260;
-pub const MAX_NAME_LEN: usize = 256;
+pub const MAX_NAME_LEN: usize = 253;
 pub const MAX_DIRENT_SIZE: usize = size_of::<LinuxDirent>();
 
 #[repr(C)]
@@ -129,6 +129,7 @@ pub struct IoVec {
     pub len: usize,
 }
 
+#[derive(AsBytes, FromZeroes)]
 #[repr(C)]
 pub struct LinuxDirent {
     pub d_ino: u64,
@@ -155,9 +156,9 @@ bitflags! {
 impl From<InodeMode> for DirentType {
     fn from(value: InodeMode) -> Self {
         match value {
-            InodeMode::FileFIFO => DirentType::DT_FIFO,
-            InodeMode::CHR => DirentType::DT_CHR,
-            InodeMode::DIR => DirentType::DT_DIR,
+            InodeMode::IFIFO => DirentType::DT_FIFO,
+            InodeMode::IFCHR => DirentType::DT_CHR,
+            InodeMode::IFDIR => DirentType::DT_DIR,
             InodeMode::IFBLK => DirentType::DT_BLK,
             InodeMode::IFREG => DirentType::DT_REG,
             InodeMode::IFLNK => DirentType::DT_LNK,
@@ -218,10 +219,10 @@ pub struct KernelStat {
     pub st_uid: u32,
     pub st_gid: u32,
     pub st_rdev: u64,
-    pub __pad1: usize,
+    __pad1: usize,
     pub st_size: u64,
     pub st_blksize: u32,
-    pub __pad2: u32,
+    __pad2: u32,
     pub st_blocks: u64,
     pub st_atim: TimeSpec,
     pub st_mtim: TimeSpec,

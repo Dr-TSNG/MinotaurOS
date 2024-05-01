@@ -1,5 +1,5 @@
 use alloc::collections::VecDeque;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use bitflags::bitflags;
 use time::{Date, Month, Time};
@@ -189,6 +189,11 @@ impl FAT32Dirent {
     /// 添加最后的短目录项
     pub fn append_short(&mut self, short_dir: &[u8]) {
         assert!(!Self::is_long_dirent(short_dir));
+        if self.name.is_empty() {
+            let name = DirOffset::split(short_dir, DirOffset::Name, DirOffset::Attr);
+            let name = name.split(|&x| x == 0x20).next().unwrap_or(name);
+            self.name = String::from_utf8_lossy(name).to_string();
+        }
         self.attr = FileAttr::from_bits_truncate(short_dir[DirOffset::Attr as usize]);
         let acc_time = DirOffset::acc_time(short_dir);
         let wrt_time = DirOffset::wrt_time(short_dir);

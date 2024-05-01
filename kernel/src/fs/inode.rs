@@ -227,7 +227,7 @@ impl dyn Inode {
         if !inner.children_loaded {
             self.clone().load_children(&mut inner).await?;
         }
-        Ok(ChildIter { inner, idx })
+        Ok(ChildIter { inode: self, inner, idx })
     }
 
     pub async fn lookup_name(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
@@ -298,6 +298,7 @@ impl dyn Inode {
 }
 
 pub struct ChildIter<'a> {
+    inode: &'a Arc<dyn Inode>,
     inner: MutexGuard<'a, InodeMetaInner>,
     idx: usize,
 }
@@ -306,7 +307,11 @@ impl Iterator for ChildIter<'_> {
     type Item = Arc<dyn Inode>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let inode = self.inner.children.values().nth(self.idx).map(|child| child.inode.clone());
+        let inode = match self.idx {
+            0 => Some(self.inode.clone()),
+            1 => Some(self.inode.metadata().parent.clone().and_then(|p| p.upgrade()).unwrap_or(self.inode.clone())),
+            _ => self.inner.children.values().nth(self.idx - 2).map(|child| child.inode.clone()),
+        };
         self.idx += 1;
         inode
     }
