@@ -1,27 +1,41 @@
+use alloc::collections::VecDeque;
 use alloc::fmt;
+use alloc::string::String;
+use alloc::sync::Arc;
 use core::fmt::Arguments;
+use lazy_static::lazy_static;
+
 use crate::driver::tty::DEFAULT_TTY;
 use crate::sync::block_on;
+use crate::sync::mutex::Mutex;
 
-static mut PREINIT_BUF: [u8; 4096] = [0; 4096];
-static mut PREINIT_BUF_LEN: usize = 0;
+const MAX_LINES: usize = 80;
+
+#[derive(Default)]
+pub struct DiagMessage {
+    pub start: usize,
+    pub current: usize,
+    pub buf: VecDeque<Arc<String>>,
+}
+
+lazy_static! {
+    pub static ref DMESG: Mutex<DiagMessage> = Mutex::default();
+}
 
 pub fn print(args: Arguments) {
     let fmt = fmt::format(args);
-    let bytes = fmt.as_bytes();
+    let mut dmesg = DMESG.lock();
+    dmesg.buf.push_back(Arc::new(fmt));
+    if dmesg.buf.len() > MAX_LINES {
+        dmesg.start += 1;
+        dmesg.buf.pop_front();
+    }
+
     if DEFAULT_TTY.is_initialized() {
-        unsafe {
-            if PREINIT_BUF_LEN > 0 {
-                let preinit_buf = &PREINIT_BUF[..PREINIT_BUF_LEN];
-                let _ = block_on(DEFAULT_TTY.write(preinit_buf));
-                PREINIT_BUF_LEN = 0;
-            }
-        }
-        let _ = block_on(DEFAULT_TTY.write(bytes));
-    } else {
-        unsafe {
-            PREINIT_BUF[PREINIT_BUF_LEN..PREINIT_BUF_LEN + bytes.len()].copy_from_slice(bytes);
-            PREINIT_BUF_LEN += bytes.len();
+        while dmesg.current < dmesg.start + dmesg.buf.len() {
+            let bytes = dmesg.buf[dmesg.current - dmesg.start].as_bytes();
+            let _ = block_on(DEFAULT_TTY.write(bytes));
+            dmesg.current += 1;
         }
     }
 }

@@ -1,7 +1,7 @@
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use log::{debug, info};
+use log::info;
 use crate::arch::VirtAddr;
 use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;

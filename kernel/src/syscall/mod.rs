@@ -177,7 +177,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Nanosleep => async_syscall!(sys_nanosleep, args[0], args[1]),
         // SyscallCode::Setitimer
         // SyscallCode::ClockGettime
-        // SyscallCode::Syslog
+        SyscallCode::Syslog => syscall!(sys_syslog, args[0] as i32, args[1], args[2]),
         SyscallCode::SchedYield => async_syscall!(sys_yield),
         SyscallCode::Kill => syscall!(sys_kill, args[0], args[1]),
         SyscallCode::Tkill => syscall!(sys_tkill, args[0], args[1], args[2]),
