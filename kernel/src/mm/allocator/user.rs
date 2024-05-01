@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::cmp::max;
 use bitvec_rs::BitVec;
 use log::warn;
-use crate::arch::{kvaddr_to_paddr, PhysPageNum};
+use crate::arch::{kvaddr_to_paddr, PAGE_SIZE, PhysPageNum};
 use crate::config::LINKAGE_EKERNEL;
 use crate::driver::GLOBAL_MAPPINGS;
 use crate::println;
@@ -106,12 +106,19 @@ impl Segment {
 }
 
 /// 分配连续的用户页帧
-/// 
+///
 /// SAFETY: 保证分配的页已经清零
 pub fn alloc_user_frames(pages: usize) -> SyscallResult<UserFrameTracker> {
     let tracker = USER_ALLOCATOR.lock().alloc(pages)?;
     tracker.ppn.byte_array().fill(0);
     Ok(tracker)
+}
+
+pub fn free_user_memory() -> usize {
+    let pages = USER_ALLOCATOR.lock().0.iter()
+        .flat_map(|seg| seg.bitmap.as_bytes())
+        .fold(0, |acc, byte| acc + byte.count_zeros());
+    pages as usize * PAGE_SIZE
 }
 
 pub fn init() {

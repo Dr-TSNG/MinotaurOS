@@ -15,17 +15,17 @@ impl<T> LateInit<T> {
         self.0.is_completed()
     }
 
-    pub fn get(&self) -> &T {
-        self.0.get().unwrap()
-    }
-
-    pub fn get_mut(&mut self) -> &mut T {
-        self.0.get_mut().unwrap()
-    }
-
     pub fn init(&self, val: T) {
         debug_assert!(self.0.get().is_none(), "LateInit::init called twice");
         self.0.call_once(|| val);
+    }
+
+    fn get(&self) -> &T {
+        self.0.get().unwrap()
+    }
+
+    fn get_mut(&mut self) -> &mut T {
+        self.0.get_mut().unwrap()
     }
 }
 

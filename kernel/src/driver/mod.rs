@@ -141,6 +141,12 @@ pub fn init_driver() -> SyscallResult<()> {
     Ok(())
 }
 
+pub fn total_memory() -> usize {
+    GLOBAL_MAPPINGS.iter().fold(0, |acc, map| {
+        if map.name.starts_with("[memory") { acc + map.size } else { acc }
+    })
+}
+
 fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
     let mut board_info = BoardInfo {
         smp: 0,

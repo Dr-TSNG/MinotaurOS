@@ -197,7 +197,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Geteuid => syscall!(sys_geteuid),
         SyscallCode::Getegid => syscall!(sys_getegid),
         SyscallCode::Gettid => syscall!(sys_gettid),
-        // SyscallCode::Sysinfo
+        SyscallCode::Sysinfo => syscall!(sys_sysinfo, args[0]),
         // SyscallCode::Shmget
         // SyscallCode::Shmctl
         // SyscallCode::Shmat

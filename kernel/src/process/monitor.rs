@@ -18,6 +18,12 @@ impl ProcessMonitorInner {
         self.0.remove(&pid);
     }
 
+    pub fn count(&self) -> usize {
+        self.0.values().fold(0, |acc, p| {
+            if p.strong_count() > 0 { acc + 1 } else { acc }
+        })
+    }
+
     pub fn get(&self, pid: Pid) -> Weak<Process> {
         self.0.get(&pid).cloned().unwrap_or(Weak::new())
     }
