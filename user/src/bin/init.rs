@@ -5,7 +5,7 @@ extern crate alloc;
 extern crate user_lib;
 
 use user_lib::println;
-use user_lib::syscall::{OpenFlags, sys_close, sys_execve, sys_exit, sys_fork, sys_mkdir, sys_open, sys_waitpid, sys_write};
+use user_lib::syscall::{sys_execve, sys_exit, sys_fork, sys_mkdir, sys_waitpid};
 
 fn execute(path: &str, argv: &[&str], envp: &[&str]) {
     let pid = sys_fork() as usize;
@@ -18,21 +18,29 @@ fn execute(path: &str, argv: &[&str], envp: &[&str]) {
     sys_waitpid(pid, &mut result);
 }
 
-fn execute_cmd(cmd: &[u8]) {
-    let fd = sys_open("/current_test.sh", OpenFlags::O_WRONLY | OpenFlags::O_CREAT);
-    sys_write(fd, cmd);
-    sys_close(fd);
-    execute("/busybox", &["sh", "/current_test.sh"], &["PATH=/:/bin", "ASH_STANDALONE=1"]);
+fn execute_script(script: &str) {
+    execute("/busybox", &["sh", script], &["PATH=/:/bin", "ASH_STANDALONE=1"]);
+}
+
+fn time_test() {
+    println!("run time-test");
+    execute("/time-test", &[], &[]);
 }
 
 fn busybox_test() {
-    let busybox_cmd = include_bytes!("../test/busybox_cmd.sh");
-    execute_cmd(busybox_cmd);
+    println!("run busybox_testcode.sh");
+    execute_script("/busybox_testcode.sh");
+}
+
+fn lua_test() {
+    println!("run lua_testcode.sh");
+    execute_script("/lua_testcode.sh");
 }
 
 fn run_testsuits() {
-    execute("/time-test", &[], &[]);
+    time_test();
     busybox_test();
+    lua_test();
 }
 
 #[no_mangle]
