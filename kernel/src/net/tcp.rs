@@ -1,15 +1,15 @@
+use crate::fs::ffi::InodeMode::{FileFIFO, IFSOCK};
 use alloc::vec;
 use log::info;
 use smoltcp::phy::Medium;
+use smoltcp::socket::tcp;
 use smoltcp::wire::IpEndpoint;
 use smoltcp::{iface::SocketHandle, wire::IpListenEndpoint};
-use smoltcp::socket::tcp;
-use crate::fs::ffi::InodeMode::{FileFIFO, IFSOCK};
 
 use crate::fs::file::{File, FileMeta};
 use crate::net::iface::NET_INTERFACE;
-use crate::net::port::{PORT_ALLOCATOR, PortAllocator};
-use crate::net::socket::{BUFFER_SIZE, Socket};
+use crate::net::port::{PortAllocator, PORT_ALLOCATOR};
+use crate::net::socket::{Socket, SocketType, BUFFER_SIZE};
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 
@@ -34,15 +34,15 @@ impl TcpSocket {
         let socket = tcp::Socket::new(tcp_rx_buffer, tcp_tx_buffer);
         // 将socket加入interface，返回handler
         let handler = NET_INTERFACE.add_tcpsocket(socket);
-        info!("[TcpSocket::new] new{}",handler);
+        info!("[TcpSocket::new] new{}", handler);
         NET_INTERFACE.poll();
         // 没有处理分配完port，不能再多分配，返回None的情况。。。
         let port = PORT_ALLOCATOR.take().unwrap();
-        info!("[TcpSocket handle{} : port is {}]",handler,port);
-        Self{
+        info!("[TcpSocket handle{} : port is {}]", handler, port);
+        Self {
             socket_handle: handler,
-            inner: Mutex::new(TcpInner{
-                local_endpoint: IpListenEndpoint{addr:None,port,},
+            inner: Mutex::new(TcpInner {
+                local_endpoint: IpListenEndpoint { addr: None, port },
                 remote_endpoint: None,
                 last_state: tcp::State::Closed,
                 recv_buf_size: BUFFER_SIZE,
@@ -111,6 +111,10 @@ impl Socket for TcpSocket {
     }
 
     fn dis_connect(&self, enabled: bool) -> SyscallResult {
+        todo!()
+    }
+
+    fn socket_type(&self) -> SocketType {
         todo!()
     }
 }
