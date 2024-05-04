@@ -94,7 +94,7 @@ impl From<Signal> for SigSet {
     }
 }
 
-#[derive(TryFromPrimitive)]
+#[derive(Debug, TryFromPrimitive)]
 #[repr(i32)]
 pub enum SigSetOp {
     BLOCK = 0,

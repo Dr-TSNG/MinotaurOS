@@ -1,4 +1,5 @@
 use core::mem::size_of;
+use log::debug;
 use crate::arch::VirtAddr;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
@@ -9,6 +10,7 @@ use crate::signal::SignalHandler;
 pub async fn sys_rt_sigsuspend(mask: usize) -> SyscallResult<usize> {
     let mask = current_process().inner.lock().addr_space.user_slice_r(VirtAddr(mask), size_of::<SigSet>())?;
     let mask = unsafe { mask.as_ptr().cast::<SigSet>().read() };
+    debug!("[sigsuspend] mask: {:?}", mask);
     let mask_bak = current_thread().signals.get_mask();
     current_thread().signals.set_mask(mask);
     current_thread().event_bus.wait(Event::all()).await;
@@ -19,6 +21,7 @@ pub async fn sys_rt_sigsuspend(mask: usize) -> SyscallResult<usize> {
 
 pub fn sys_rt_sigaction(sig: i32, act: usize, oact: usize) -> SyscallResult<usize> {
     let signal = Signal::try_from(sig as usize).map_err(|_| Errno::EINVAL)?;
+    debug!("[sigaction] signal: {:?} new: {}", signal, act == 0);
     let proc_inner = current_process().inner.lock();
 
     if oact != 0 {
@@ -54,9 +57,11 @@ pub fn sys_rt_sigprocmask(how: i32, nset: usize, oset: usize) -> SyscallResult<u
     }
 
     if nset != 0 {
+        let how = SigSetOp::try_from(how).map_err(|_| Errno::EINVAL)?;
         let nset = proc_inner.addr_space.user_slice_r(VirtAddr(nset), size_of::<SigSet>())?;
         let nset = unsafe { nset.as_ptr().cast::<SigSet>().read() };
-        match SigSetOp::try_from(how).map_err(|_| Errno::EINVAL)? {
+        debug!("[sigprocmask] how: {:?} nset: {:?} oset: {:?}", how, nset, mask);
+        match how {
             SigSetOp::BLOCK => mask.insert(nset),
             SigSetOp::SETMASK => mask = nset,
             SigSetOp::UNBLOCK => mask.remove(nset),
@@ -73,5 +78,5 @@ pub fn sys_rt_sigreturn() -> SyscallResult<usize> {
     let ucontext = unsafe { user_sp.as_ptr().cast::<UContext>().read() };
     current_thread().signals.set_mask(ucontext.uc_sigmask);
     trap_ctx.user_x = ucontext.uc_mcontext;
-    Ok(0)
+    Ok(trap_ctx.user_x[10])
 }

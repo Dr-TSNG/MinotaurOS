@@ -329,11 +329,12 @@ impl Process {
     pub fn on_child_exit(&self, pid: Pid, exit_code: i8) {
         info!("Child {} exited with code {}", pid, exit_code);
         self.inner.lock().apply_mut(|inner| {
-            inner.threads.values().for_each(|thread| {
+            for thread in inner.threads.values() {
                 if let Some(thread) = thread.upgrade() {
                     thread.recv_signal(Signal::SIGCHLD);
+                    break;
                 }
-            })
+            }
         });
     }
 }
