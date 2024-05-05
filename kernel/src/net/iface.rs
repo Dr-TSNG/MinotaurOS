@@ -1,10 +1,12 @@
 //！ 通过interface实现的方法来实现socket的获取。
 
 use crate::net::netaddress::IpAddr;
-use crate::net::tcp::TcpSocket;
+// use crate::net::tcp::TcpSocket;
+use crate::net::socket::ShutDownType;
 use crate::sched::time::current_time;
 use crate::sync::mutex::Mutex;
 use alloc::vec;
+use lazy_static::lazy_static;
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, Loopback, Medium};
 use smoltcp::socket::{udp, AnySocket};
@@ -24,11 +26,14 @@ pub struct InterfaceInner<'a> {
 }
 
 impl<'a> NetInterface<'a> {
-    pub fn new() -> Self {
-        let i_inner = InterfaceInner::new();
+    pub const fn new() -> Self {
         Self {
-            inner: Mutex::new(Some(i_inner)),
+            inner: Mutex::new(None),
         }
+    }
+
+    pub fn init(&self) {
+        *self.inner.lock() = Some(InterfaceInner::new());
     }
 
     pub fn add_socket<T>(&self, socket: T) -> SocketHandle

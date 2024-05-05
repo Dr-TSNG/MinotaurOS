@@ -15,7 +15,7 @@ pub struct PortAllocator {
 
 impl PortAllocator {
     pub fn new(max_port: u16) -> Self {
-        let decode: VecDeque<u16> = VecDeque::with_capacity(max_port as usize);
+        let mut decode: VecDeque<u16> = VecDeque::with_capacity(max_port as usize);
         for i in 0..decode.len() {
             decode[i] = i as u16;
         }

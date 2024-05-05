@@ -6,11 +6,10 @@ use smoltcp::socket;
 use smoltcp::socket::udp::PacketMetadata;
 use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
 
-use super::socket::SocketAddress;
 use crate::fs::file::{File, FileMeta};
 use crate::net::iface::NET_INTERFACE;
+use crate::net::socket::{BUFFER_SIZE, endpoint, SocketAddressV4, SocketType};
 use crate::net::socket::Socket;
-use crate::net::socket::{SocketType, BUFFER_SIZE};
 use crate::result::Errno::{EINVAL, EOPNOTSUPP};
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
@@ -56,34 +55,46 @@ impl UdpSocket {
     }
 }
 
-impl File for UdpSocket {
-    fn metadata(&self) -> &FileMeta {
-        todo!()
-    }
-
-    async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
-        todo!()
-    }
-
-    async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
-        todo!()
-    }
-}
-
 impl Socket for UdpSocket {
     fn bind(&self, addr: IpListenEndpoint) -> SyscallResult {
         NET_INTERFACE.poll();
-        NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| {
-            socket.bind(addr).ok().ok_or(SyscallResult::Err(EINVAL))
-        })?;
+        let ret = NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| {
+            socket.bind(addr)
+        });
+        if ret.is_err() == true{
+            return Err(EINVAL)
+        }
         NET_INTERFACE.poll();
         Ok(())
     }
 
     fn connect<'a>(&'a self, addr: &'a [u8]) -> SyscallResult {
-        Box::pin(async move {
-            let remote_endpoint;
+        let fut = Box::pin(async move {
+            let remote_endpoint = endpoint(addr)?;
+            let mut inner = self.inner.lock();
+            inner.remote_endpoint = Some(remote_endpoint);
+            NET_INTERFACE.poll();
+            NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| {
+                let local = socket.endpoint();
+                if local.port == 0 {
+                    let addr = SocketAddressV4::new([0; 16].as_slice());
+                    let endpoint = IpListenEndpoint::from(addr);
+                    let ret = socket.bind(endpoint);
+                    if ret.is_err() {
+                        return match ret.err().unwrap() {
+                            socket::udp::BindError::Unaddressable => Err(EINVAL),
+                            socket::udp::BindError::InvalidState => Err(EINVAL),
+                        };
+                    }
+                    Ok(())
+                } else {
+                    Ok(())
+                }
+            })?;
+            NET_INTERFACE.poll();
+            return SyscallResult::Ok(());
         });
+        Ok(())
     }
 
     fn listen(&self) -> SyscallResult {
@@ -91,7 +102,7 @@ impl Socket for UdpSocket {
     }
 
     fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult {
-        todo!()
+        SyscallResult::Err(EOPNOTSUPP)
     }
 
     fn set_send_buf_size(&self, size: usize) -> SyscallResult {
@@ -108,18 +119,11 @@ impl Socket for UdpSocket {
         SyscallResult::Err(EOPNOTSUPP)
     }
 
-    fn dis_connect(&self, enabled: bool) -> SyscallResult {
+    fn dis_connect(&self, how: u32) -> SyscallResult {
         Ok(())
     }
 
     fn socket_type(&self) -> SocketType {
-        1 << 1.into()
+        SocketType::SOCK_DGRAM
     }
 }
-
-/*
-impl Socket for UdpSocket{
-
-}
-
- */
