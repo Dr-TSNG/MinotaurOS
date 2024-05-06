@@ -8,7 +8,7 @@ use user_lib::println;
 use user_lib::syscall::{sys_execve, sys_exit, sys_fork, sys_mkdir, sys_waitpid};
 
 fn execute(path: &str, argv: &[&str], envp: &[&str]) {
-    let pid = sys_fork() as usize;
+    let pid = sys_fork();
     if pid == 0 {
         sys_execve(path, argv, envp);
         println!("!!! execve failed !!!");

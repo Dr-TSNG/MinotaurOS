@@ -113,6 +113,94 @@ bitflags! {
     }
 }
 
+#[repr(C)]
+struct TimeSpec {
+    tv_sec: usize,
+    tv_nsec: usize,
+}
+
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+pub struct SigAction {
+    pub sa_handler: usize,
+    pub sa_flags: u32,
+    pub sa_restorer: usize,
+    pub sa_mask: SigSet,
+}
+
+pub const SIGHUP: i32 = 1;
+pub const SIGINT: i32 = 2;
+pub const SIGQUIT: i32 = 3;
+pub const SIGILL: i32 = 4;
+pub const SIGTRAP: i32 = 5;
+pub const SIGABRT: i32 = 6;
+pub const SIGBUS: i32 = 7;
+pub const SIGFPE: i32 = 8;
+pub const SIGKILL: i32 = 9;
+pub const SIGUSR1: i32 = 10;
+pub const SIGSEGV: i32 = 11;
+pub const SIGUSR2: i32 = 12;
+pub const SIGPIPE: i32 = 13;
+pub const SIGALRM: i32 = 14;
+pub const SIGTERM: i32 = 15;
+pub const SIGSTKFLT: i32 = 16;
+pub const SIGCHLD: i32 = 17;
+pub const SIGCONT: i32 = 18;
+pub const SIGSTOP: i32 = 19;
+pub const SIGTSTP: i32 = 20;
+pub const SIGTTIN: i32 = 21;
+pub const SIGTTOU: i32 = 22;
+pub const SIGURG: i32 = 23;
+pub const SIGXCPU: i32 = 24;
+pub const SIGXFSZ: i32 = 25;
+pub const SIGVTALRM: i32 = 26;
+pub const SIGPROF: i32 = 27;
+pub const SIGWINCH: i32 = 28;
+pub const SIGIO: i32 = 29;
+pub const SIGPWR: i32 = 30;
+pub const SIGSYS: i32 = 31;
+
+pub const SIG_BLOCK: u32 = 0;
+pub const SIG_UNBLOCK: u32 = 1;
+pub const SIG_SETMASK: u32 = 2;
+
+bitflags! {
+    #[derive(Default)]
+    pub struct SigSet: u64 {
+        const SIGHUP    = 1 << (1 - 1);
+        const SIGINT    = 1 << (2 - 1);
+        const SIGQUIT   = 1 << (3 - 1);
+        const SIGILL    = 1 << (4 - 1);
+        const SIGTRAP   = 1 << (5 - 1);
+        const SIGABRT   = 1 << (6 - 1);
+        const SIGBUS    = 1 << (7 - 1);
+        const SIGFPE    = 1 << (8 - 1);
+        const SIGKILL   = 1 << (9 - 1);
+        const SIGUSR1   = 1 << (10 - 1);
+        const SIGSEGV   = 1 << (11 - 1);
+        const SIGUSR2   = 1 << (12 - 1);
+        const SIGPIPE   = 1 << (13 - 1);
+        const SIGALRM   = 1 << (14 - 1);
+        const SIGTERM   = 1 << (15 - 1);
+        const SIGSTKFLT = 1 << (16 - 1);
+        const SIGCHLD   = 1 << (17 - 1);
+        const SIGCONT   = 1 << (18 - 1);
+        const SIGSTOP   = 1 << (19 - 1);
+        const SIGTSTP   = 1 << (20 - 1);
+        const SIGTTIN   = 1 << (21 - 1);
+        const SIGTTOU   = 1 << (22 - 1);
+        const SIGURG    = 1 << (23 - 1);
+        const SIGXCPU   = 1 << (24 - 1);
+        const SIGXFSZ   = 1 << (25 - 1);
+        const SIGVTALRM = 1 << (26 - 1);
+        const SIGPROF   = 1 << (27 - 1);
+        const SIGWINCH  = 1 << (28 - 1);
+        const SIGIO     = 1 << (29 - 1);
+        const SIGPWR    = 1 << (30 - 1);
+        const SIGSYS    = 1 << (31 - 1);
+    }
+}
+
 pub static AT_FDCWD: i32 = -100;
 
 macro_rules! syscall {
@@ -218,6 +306,38 @@ pub fn sys_execve(path: &str, argv: &[&str], envp: &[&str]) -> isize {
     syscall!(Execve, path.as_ptr() as usize, argv.as_ptr() as usize, envp.as_ptr() as usize)
 }
 
-pub fn sys_waitpid(pid: usize, status: &mut i32) -> isize {
+pub fn sys_waitpid(pid: isize, status: &mut i32) -> isize {
     syscall!(Wait4, pid, status as *mut i32, 0, 0)
+}
+
+pub fn sys_sleep(sec: usize, nsec: usize) -> isize {
+    let ts = TimeSpec {
+        tv_sec: sec,
+        tv_nsec: nsec,
+    };
+    syscall!(Nanosleep, &ts as *const TimeSpec, 0)
+}
+
+pub fn sys_getpid() -> isize {
+    syscall!(Getpid)
+}
+
+pub fn sys_kill(pid: usize, signal: i32) -> isize {
+    syscall!(Kill, pid, signal)
+}
+
+pub fn sys_pipe(pipe: &mut [i32; 2]) -> isize {
+    syscall!(Pipe2, pipe.as_mut_ptr() as usize, 0)
+}
+
+pub fn sigaction(sig: i32, new: Option<&SigAction>, old: Option<&mut SigAction>) -> isize {
+    let new_ptr = new.map_or(0, |n| n as *const SigAction as usize);
+    let old_ptr = old.map_or(0, |o| o as *mut SigAction as usize);
+    syscall!(RtSigaction, sig as usize, new_ptr, old_ptr, 8)
+}
+
+pub fn sigprocmask(how: u32, set: Option<&SigSet>, oldset: Option<&mut SigSet>) -> isize {
+    let set_ptr = set.map_or(0, |s| s as *const SigSet as usize);
+    let oldset_ptr = oldset.map_or(0, |s| s as *mut SigSet as usize);
+    syscall!(RtSigprocmask, how as usize, set_ptr, oldset_ptr, 8)
 }

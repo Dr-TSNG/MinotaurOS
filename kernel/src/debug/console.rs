@@ -24,19 +24,24 @@ lazy_static! {
 
 pub fn print(args: Arguments) {
     let fmt = fmt::format(args);
-    let mut dmesg = DMESG.lock();
-    dmesg.buf.push_back(Arc::new(fmt));
-    if dmesg.buf.len() > MAX_LINES {
-        dmesg.start += 1;
-        dmesg.buf.pop_front();
-    }
-
-    if DEFAULT_TTY.is_initialized() {
-        while dmesg.current < dmesg.start + dmesg.buf.len() {
-            let bytes = dmesg.buf[dmesg.current - dmesg.start].as_bytes();
-            let _ = block_on(DEFAULT_TTY.write(bytes));
-            dmesg.current += 1;
+    DMESG.lock().apply_mut(|dmesg| {
+        dmesg.buf.push_back(Arc::new(fmt));
+        if dmesg.buf.len() > MAX_LINES {
+            dmesg.start += 1;
+            dmesg.buf.pop_front();
         }
+    });
+    if DEFAULT_TTY.is_initialized() {
+        dmesg_flush_tty();
+    }
+}
+
+pub fn dmesg_flush_tty() {
+    let mut dmesg = DMESG.lock();
+    while dmesg.current < dmesg.start + dmesg.buf.len() {
+        let bytes = dmesg.buf[dmesg.current - dmesg.start].as_bytes();
+        let _ = block_on(DEFAULT_TTY.write(bytes));
+        dmesg.current += 1;
     }
 }
 

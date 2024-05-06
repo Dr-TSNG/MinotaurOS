@@ -40,6 +40,7 @@ use arch::shutdown;
 use config::KERNEL_ADDR_OFFSET;
 use crate::arch::sbi;
 use crate::config::{KERNEL_PADDR_BASE, KERNEL_STACK_SIZE, LINKAGE_EBSS, LINKAGE_SBSS};
+use crate::debug::console::dmesg_flush_tty;
 use crate::driver::BOARD_INFO;
 use crate::process::Process;
 use crate::processor::hart;
@@ -83,6 +84,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     mm::vm_init(true)?;
     driver::init_driver()?;
     builtin::init();
+    dmesg_flush_tty();
 
     let data = builtin::builtin_app("init").unwrap();
     let mnt_ns = fs::init()?;
