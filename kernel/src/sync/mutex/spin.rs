@@ -14,7 +14,7 @@ pub struct SpinMutex<T: ?Sized, S: MutexStrategy> {
 
 pub struct SpinMutexGuard<'a, T: ?Sized, S: MutexStrategy> {
     mutex: &'a SpinMutex<T, S>,
-    guard: S::GuardData,
+    _guard: S::GuardData,
 }
 
 unsafe impl<T: ?Sized + Send, S: MutexStrategy> Sync for SpinMutex<T, S> {}
@@ -35,19 +35,20 @@ impl<T, S: MutexStrategy> SpinMutex<T, S> {
     }
 
     pub fn try_lock(&self) -> Option<SpinMutexGuard<T, S>> {
+        let guard = S::new_guard();
         if self
             .lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok() {
             Some(SpinMutexGuard {
                 mutex: self,
-                guard: S::new_guard(),
+                _guard: guard,
             })
         } else {
             None
         }
     }
-    
+
     pub fn lock(&self) -> SpinMutexGuard<T, S> {
         let start_time = current_time();
         loop {

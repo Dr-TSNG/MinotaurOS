@@ -4,7 +4,6 @@ use alloc::task::Wake;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
-use log::trace;
 
 pub mod mutex;
 pub mod once;
@@ -12,9 +11,7 @@ pub mod once;
 struct BlockWaker;
 
 impl Wake for BlockWaker {
-    fn wake(self: Arc<Self>) {
-        trace!("Block waker wakes");
-    }
+    fn wake(self: Arc<Self>) {}
 }
 
 struct TakeWakerFuture;

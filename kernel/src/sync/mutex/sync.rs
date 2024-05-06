@@ -16,7 +16,7 @@ pub struct AsyncMutex<T: ?Sized, S: MutexStrategy> {
 
 pub struct AsyncMutexGuard<'a, T: ?Sized, S: MutexStrategy> {
     mutex: &'a AsyncMutex<T, S>,
-    guard: S::GuardData,
+    _guard: S::GuardData,
 }
 
 unsafe impl<T: ?Sized + Send, S: MutexStrategy> Sync for AsyncMutex<T, S> {}
@@ -42,28 +42,28 @@ impl<T, S: MutexStrategy> AsyncMutex<T, S> {
     }
 
     pub async fn lock(&self) -> AsyncMutexGuard<T, S> {
-        let guard = S::new_guard();
-        poll_fn(|cx| self.poll_lock(cx)).await;
-        AsyncMutexGuard {
-            mutex: self,
-            guard,
-        }
+        poll_fn(|cx| self.poll_lock(cx)).await
     }
 
-    fn poll_lock(&self, cx: &mut Context<'_>) -> Poll<()> {
-        if self
-            .lock
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err() {
-            self.waker.register(cx.waker());
-            if self.is_locked() {
-                Poll::Pending
-            } else {
-                Poll::Ready(())
-            }
-        } else {
-            Poll::Ready(())
+    fn poll_lock(&self, cx: &Context<'_>) -> Poll<AsyncMutexGuard<T, S>> {
+        let guard = S::new_guard();
+        if self.lock.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+            return Poll::Ready(AsyncMutexGuard {
+                mutex: self,
+                _guard: guard,
+            });
         }
+
+        self.waker.register(cx.waker());
+
+        if self.lock.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+            return Poll::Ready(AsyncMutexGuard {
+                mutex: self,
+                _guard: guard,
+            });
+        }
+
+        Poll::Pending
     }
 }
 
