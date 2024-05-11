@@ -82,7 +82,7 @@ impl File for Pipe {
             pos: 0,
             len: buf.len(),
         };
-        current_thread().event_bus.suspend_with(Event::KILL_PROCESS, fut).await
+        current_thread().event_bus.suspend_with(Event::KILL_THREAD, fut).await
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
@@ -96,7 +96,7 @@ impl File for Pipe {
             len: buf.len(),
             transfer: 0,
         };
-        current_thread().event_bus.suspend_with(Event::KILL_PROCESS, fut).await
+        current_thread().event_bus.suspend_with(Event::KILL_THREAD, fut).await
     }
 }
 

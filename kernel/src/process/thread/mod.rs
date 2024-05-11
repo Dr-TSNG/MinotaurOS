@@ -72,7 +72,7 @@ impl Thread {
         info!("Thread {} receive signal {:?}", self.tid.0, signal);
         match signal {
             Signal::SIGCHLD => self.event_bus.recv_event(Event::CHILD_EXIT),
-            Signal::SIGKILL => self.event_bus.recv_event(Event::KILL_PROCESS),
+            Signal::SIGKILL => self.event_bus.recv_event(Event::KILL_THREAD),
             _ => {
                 if !self.signals.get_mask().contains(signal.into()) {
                     self.event_bus.recv_event(Event::COMMON_SIGNAL);

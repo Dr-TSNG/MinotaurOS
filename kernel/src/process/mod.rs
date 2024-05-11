@@ -13,6 +13,7 @@ use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
 use log::{info, warn};
 use crate::arch::VirtAddr;
+use crate::config::USER_STACK_TOP;
 use crate::fs::fd::FdTable;
 use crate::fs::file_system::MountNamespace;
 use crate::mm::addr_space::AddressSpace;
@@ -64,7 +65,7 @@ pub struct ProcessInner {
 
 impl Process {
     pub async fn new_initproc(mnt_ns: Arc<MountNamespace>, elf_data: &[u8]) -> SyscallResult<Arc<Self>> {
-        let (addr_space, entry, user_sp, _) =
+        let (addr_space, entry, _) =
             AddressSpace::from_elf(&mnt_ns, elf_data).await?;
         let pid = Arc::new(TidTracker::new());
 
@@ -83,7 +84,7 @@ impl Process {
             }),
         });
 
-        let trap_ctx = TrapContext::new(entry, user_sp);
+        let trap_ctx = TrapContext::new(entry, USER_STACK_TOP.0);
         let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()), SignalController::new());
         process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
 
@@ -100,7 +101,7 @@ impl Process {
         envs: &[CString],
     ) -> SyscallResult<usize> {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
-        let (addr_space, entry, mut user_sp, mut auxv) =
+        let (addr_space, entry, mut auxv) =
             AddressSpace::from_elf(&mnt_ns, elf_data).await?;
 
         current_process().inner.lock().apply_mut(|proc_inner| {
@@ -125,6 +126,8 @@ impl Process {
             proc_inner.addr_space = addr_space;
             proc_inner.fd_table.cloexec();
         });
+
+        let mut user_sp = USER_STACK_TOP.0;
 
         // 写入参数和环境变量
         fn write_args(args: &[CString], sp: &mut usize) -> SyscallResult<Vec<usize>> {

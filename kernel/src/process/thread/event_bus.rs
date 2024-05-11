@@ -18,8 +18,8 @@ bitflags! {
     #[derive(Default)]
     pub struct Event: u32 {
         const CHILD_EXIT = 1 << 0;
-        const KILL_PROCESS = 1 << 2;
-        const COMMON_SIGNAL = 1 << 3;
+        const KILL_THREAD = 1 << 1;
+        const COMMON_SIGNAL = 1 << 2;
     }
 }
 

@@ -80,7 +80,7 @@ impl AddressSpace {
     pub async fn from_elf(
         mnt_ns: &MountNamespace,
         data: &[u8],
-    ) -> SyscallResult<(Self, usize, usize, Vec<Aux>)> {
+    ) -> SyscallResult<(Self, usize, Vec<Aux>)> {
         let mut addr_space = Self::new_bare();
         addr_space.copy_global_mappings();
         addr_space.map_trampoline()?;
@@ -141,7 +141,6 @@ impl AddressSpace {
         // 映射用户栈
         let ustack_top_vpn = VirtPageNum::from(USER_STACK_TOP);
         let ustack_bottom_vpn = ustack_top_vpn - USER_STACK_SIZE / PAGE_SIZE;
-        let ustack_top = VirtAddr::from(ustack_top_vpn).0;
         let region = LazyRegion::new_free(ASRegionMeta {
             name: Some("[stack]".to_string()),
             perms: ASPerms::U | ASPerms::R | ASPerms::W,
@@ -177,7 +176,7 @@ impl AddressSpace {
         auxv.push(Aux::new(aux::AT_GID, 0));
         auxv.push(Aux::new(aux::AT_EGID, 0));
 
-        Ok((addr_space, entry, ustack_top, auxv))
+        Ok((addr_space, entry, auxv))
     }
 
     pub fn fork(&mut self) -> AddressSpace {
