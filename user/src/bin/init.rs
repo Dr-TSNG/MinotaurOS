@@ -7,10 +7,10 @@ extern crate user_lib;
 use user_lib::println;
 use user_lib::syscall::{sys_execve, sys_exit, sys_fork, sys_mkdir, sys_waitpid};
 
-fn execute(path: &str, argv: &[&str], envp: &[&str]) {
+fn execute(path: &str) {
     let pid = sys_fork();
     if pid == 0 {
-        sys_execve(path, argv, envp);
+        sys_execve(path, &[path], &[]);
         println!("!!! execve failed !!!");
         sys_exit(-1);
     }
@@ -18,23 +18,19 @@ fn execute(path: &str, argv: &[&str], envp: &[&str]) {
     sys_waitpid(pid, &mut result);
 }
 
-fn execute_script(script: &str) {
-    execute("/busybox", &["sh", script], &["PATH=/:/bin", "ASH_STANDALONE=1"]);
-}
-
 fn time_test() {
     println!("run time-test");
-    execute("/time-test", &[], &[]);
+    execute("time-test");
 }
 
 fn busybox_test() {
     println!("run busybox_testcode.sh");
-    execute_script("/busybox_testcode.sh");
+    execute("busybox_testcode.sh");
 }
 
 fn lua_test() {
     println!("run lua_testcode.sh");
-    execute_script("/lua_testcode.sh");
+    execute("lua_testcode.sh");
 }
 
 fn run_testsuits() {

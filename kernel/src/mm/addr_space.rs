@@ -217,8 +217,9 @@ impl AddressSpace {
             region.fault_handler(self.root_pt, vpn)
         } else {
             info!("Page access violation: {:?} - {:?} / {:?}", addr, perform, region.metadata().perms);
-            Err(Errno::EACCES)
+            return Err(Errno::EACCES);
         };
+        unsafe { self.activate(); }
         result
     }
 

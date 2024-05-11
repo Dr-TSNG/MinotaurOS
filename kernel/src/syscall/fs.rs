@@ -3,18 +3,22 @@ use alloc::string::ToString;
 use alloc::vec;
 use core::cmp::min;
 use core::mem::size_of;
+use core::time::Duration;
 use log::{debug, warn};
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags};
+use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
 use crate::fs::pipe::Pipe;
-use crate::processor::current_process;
+use crate::process::thread::event_bus::Event;
+use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::{TimeSpec, UTIME_NOW, UTIME_OMIT};
-use crate::sched::time::current_time;
+use crate::sched::iomultiplex::IOMultiplexFuture;
+use crate::sched::time::{current_time, TimeoutFuture, TimeoutResult};
+use crate::signal::ffi::SigSet;
 
 pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
     if buf == 0 || size == 0 {
@@ -400,6 +404,51 @@ pub async fn sys_sendfile(out_fd: FdNum, in_fd: FdNum, offset: usize, count: usi
         user_buf.copy_from_slice(&write);
         Ok(sent)
     }
+}
+
+pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let slice = proc_inner.addr_space.user_slice_w(VirtAddr(ufds), size_of::<PollFd>() * nfds)?;
+    let fds = bytemuck::cast_slice(slice).to_vec();
+    let timeout = match timeout {
+        0 => None,
+        _ => {
+            let timeout = proc_inner.addr_space.user_slice_r(VirtAddr(timeout), size_of::<TimeSpec>())?;
+            let timeout = TimeSpec::ref_from(timeout).unwrap();
+            Some(Duration::from(*timeout))
+        }
+    };
+    let sigmask = match sigmask {
+        0 => None,
+        _ => {
+            let sigmask = proc_inner.addr_space.user_slice_r(VirtAddr(sigmask), size_of::<SigSet>())?;
+            let sigmask = unsafe { sigmask.as_ptr().cast::<SigSet>().read() };
+            Some(sigmask)
+        }
+    };
+    drop(proc_inner);
+    debug!("[ppoll] fds: {:?}, timeout: {:?}, sigmask: {:?}", fds, timeout, sigmask);
+
+    let future = current_thread().event_bus.suspend_with(
+        Event::KILL_THREAD,
+        IOMultiplexFuture::new(fds, ufds),
+    );
+    let mask_bak = current_thread().signals.get_mask();
+    if let Some(sigmask) = sigmask {
+        current_thread().signals.set_mask(sigmask);
+    }
+    let ret = match timeout {
+        Some(timeout) => match TimeoutFuture::new(timeout, future).await {
+            TimeoutResult::Ready(ret) => ret,
+            TimeoutResult::Timeout => {
+                debug!("[ppoll] timeout");
+                Ok(0)
+            }
+        },
+        None => future.await,
+    };
+    current_thread().signals.set_mask(mask_bak);
+    ret
 }
 
 pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, _flags: u32) -> SyscallResult<usize> {

@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
+use core::task::Waker;
 use async_trait::async_trait;
 use crate::arch::PAGE_SIZE;
 use crate::driver::CharacterDevice;
@@ -85,6 +86,14 @@ pub trait File: Send + Sync {
 
     async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
         Err(Errno::ESPIPE)
+    }
+
+    fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        Ok(true)
+    }
+
+    fn pollout(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        Ok(true)
     }
 }
 
@@ -232,5 +241,5 @@ impl File for CharacterFile {
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
         device.write(buf).await
-    }    
+    }
 }

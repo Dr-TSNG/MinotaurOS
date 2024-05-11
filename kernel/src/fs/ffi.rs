@@ -1,5 +1,6 @@
 use core::mem::size_of;
 use bitflags::bitflags;
+use bytemuck::{Pod, Zeroable};
 use lazy_static::lazy_static;
 use num_enum::TryFromPrimitive;
 use zerocopy::{AsBytes, FromZeroes};
@@ -244,4 +245,33 @@ pub struct KernelStatfs {
     pub f_frsize: u64,
     pub f_flags: u64,
     pub f_spare: [u64; 4],
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+pub struct PollFd {
+    /// Fd
+    pub fd: i32,
+    /// Requested events
+    pub events: i16,
+    /// Returned events
+    pub revents: i16,
+}
+
+bitflags! {
+    /// Poll events
+    pub struct PollEvents: i16 {
+        /// There is data to read
+        const POLLIN = 1 << 0;
+        /// Execption about fd
+        const POLLPRI = 1 << 1;
+        /// There is data to write
+        const POLLOUT = 1 << 2;
+        /// Error condition
+        const POLLERR = 1 << 3;
+        /// Hang up
+        const POLLHUP = 1 << 4;
+        /// Invalid request: fd not open
+        const POLLNVAL = 1 << 5;
+    }
 }

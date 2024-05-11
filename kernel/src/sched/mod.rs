@@ -1,5 +1,6 @@
 pub mod executor;
 pub mod ffi;
+pub mod iomultiplex;
 pub mod time;
 pub mod timer;
 

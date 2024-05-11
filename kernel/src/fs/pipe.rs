@@ -7,10 +7,9 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use async_trait::async_trait;
 use log::debug;
-use crate::arch::VirtAddr;
 use crate::fs::file::{File, FileMeta};
 use crate::process::thread::event_bus::Event;
-use crate::processor::{current_process, current_thread};
+use crate::processor::current_thread;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
@@ -78,9 +77,8 @@ impl File for Pipe {
         }
         let fut = PipeReadFuture {
             pipe: self,
-            user_buf: buf.as_ptr() as usize,
+            buf,
             pos: 0,
-            len: buf.len(),
         };
         current_thread().event_bus.suspend_with(Event::KILL_THREAD, fut).await
     }
@@ -91,27 +89,48 @@ impl File for Pipe {
         }
         let fut = PipeWriteFuture {
             pipe: self,
-            user_buf: buf.as_ptr() as usize,
+            buf,
             pos: 0,
-            len: buf.len(),
             transfer: 0,
         };
         current_thread().event_bus.suspend_with(Event::KILL_THREAD, fut).await
+    }
+
+    fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        let mut inner = self.inner.lock();
+        if !inner.buf.is_empty() || self.other.strong_count() == 0 {
+            Ok(true)
+        } else {
+            if let Some(waker) = waker {
+                inner.readers.push_back(waker);
+            }
+            Ok(false)
+        }
+    }
+
+    fn pollout(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        let mut inner = self.inner.lock();
+        if self.other.strong_count() == 0 {
+            Ok(true)
+        } else {
+            if let Some(waker) = waker {
+                inner.writers.push_back(waker);
+            }
+            Ok(false)
+        }
     }
 }
 
 struct PipeReadFuture<'a> {
     pipe: &'a Pipe,
-    user_buf: usize,
+    buf: &'a mut [u8],
     pos: usize,
-    len: usize,
 }
 
 struct PipeWriteFuture<'a> {
     pipe: &'a Pipe,
-    user_buf: usize,
+    buf: &'a [u8],
     pos: usize,
-    len: usize,
     transfer: usize,
 }
 
@@ -120,22 +139,17 @@ impl Future for PipeReadFuture<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut inner = self.pipe.inner.lock();
-        let read = min(self.len - self.pos, inner.buf.len());
-        debug!("[pipe] read poll pos: {}, len: {}, buf.len: {}, read: {}", self.pos, self.len, inner.buf.len(), read);
+        let read = min(self.buf.len() - self.pos, inner.buf.len());
+        debug!(
+            "[pipe] read poll pos: {}, len: {}, buf.len: {}, read: {}",
+            self.pos, self.buf.len(), inner.buf.len(), read,
+        );
         if read > 0 {
-            let user_buf = current_process().inner.lock().apply(|proc_inner| {
-                proc_inner.addr_space.user_slice_w(VirtAddr(self.user_buf + self.pos), read)
-            });
-            match user_buf {
-                Ok(user_buf) => {
-                    for (i, b) in inner.buf.drain(..read).enumerate() {
-                        user_buf[i] = b;
-                    }
-                    self.pos += read;
-                    inner.transfer += read;
-                }
-                Err(e) => return Poll::Ready(Err(e)),
+            for (i, b) in inner.buf.drain(..read).enumerate() {
+                self.buf[i] = b;
             }
+            self.pos += read;
+            inner.transfer += read;
             while let Some(waker) = inner.writers.pop_front() {
                 waker.wake();
             }
@@ -155,26 +169,21 @@ impl Future for PipeWriteFuture<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut inner = self.pipe.inner.lock();
-        let write = self.len - self.pos;
-        debug!("[pipe] write poll pos: {}, len: {}, buf.len: {} write: {}", self.pos, self.len, inner.buf.len(), write);
+        let write = self.buf.len() - self.pos;
+        debug!(
+            "[pipe] write poll pos: {}, len: {}, buf.len: {} write: {}",
+            self.pos, self.buf.len(), inner.buf.len(), write,
+        );
         if write == 0 && inner.transfer >= self.transfer {
-            return Poll::Ready(Ok(self.len as isize));
+            return Poll::Ready(Ok(self.buf.len() as isize));
         }
         if self.pipe.other.strong_count() == 0 {
             return Poll::Ready(Err(Errno::EPIPE));
         }
         if write > 0 {
-            let user_buf = current_process().inner.lock().apply(|proc_inner| {
-                proc_inner.addr_space.user_slice_r(VirtAddr(self.user_buf + self.pos), write)
-            });
-            match user_buf {
-                Ok(user_buf) => {
-                    inner.buf.extend(user_buf);
-                    self.pos += write;
-                    self.transfer = inner.transfer + write;
-                }
-                Err(e) => return Poll::Ready(Err(e)),
-            }
+            inner.buf.extend(self.buf);
+            self.pos += write;
+            self.transfer = inner.transfer + write;
             while let Some(waker) = inner.readers.pop_front() {
                 waker.wake();
             }
