@@ -23,12 +23,5 @@ pub fn current_time_duration() -> Duration {
 这两个事件都使用Duration表示，转化为Duration后是否完全一致呢？
 
 
-# 关于Box::pin()
-在udp.rs的connect()函数中，调用connect()函数会在其中使用到Box::pin返回
-Pin<Box<impl Future<Output=Result<i32, <unknown>（生命周期'a）>>+Sized>>
-这个返回值时一个future，可以被runtime执行。
-
-现在的实现返回值时错误的，要实现和异步runtime和系统调用的接轨。
-
-
+# 
 

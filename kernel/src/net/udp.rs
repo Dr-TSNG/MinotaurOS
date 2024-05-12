@@ -1,5 +1,7 @@
 use alloc::boxed::Box;
 use alloc::vec;
+use async_trait::async_trait;
+use log::info;
 
 use smoltcp::iface::SocketHandle;
 use smoltcp::socket;
@@ -8,8 +10,8 @@ use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
 
 use crate::fs::file::{File, FileMeta};
 use crate::net::iface::NET_INTERFACE;
-use crate::net::socket::{BUFFER_SIZE, endpoint, SocketAddressV4, SocketType};
 use crate::net::socket::Socket;
+use crate::net::socket::{endpoint, SocketAddressV4, SocketType, BUFFER_SIZE};
 use crate::result::Errno::{EINVAL, EOPNOTSUPP};
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
@@ -38,6 +40,7 @@ impl UdpSocket {
         );
         let socket = socket::udp::Socket::new(recv, send);
         let socket_handle = NET_INTERFACE.add_socket(socket);
+        log::info!("[UdpSocket::new] new {}", socket_handle);
         NET_INTERFACE.poll();
         Self {
             inner: Mutex::new(UdpSocketInner {
@@ -55,53 +58,61 @@ impl UdpSocket {
     }
 }
 
+#[async_trait]
 impl Socket for UdpSocket {
     fn bind(&self, addr: IpListenEndpoint) -> SyscallResult {
         NET_INTERFACE.poll();
-        let ret = NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| {
-            socket.bind(addr)
-        });
-        if ret.is_err() == true{
-            return Err(EINVAL)
+        let ret = NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| socket.bind(addr));
+        if ret.is_err() == true {
+            return Err(EINVAL);
         }
         NET_INTERFACE.poll();
         Ok(())
     }
 
-    fn connect<'a>(&'a self, addr: &'a [u8]) -> SyscallResult {
-        let fut = Box::pin(async move {
-            let remote_endpoint = endpoint(addr)?;
-            let mut inner = self.inner.lock();
-            inner.remote_endpoint = Some(remote_endpoint);
-            NET_INTERFACE.poll();
-            NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| {
-                let local = socket.endpoint();
-                if local.port == 0 {
-                    let addr = SocketAddressV4::new([0; 16].as_slice());
-                    let endpoint = IpListenEndpoint::from(addr);
-                    let ret = socket.bind(endpoint);
-                    if ret.is_err() {
-                        return match ret.err().unwrap() {
-                            socket::udp::BindError::Unaddressable => Err(EINVAL),
-                            socket::udp::BindError::InvalidState => Err(EINVAL),
-                        };
-                    }
-                    Ok(())
-                } else {
-                    Ok(())
+    async fn connect(&self, addr: &[u8]) -> SyscallResult {
+        // let fut = Box::pin(async move {
+
+        let remote_endpoint = endpoint(addr)?;
+        let mut inner = self.inner.lock();
+        inner.remote_endpoint = Some(remote_endpoint);
+        NET_INTERFACE.poll();
+        NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| {
+            let local = socket.endpoint();
+            if local.port == 0 {
+                let addr = SocketAddressV4::new([0; 16].as_slice());
+                let endpoint = IpListenEndpoint::from(addr);
+                let ret = socket.bind(endpoint);
+                if ret.is_err() {
+                    return match ret.err().unwrap() {
+                        socket::udp::BindError::Unaddressable => {
+                            info!("[Udp::bind] unaddr");
+                            Err(EINVAL)
+                        }
+                        socket::udp::BindError::InvalidState => {
+                            info!("[Udp::bind] invaild state");
+                            Err(EINVAL)
+                        }
+                    };
                 }
-            })?;
-            NET_INTERFACE.poll();
-            return SyscallResult::Ok(());
-        });
-        Ok(())
+                log::info!("[Udp::bind] bind to {:?}", endpoint);
+                Ok(())
+            } else {
+                // log::info!("[Udp::bind] bind to {:?}", remote_endpoint);
+                Ok(())
+            }
+        })?;
+        NET_INTERFACE.poll();
+        return SyscallResult::Ok(());
+        //});
+        //fut.await
     }
 
-    fn listen(&self) -> SyscallResult {
+    async fn listen(&self) -> SyscallResult {
         SyscallResult::Err(EOPNOTSUPP)
     }
 
-    fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult {
+    async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult {
         SyscallResult::Err(EOPNOTSUPP)
     }
 
@@ -125,5 +136,9 @@ impl Socket for UdpSocket {
 
     fn socket_type(&self) -> SocketType {
         SocketType::SOCK_DGRAM
+    }
+
+    fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint> {
+        todo!()
     }
 }

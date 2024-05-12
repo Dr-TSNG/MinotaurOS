@@ -1,17 +1,16 @@
 //！ 通过interface实现的方法来实现socket的获取。
 
-use crate::net::netaddress::IpAddr;
-// use crate::net::tcp::TcpSocket;
-use crate::net::socket::ShutDownType;
-use crate::sched::time::current_time;
-use crate::sync::mutex::Mutex;
 use alloc::vec;
-use lazy_static::lazy_static;
+
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, Loopback, Medium};
 use smoltcp::socket::{udp, AnySocket};
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpCidr};
+
+use crate::net::netaddress::IpAddr;
+use crate::sched::time::current_time;
+use crate::sync::mutex::Mutex;
 
 pub static NET_INTERFACE: NetInterface = NetInterface::new();
 

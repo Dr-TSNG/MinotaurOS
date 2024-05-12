@@ -1,9 +1,12 @@
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
+use async_trait::async_trait;
 use core::mem;
 use core::slice;
 
 use bitflags::bitflags;
+use log::__private_api::Value;
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv6Address};
 
 use crate::fs::fd::FdNum;
@@ -19,6 +22,43 @@ pub const AF_INET6: u16 = 0x000a;
 
 /// 32KiB , both send and recv
 pub const BUFFER_SIZE: usize = 1 << 15;
+
+/// 这是fd描述符与Socket相关的映射表，
+/// 实现file trait后，用于使用fd查找socket
+pub struct SocketTable(BTreeMap<FdNum, Arc<dyn Socket>>);
+
+impl SocketTable {
+    pub const fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+    pub fn insert(&mut self, key: FdNum, value: Arc<dyn Socket>) {
+        self.0.insert(key, value);
+    }
+    pub fn get_ref(&self, fd: FdNum) -> Option<&Arc<dyn Socket>> {
+        self.0.get(&fd)
+    }
+    pub fn take(&mut self, fd: FdNum) -> Option<Arc<dyn Socket>> {
+        self.0.remove(&fd)
+    }
+    pub fn from_another(socket_table: &SocketTable) -> SyscallResult<Self> {
+        let mut ret = BTreeMap::new();
+        for (sockfd, socket) in socket_table.0.iter() {
+            ret.insert(*sockfd, socket.clone());
+        }
+        Ok(Self(ret))
+    }
+    pub fn can_bind(&self, endpoint: IpListenEndpoint) -> Option<(FdNum, Arc<dyn Socket>)> {
+        for (sockfd, socket) in self.0.clone() {
+            if socket.socket_type().contains(SocketType::SOCK_DGRAM) {
+                if socket.local_endpoint().unwrap().eq(&endpoint) {
+                    log::info!("[SockTable::can_bind] find port exist");
+                    return Some((sockfd, socket));
+                }
+            }
+        }
+        None
+    }
+}
 
 pub enum ShutDownType {
     ShutdownRead(u32),
@@ -178,19 +218,19 @@ impl From<SocketAddressV6> for IpListenEndpoint {
     }
 }
 
-pub struct SocketTable(BTreeMap<FdNum, Arc<dyn Socket>>);
-
 /// for syscall on net part , return SyscallResult
-pub trait Socket{
+#[async_trait]
+pub trait Socket {
     fn bind(&self, addr: IpListenEndpoint) -> SyscallResult;
-    fn connect<'a>(&'a self, addr: &'a [u8]) -> SyscallResult;
-    fn listen(&self) -> SyscallResult;
-    fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult;
+    async fn connect(&self, addr: &[u8]) -> SyscallResult;
+    async fn listen(&self) -> SyscallResult;
+    async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult;
     fn set_send_buf_size(&self, size: usize) -> SyscallResult;
     fn set_recv_buf_size(&self, size: usize) -> SyscallResult;
     fn set_keep_live(&self, enabled: bool) -> SyscallResult;
     fn dis_connect(&self, how: u32) -> SyscallResult;
     fn socket_type(&self) -> SocketType;
+    fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint>;
 }
 
 pub fn listen_endpoint(addr_buf: &[u8]) -> SyscallResult<IpListenEndpoint> {
