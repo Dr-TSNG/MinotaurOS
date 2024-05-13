@@ -4,24 +4,27 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::{format, vec};
 use alloc::vec::Vec;
+use core::task::Waker;
 use async_trait::async_trait;
 use fdt_rs::base::DevTree;
 use fdt_rs::error::DevTreeError;
 use fdt_rs::index::{DevTreeIndex, DevTreeIndexNode};
 use fdt_rs::prelude::PropReader;
-use log::info;
-use crate::arch::{PhysAddr, VirtAddr};
+use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 use crate::config::{KERNEL_ADDR_OFFSET, KERNEL_MMIO_BASE};
-use crate::driver::tty::{DEFAULT_TTY, SBITtyDevice};
+use crate::driver::plic::PLIC;
 use crate::driver::virtio::VirtIODevice;
+use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::fs::file::{CharacterFile, FileMeta};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::IdAllocator;
+use crate::println;
 use crate::result::SyscallResult;
 use crate::sync::mutex::{Mutex, RwLock};
 use crate::sync::once::LateInit;
 
-pub mod tty;
+pub mod ns16550a;
+pub mod plic;
 pub mod virtio;
 
 pub static BOARD_INFO: LateInit<BoardInfo> = LateInit::new();
@@ -30,10 +33,10 @@ pub static DEVICES: RwLock<BTreeMap<usize, Device>> = RwLock::new(BTreeMap::new(
 
 static DEV_ID_ALLOCATOR: Mutex<IdAllocator> = Mutex::new(IdAllocator::new(1));
 
-#[derive(Debug)]
 pub struct BoardInfo {
     pub smp: usize,
     pub freq: usize,
+    pub plic: PLIC,
 }
 
 pub struct GlobalMapping {
@@ -77,6 +80,13 @@ impl Device {
             Device::Character(dev) => dev.metadata(),
         }
     }
+
+    fn init(&self) {
+        match self {
+            Device::Block(dev) => dev.init(),
+            Device::Character(dev) => dev.init(),
+        }
+    }
 }
 
 pub struct DeviceMeta {
@@ -99,6 +109,9 @@ pub trait BlockDevice: Send + Sync {
     /// 设备元数据
     fn metadata(&self) -> &DeviceMeta;
 
+    /// MMIO 映射完成后初始化
+    fn init(&self);
+
     /// 从块设备读取数据
     async fn read_block(&self, block_id: usize, buf: &mut [u8]) -> SyscallResult;
 
@@ -111,11 +124,24 @@ pub trait CharacterDevice: Send + Sync {
     /// 设备元数据
     fn metadata(&self) -> &DeviceMeta;
 
+    /// MMIO 映射完成后初始化
+    fn init(&self);
+
+    /// 是否有数据
+    fn has_data(&self) -> bool;
+
+    /// 注册唤醒器
+    fn register_waker(&self, waker: Waker);
+
     /// 从字符设备读取数据
-    async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize>;
+    async fn getchar(&self) -> SyscallResult<u8>;
 
     /// 向字符设备写入数据
-    async fn write(&self, buf: &[u8]) -> SyscallResult<isize>;
+    async fn putchar(&self, ch: u8) -> SyscallResult;
+}
+
+trait IrqDevice: Send + Sync {
+    fn handle_irq(&self);
 }
 
 pub fn init_dtb(dtb_paddr: usize) {
@@ -123,21 +149,15 @@ pub fn init_dtb(dtb_paddr: usize) {
 }
 
 pub fn init_driver() -> SyscallResult<()> {
-    for map in GLOBAL_MAPPINGS.iter() {
-        if map.name == "[virtio]" {
-            let dev = VirtIODevice::new(map.virt_start)?;
-            DEVICES.write().insert(dev.metadata().dev_id, Device::Block(dev));
-            info!("Initialize virtio device at {:?}", map.virt_start);
+    for device in DEVICES.read().values() {
+        device.init();
+        if let Device::Character(dev) = device {
+            if dev.metadata().dev_name == "uart" {
+                DEFAULT_TTY.init(CharacterFile::new(FileMeta::new(None), dev.clone()));
+            }
         }
     }
-
-    let sbi_tty = Arc::new(SBITtyDevice::new());
-    let sbi_tty: Arc<dyn CharacterDevice> = sbi_tty.clone();
-    let tty_file = CharacterFile::new(FileMeta::new(None), Arc::downgrade(&sbi_tty));
-    DEFAULT_TTY.init(tty_file);
-    DEVICES.write().insert(sbi_tty.metadata().dev_id, Device::Character(sbi_tty));
-    info!("Initialize SBI tty device");
-
+    BOARD_INFO.plic.init(BOARD_INFO.smp);
     Ok(())
 }
 
@@ -148,10 +168,11 @@ pub fn total_memory() -> usize {
 }
 
 fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
-    let mut board_info = BoardInfo {
-        smp: 0,
-        freq: 0,
-    };
+    let mut b_smp = 0;
+    let mut b_freq = 0;
+    let mut b_plic_base = VirtAddr(0);
+    let mut b_plic_intr = BTreeMap::new();
+
     let mut g_mappings = Vec::new();
     let mut mmio_offset = 0;
     let fdt = unsafe {
@@ -179,14 +200,14 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                 .find(|prop| prop.name() == Ok("timebase-frequency"))
                 .unwrap()
                 .propbuf();
-            board_info.freq = match freq.len() {
+            b_freq = match freq.len() {
                 4 => u32::from_be_bytes(freq.try_into().unwrap()) as usize,
                 8 => u64::from_be_bytes(freq.try_into().unwrap()) as usize,
                 _ => return Err(DevTreeError::ParseError),
             };
             for cpu in node.children() {
                 if cpu.name()?.starts_with("cpu@") {
-                    board_info.smp += 1;
+                    b_smp += 1;
                 }
             }
         } else if name.starts_with("memory") {
@@ -204,6 +225,10 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
         } else if name == "soc" {
             for node in node.children() {
                 let name = node.name()?;
+                let compatible = node
+                    .props()
+                    .find(|prop| prop.name() == Ok("compatible"))
+                    .and_then(|prop| prop.str().ok());
                 if name == "virtio_mmio@10001000" {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let mapping = GlobalMapping::new(
@@ -214,12 +239,60 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                         ASPerms::R | ASPerms::W,
                     );
                     mmio_offset += reg[0].1;
+                    let dev = Arc::new(VirtIODevice::new(mapping.virt_start));
+                    DEVICES.write().insert(dev.metadata().dev_id, Device::Block(dev));
+                    println!("[kernel] Register virtio device at {:?}", mapping.virt_start);
+                    g_mappings.push(mapping);
+                } else if name.starts_with("plic@") {
+                    let reg = parse_reg(&node, addr_cells, size_cells);
+                    if mmio_offset % reg[0].1 != 0 {
+                        mmio_offset += reg[0].1 - mmio_offset % reg[0].1;
+                    }
+                    b_plic_base = KERNEL_MMIO_BASE + mmio_offset;
+                    let mapping = GlobalMapping::new(
+                        format!("[plic@{:x}]", reg[0].0),
+                        PhysAddr(reg[0].0),
+                        b_plic_base,
+                        reg[0].1,
+                        ASPerms::R | ASPerms::W,
+                    );
+                    mmio_offset += reg[0].1;
+                    println!("[kernel] Register PLIC at {:?}", b_plic_base);
+                    g_mappings.push(mapping);
+                } else if compatible == Some("ns16550a") {
+                    let reg = parse_reg(&node, addr_cells, size_cells);
+                    let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+                    let intr = node
+                        .props()
+                        .find(|prop| prop.name() == Ok("interrupts"))
+                        .unwrap().u32(0)?;
+                    let mapping = GlobalMapping::new(
+                        format!("[serial@{:x}]", reg[0].0),
+                        PhysAddr(reg[0].0),
+                        KERNEL_MMIO_BASE + mmio_offset,
+                        size,
+                        ASPerms::R | ASPerms::W,
+                    );
+                    mmio_offset += size;
+                    let dev = Arc::new(ns16550a::UartDevice::new(mapping.virt_start));
+                    b_plic_intr.insert(intr as usize, dev.clone());
+                    DEVICES.write().insert(dev.metadata().dev_id, Device::Character(dev));
+                    println!("[kernel] Register serial device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
                 }
             }
         }
     }
 
+    let b_plic = PLIC::new(b_plic_base);
+    for (intr_id, dev) in b_plic_intr {
+        b_plic.register_device(intr_id, dev);
+    }
+    let board_info = BoardInfo {
+        smp: b_smp,
+        freq: b_freq,
+        plic: b_plic,
+    };
     BOARD_INFO.init(board_info);
     GLOBAL_MAPPINGS.init(g_mappings);
     Ok(())

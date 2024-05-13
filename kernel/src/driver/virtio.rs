@@ -1,7 +1,6 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::ToString;
-use alloc::sync::Arc;
 use core::ptr::NonNull;
 use async_trait::async_trait;
 use log::error;
@@ -13,6 +12,7 @@ use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
 use crate::arch::{kvaddr_to_paddr, paddr_to_kvaddr, PhysAddr, PhysPageNum, VirtAddr};
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::result::{Errno, SyscallResult};
+use crate::sync::once::LateInit;
 
 static VIRTIO_FRAMES: IrqMutex<BTreeMap<PhysPageNum, HeapFrameTracker>> = IrqMutex::new(BTreeMap::new());
 
@@ -67,7 +67,8 @@ unsafe impl Hal for VirtioHal {
 // TODO: Real async support
 pub struct VirtIODevice {
     metadata: DeviceMeta,
-    block: IrqMutex<VirtIOBlk<VirtioHal, MmioTransport>>,
+    base_addr: VirtAddr,
+    block: LateInit<IrqMutex<VirtIOBlk<VirtioHal, MmioTransport>>>,
 }
 
 unsafe impl Send for VirtIODevice {}
@@ -78,6 +79,15 @@ unsafe impl Sync for VirtIODevice {}
 impl BlockDevice for VirtIODevice {
     fn metadata(&self) -> &DeviceMeta {
         &self.metadata
+    }
+
+    fn init(&self) {
+        unsafe {
+            let header = self.base_addr.as_ptr().cast::<VirtIOHeader>().as_mut().unwrap();
+            let transport = MmioTransport::new(header.into()).unwrap();
+            let block = VirtIOBlk::<VirtioHal, MmioTransport>::new(transport).unwrap();
+            self.block.init(IrqMutex::new(block));
+        }
     }
 
     async fn read_block(&self, block_id: usize, buf: &mut [u8]) -> SyscallResult {
@@ -98,20 +108,11 @@ impl BlockDevice for VirtIODevice {
 }
 
 impl VirtIODevice {
-    pub fn new(virt_addr: VirtAddr) -> SyscallResult<Arc<Self>> {
-        unsafe {
-            let header = &mut *(virt_addr.0 as *mut VirtIOHeader);
-            let transport = MmioTransport::new(header.into())
-                .inspect_err(|e| error!("VirtIO error: {:?}", e))
-                .map_err(|_| Errno::ENODEV)?;
-            let block = VirtIOBlk::<VirtioHal, MmioTransport>::new(transport)
-                .inspect_err(|e| error!("VirtIO error: {:?}", e))
-                .map_err(|_| Errno::ENODEV)?;
-            let block = Self {
-                metadata: DeviceMeta::new("virtio".to_string()),
-                block: IrqMutex::new(block),
-            };
-            Ok(Arc::new(block))
+    pub fn new(base_addr: VirtAddr) -> Self {
+        Self {
+            metadata: DeviceMeta::new("virtio".to_string()),
+            base_addr,
+            block: LateInit::new(),
         }
     }
 }

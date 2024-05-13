@@ -62,7 +62,7 @@ pub fn alloc_kernel_frames(pages: usize) -> HeapFrameTracker {
 
 fn dealloc_kernel_pages(tracker: &HeapFrameTracker) {
     let vpn = ppn_to_kvpn(tracker.ppn);
-    let ptr = unsafe { VirtAddr::from(vpn).as_ptr() };
+    let ptr = VirtAddr::from(vpn).as_ptr();
     let ptr = NonNull::new(ptr).unwrap();
     KERNEL_HEAP.0.lock()
         .dealloc(ptr, Layout::from_size_align(tracker.pages * PAGE_SIZE, PAGE_SIZE).unwrap());

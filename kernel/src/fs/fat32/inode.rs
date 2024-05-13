@@ -7,7 +7,7 @@ use core::cmp::min;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use bitvec_rs::BitVec;
-use log::{debug, trace};
+use log::debug;
 use crate::fs::fat32::dir::{FAT32Dirent, FileAttr};
 use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::fat32::fat::FATEnt;
@@ -223,7 +223,6 @@ impl InodeInternal for FAT32Inode {
             if name == "." || name == ".." {
                 continue;
             }
-            trace!("[fat32] load {}", name);
             inner.children.insert(name, child);
         }
         inner.children_loaded = true;

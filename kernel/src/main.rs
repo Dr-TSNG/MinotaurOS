@@ -86,7 +86,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     builtin::init();
     dmesg_flush_tty();
 
-    let data = builtin::builtin_app("init").unwrap();
+    let data = builtin::builtin_app("shell").unwrap();
     let mnt_ns = fs::init()?;
     info!("Spawn init process");
     block_on(Process::new_initproc(mnt_ns, data))?;

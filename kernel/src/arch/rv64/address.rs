@@ -152,7 +152,7 @@ impl VirtAddr {
     pub fn aligned(&self, level: usize) -> bool {
         self.page_offset(level) == 0
     }
-    pub unsafe fn as_ptr(&self) -> *mut u8 {
+    pub fn as_ptr(&self) -> *mut u8 {
         self.0 as *mut u8
     }
 }

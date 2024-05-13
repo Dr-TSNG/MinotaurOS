@@ -4,8 +4,8 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use core::fmt::Arguments;
 use lazy_static::lazy_static;
+use crate::fs::devfs::tty::DEFAULT_TTY;
 
-use crate::driver::tty::DEFAULT_TTY;
 use crate::sync::block_on;
 use crate::sync::mutex::Mutex;
 

@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use crate::config::MAX_FD_NUM;
-use crate::driver::tty::DEFAULT_TTY;
+use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::File;
 use crate::result::{Errno, SyscallResult};

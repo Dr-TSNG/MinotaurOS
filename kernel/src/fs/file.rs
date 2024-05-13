@@ -222,8 +222,8 @@ pub struct CharacterFile {
 }
 
 impl CharacterFile {
-    pub fn new(metadata: FileMeta, device: Weak<dyn CharacterDevice>) -> Arc<Self> {
-        Arc::new(Self { metadata, device })
+    pub fn new(metadata: FileMeta, device: Arc<dyn CharacterDevice>) -> Arc<Self> {
+        Arc::new(Self { metadata, device: Arc::downgrade(&device) })
     }
 }
 
@@ -235,11 +235,29 @@ impl File for CharacterFile {
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
-        device.read(buf).await
+        for i in 0..buf.len() {
+            buf[i] = device.getchar().await?;
+        }
+        Ok(buf.len() as isize)
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
-        device.write(buf).await
+        for ch in buf.iter() {
+            device.putchar(*ch).await?;
+        }
+        Ok(buf.len() as isize)
+    }
+
+    fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
+        if device.has_data() {
+            Ok(true)
+        } else {
+            if let Some(waker) = waker {
+                device.register_waker(waker);
+            }
+            Ok(false)
+        }
     }
 }

@@ -150,7 +150,7 @@ impl FAT32FileSystem {
                         occupy.push(true);
                         dir_len += 1;
                         dir.append_short(value);
-                        trace!("Read FAT32 dirent: {:<24} at {}-{} attr {:?}", dir.name, dir_pos, dir_len, dir.attr);
+                        trace!("[fat32] Read fat32 dirent: {:<24} at {}-{} attr {:?}", dir.name, dir_pos, dir_len, dir.attr);
                         if dir.name != "." && dir.name != ".." {
                             let inode = FAT32Inode::new(&self, parent.clone(), dir).await?;
                             children.push(InodeChild::new(inode, FAT32ChildExt::new(dir_pos, dir_len)));

@@ -20,10 +20,14 @@ pub mod page_cache;
 pub mod pipe;
 
 pub fn init() -> SyscallResult<Arc<MountNamespace>> {
-    let root_dev = match DEVICES.read().get(&1) {
-        Some(Device::Block(blk)) => blk.clone(),
-        _ => panic!("Missing root block device"),
-    };
+    let mut root_dev = None;
+    for device in DEVICES.read().values() {
+        if let Device::Block(blk) = device {
+            root_dev = Some(blk.clone());
+            break;
+        }
+    }
+    let root_dev = root_dev.expect("Missing root block device");
     let mnt_ns = block_on(async_init(root_dev))?;
     info!("File systems initialized");
     path::path_test();
