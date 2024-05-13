@@ -1,10 +1,9 @@
 use alloc::boxed::Box;
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::task::Waker;
 use async_trait::async_trait;
 use crate::arch::PAGE_SIZE;
-use crate::driver::CharacterDevice;
 use crate::fs::ffi::InodeMode;
 use crate::fs::inode::Inode;
 use crate::result::{Errno, SyscallResult};
@@ -213,51 +212,5 @@ impl File for RegularFile {
         let ret = self.write(buf).await;
         self.seek(Seek::Set(old)).await?;
         ret
-    }
-}
-
-pub struct CharacterFile {
-    metadata: FileMeta,
-    device: Weak<dyn CharacterDevice>,
-}
-
-impl CharacterFile {
-    pub fn new(metadata: FileMeta, device: Arc<dyn CharacterDevice>) -> Arc<Self> {
-        Arc::new(Self { metadata, device: Arc::downgrade(&device) })
-    }
-}
-
-#[async_trait]
-impl File for CharacterFile {
-    fn metadata(&self) -> &FileMeta {
-        &self.metadata
-    }
-
-    async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
-        let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
-        for i in 0..buf.len() {
-            buf[i] = device.getchar().await?;
-        }
-        Ok(buf.len() as isize)
-    }
-
-    async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
-        let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
-        for ch in buf.iter() {
-            device.putchar(*ch).await?;
-        }
-        Ok(buf.len() as isize)
-    }
-
-    fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
-        let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
-        if device.has_data() {
-            Ok(true)
-        } else {
-            if let Some(waker) = waker {
-                device.register_waker(waker);
-            }
-            Ok(false)
-        }
     }
 }
