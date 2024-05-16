@@ -2,13 +2,15 @@ use alloc::ffi::CString;
 use alloc::string::ToString;
 use alloc::vec;
 use core::cmp::min;
+use core::ffi::CStr;
 use core::mem::size_of;
 use core::time::Duration;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::arch::{PAGE_SIZE, VirtAddr};
+use crate::fs::devfs::DevFileSystem;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd};
+use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd, VfsFlags};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
 use crate::fs::pipe::Pipe;
@@ -152,7 +154,35 @@ pub async fn sys_umount2(target: usize, flags: u32) -> SyscallResult<usize> {
 }
 
 pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, data: usize) -> SyscallResult<usize> {
-    warn!("mount is not implemented");
+    let proc_inner = current_process().inner.lock();
+    let source = proc_inner.addr_space.user_slice_r(VirtAddr(source), PATH_MAX)?;
+    let source = CStr::from_bytes_until_nul(source).map_err(|_| Errno::EINVAL)?.to_str().unwrap();
+    let target = proc_inner.addr_space.user_slice_r(VirtAddr(target), PATH_MAX)?;
+    let target = CStr::from_bytes_until_nul(target).map_err(|_| Errno::EINVAL)?.to_str().unwrap();
+    let fstype = proc_inner.addr_space.user_slice_r(VirtAddr(fstype), PATH_MAX)?;
+    let fstype = CStr::from_bytes_until_nul(fstype).map_err(|_| Errno::EINVAL)?.to_str().unwrap();
+    let flags = VfsFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
+    let data = match data {
+        0 => None,
+        _ => {
+            let data = proc_inner.addr_space.user_slice_r(VirtAddr(data), size_of::<usize>())?;
+            Some(CStr::from_bytes_until_nul(data).map_err(|_| Errno::EINVAL)?.to_str().unwrap())
+        }
+    };
+    info!(
+        "[mount] source: {}, target: {}, fstype: {}, flags: {:?}, data: {:?}", 
+        source, target, fstype, flags, data,
+    );
+
+    match fstype {
+        "devfs" => {
+            proc_inner.mnt_ns.mount(target, |p| {
+                DevFileSystem::new(flags, source.to_string(), Some(p))
+            }).await?;
+        }
+        _ => return Err(Errno::ENODEV),
+    }
+
     Ok(0)
 }
 

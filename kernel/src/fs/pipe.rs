@@ -90,8 +90,6 @@ impl File for Pipe {
         let fut = PipeWriteFuture {
             pipe: self,
             buf,
-            pos: 0,
-            transfer: 0,
         };
         current_thread().event_bus.suspend_with(Event::KILL_THREAD, fut).await
     }
@@ -130,8 +128,6 @@ struct PipeReadFuture<'a> {
 struct PipeWriteFuture<'a> {
     pipe: &'a Pipe,
     buf: &'a [u8],
-    pos: usize,
-    transfer: usize,
 }
 
 impl Future for PipeReadFuture<'_> {
@@ -169,26 +165,17 @@ impl Future for PipeWriteFuture<'_> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut inner = self.pipe.inner.lock();
-        let write = self.buf.len() - self.pos;
         debug!(
-            "[pipe] write poll pos: {}, len: {}, buf.len: {} write: {}",
-            self.pos, self.buf.len(), inner.buf.len(), write,
+            "[pipe] write poll len: {}, buf.len: {}",
+            self.buf.len(), inner.buf.len(),
         );
-        if write == 0 && inner.transfer >= self.transfer {
-            return Poll::Ready(Ok(self.buf.len() as isize));
-        }
         if self.pipe.other.strong_count() == 0 {
             return Poll::Ready(Err(Errno::EPIPE));
         }
-        if write > 0 {
-            inner.buf.extend(self.buf);
-            self.pos += write;
-            self.transfer = inner.transfer + write;
-            while let Some(waker) = inner.readers.pop_front() {
-                waker.wake();
-            }
+        inner.buf.extend(self.buf);
+        while let Some(waker) = inner.readers.pop_front() {
+            waker.wake();
         }
-        inner.writers.push_back(cx.waker().clone());
-        Poll::Pending
+        Poll::Ready(Ok(self.buf.len() as isize))
     }
 }

@@ -59,9 +59,13 @@ impl TryFrom<(i32, isize)> for Seek {
 pub trait File: Send + Sync {
     fn metadata(&self) -> &FileMeta;
 
-    async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize>;
+    async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
+        Err(Errno::EPERM)
+    }
 
-    async fn write(&self, buf: &[u8]) -> SyscallResult<isize>;
+    async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
+        Err(Errno::EPERM)
+    }
 
     async fn truncate(&self, size: isize) -> SyscallResult {
         Err(Errno::EPERM)
@@ -109,6 +113,55 @@ impl dyn File {
             buf.extend_from_slice(&tmp[..len as usize]);
         }
         Ok(buf)
+    }
+}
+
+pub struct CharacterFile {
+    metadata: FileMeta,
+}
+
+impl CharacterFile {
+    pub fn new(metadata: FileMeta) -> Arc<Self> {
+        Arc::new(Self { metadata })
+    }
+}
+
+#[async_trait]
+impl File for CharacterFile {
+    fn metadata(&self) -> &FileMeta {
+        &self.metadata
+    }
+
+    async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
+        let inode = self.metadata.inode.as_ref().unwrap();
+        if inode.metadata().mode != InodeMode::IFCHR {
+            return Err(Errno::ENOTTY);
+        }
+        inode.read(buf, 0).await
+    }
+
+    async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
+        let inode = self.metadata.inode.as_ref().unwrap();
+        if inode.metadata().mode != InodeMode::IFCHR {
+            return Err(Errno::ENOTTY);
+        }
+        inode.write(buf, 0).await
+    }
+}
+
+pub struct DirFile {
+    metadata: FileMeta,
+}
+
+impl DirFile {
+    pub fn new(metadata: FileMeta) -> Arc<Self> {
+        Arc::new(Self { metadata })
+    }
+}
+
+impl File for DirFile {
+    fn metadata(&self) -> &FileMeta {
+        &self.metadata
     }
 }
 

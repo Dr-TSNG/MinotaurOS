@@ -75,6 +75,11 @@ pub fn sys_rt_sigprocmask(how: i32, nset: usize, oset: usize) -> SyscallResult<u
     Ok(0)
 }
 
+pub fn sys_rt_sigtimedwait(uset: usize, uinfo: usize, uts: usize) -> SyscallResult<usize> {
+    // TODO: implement sys_rt_sigtimedwait
+    Ok(0)
+}
+
 pub fn sys_rt_sigreturn() -> SyscallResult<usize> {
     let trap_ctx = current_trap_ctx();
     let user_sp = VirtAddr(trap_ctx.get_sp());

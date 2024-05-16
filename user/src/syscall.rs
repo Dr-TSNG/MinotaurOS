@@ -1,6 +1,7 @@
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::arch::asm;
+use core::ptr::null;
 use bitflags::bitflags;
 use crate::syscall::SyscallCode::*;
 
@@ -340,4 +341,13 @@ pub fn sigprocmask(how: u32, set: Option<&SigSet>, oldset: Option<&mut SigSet>) 
     let set_ptr = set.map_or(0, |s| s as *const SigSet as usize);
     let oldset_ptr = oldset.map_or(0, |s| s as *mut SigSet as usize);
     syscall!(RtSigprocmask, how as usize, set_ptr, oldset_ptr, 8)
+}
+
+pub fn mount(source: &str, target: &str, fstype: &str, flags: u32, data: Option<&str>) -> isize {
+    let source = CString::new(source).unwrap();
+    let target = CString::new(target).unwrap();
+    let fstype = CString::new(fstype).unwrap();
+    let data = data.map(|s| CString::new(s).unwrap());
+    let data = data.as_ref().map(|s| s.as_ptr()).unwrap_or(null());
+    syscall!(Mount, source.as_ptr(), target.as_ptr(), fstype.as_ptr(), flags, data)
 }

@@ -10,6 +10,7 @@ use crate::sync::mutex::Mutex;
 
 #[repr(u64)]
 pub enum FileSystemType {
+    DEVFS = 0x62646576,
     FAT32 = 0x4d44,
     TMPFS = 0x01021994,
     PROCFS = 0x9fa0,
@@ -78,18 +79,27 @@ impl MountNamespace {
         root.lookup_relative(&path[1..]).await
     }
 
-    // TODO: Add to Inode's `mounts` field
-    pub fn mount(&self, fs: Arc<dyn FileSystem>, absolute_path: &str) -> SyscallResult {
+    pub async fn mount<F>(&self, absolute_path: &str, fs_fn: F) -> SyscallResult
+        where F: FnOnce(Arc<dyn Inode>) -> Arc<dyn FileSystem> {
         assert!(is_absolute_path(absolute_path));
+        let inode = self.lookup_absolute(absolute_path).await?;
+        let inode = inode.metadata().parent.clone().unwrap().upgrade().unwrap();
+        let dir_name = absolute_path.rsplit_once('/').unwrap().1.to_string();
+        let fs = fs_fn(inode.clone());
         let mut tree = self.tree.lock();
-        Self::do_mount(&mut tree.sub_trees, fs, absolute_path)?;
+        Self::do_mount(&mut tree.sub_trees, fs.clone(), absolute_path)?;
+        inode.metadata().inner.lock().mounts.insert(dir_name, fs.root());
         Ok(())
     }
 
-    pub fn unmount(&self, absolute_path: &str) -> SyscallResult {
+    pub async fn unmount(&self, absolute_path: &str) -> SyscallResult {
         assert!(is_absolute_path(absolute_path));
+        let inode = self.lookup_absolute(absolute_path).await?;
+        let inode = inode.metadata().parent.clone().unwrap().upgrade().unwrap();
+        let dir_name = absolute_path.rsplit_once('/').unwrap().1.to_string();
         let mut tree = self.tree.lock();
         Self::do_unmount(&mut tree.sub_trees, absolute_path)?;
+        inode.metadata().inner.lock().mounts.remove(&dir_name);
         Ok(())
     }
 

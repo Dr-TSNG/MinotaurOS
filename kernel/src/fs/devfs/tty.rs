@@ -42,6 +42,11 @@ impl File for TtyFile {
         Ok(buf.len() as isize)
     }
 
+    async fn ioctl(&self, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
+        // TODO: Real ioctl
+        Ok(0)
+    }
+
     fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
         let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
         if device.has_data() {
@@ -52,10 +57,5 @@ impl File for TtyFile {
             }
             Ok(false)
         }
-    }
-
-    async fn ioctl(&self, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
-        // TODO: Real ioctl
-        Ok(0)
     }
 }

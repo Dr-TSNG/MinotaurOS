@@ -145,7 +145,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Mkdirat => async_syscall!(sys_mkdirat, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Unlinkat => async_syscall!(sys_unlinkat, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Umount2 => async_syscall!(sys_umount2, args[0], args[1] as u32),
-        SyscallCode::Mount => async_syscall!(sys_mount, args[0], args[1], args[2], args[4] as u32, args[5]),
+        SyscallCode::Mount => async_syscall!(sys_mount, args[0], args[1], args[2], args[3] as u32, args[4]),
         SyscallCode::Fstatfs => syscall!(sys_fstatfs, args[0] as FdNum, args[1]),
         SyscallCode::Ftruncate => async_syscall!(sys_ftruncate, args[0] as FdNum, args[1] as isize),
         SyscallCode::Faccessat => async_syscall!(sys_faccessat, args[0] as FdNum, args[1], args[2] as u32, args[3] as u32),
@@ -184,7 +184,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::RtSigsupend => async_syscall!(sys_rt_sigsuspend, args[0]),
         SyscallCode::RtSigaction => syscall!(sys_rt_sigaction, args[0] as i32, args[1], args[2]),
         SyscallCode::RtSigprocmask => syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2]),
-        // SyscallCode::RtSigtimedwait
+        SyscallCode::RtSigtimedwait => syscall!(sys_rt_sigtimedwait, args[0], args[1], args[2]),
         SyscallCode::RtSigreturn => syscall!(sys_rt_sigreturn),
         SyscallCode::Times => syscall!(sys_times, args[0]),
         SyscallCode::Uname => syscall!(sys_uname, args[0]),

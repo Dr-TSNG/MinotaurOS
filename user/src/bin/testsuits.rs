@@ -5,7 +5,7 @@ extern crate alloc;
 extern crate user_lib;
 
 use user_lib::println;
-use user_lib::syscall::{sys_execve, sys_exit, sys_fork, sys_mkdir, sys_waitpid};
+use user_lib::syscall::{mount, sys_execve, sys_exit, sys_fork, sys_mkdir, sys_waitpid};
 
 fn execute(path: &str) {
     let pid = sys_fork();
@@ -45,5 +45,6 @@ fn main() {
     sys_mkdir("/proc", 0);
     sys_mkdir("/tmp", 0);
     sys_mkdir("/sys", 0);
+    mount("devfs", "/dev", "devfs", 0, None);
     run_testsuits();
 }

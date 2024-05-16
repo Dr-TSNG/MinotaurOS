@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use downcast_rs::{DowncastSync, impl_downcast};
 use log::warn;
 use crate::fs::ffi::InodeMode;
-use crate::fs::file::File;
+use crate::fs::file::{CharacterFile, DirFile, File, FileMeta, RegularFile};
 use crate::fs::page_cache::PageCache;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
@@ -181,15 +181,19 @@ pub(super) trait InodeInternal {
 pub trait Inode: DowncastSync + InodeInternal {
     /// 获取 Inode 元数据
     fn metadata(&self) -> &InodeMeta;
-
-    /// 打开一个 Inode，返回打开的文件
-    fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
-        Err(Errno::EPERM)
-    }
 }
 impl_downcast!(sync Inode);
 
 impl dyn Inode {
+    pub fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
+        match self.metadata().mode {
+            InodeMode::IFCHR => Ok(CharacterFile::new(FileMeta::new(Some(self)))),
+            InodeMode::IFDIR => Ok(DirFile::new(FileMeta::new(Some(self)))),
+            InodeMode::IFREG => Ok(RegularFile::new(FileMeta::new(Some(self)))),
+            _ => Err(Errno::EPERM),
+        }
+    }
+
     pub fn page_cache(&self) -> Option<Arc<PageCache>> {
         self.metadata().page_cache.clone()
     }

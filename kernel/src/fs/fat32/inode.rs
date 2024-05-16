@@ -12,7 +12,6 @@ use crate::fs::fat32::dir::{FAT32Dirent, FileAttr};
 use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::fat32::fat::FATEnt;
 use crate::fs::ffi::InodeMode;
-use crate::fs::file::{File, FileMeta, RegularFile};
 use crate::fs::inode::{Inode, InodeChild, InodeInternal, InodeMeta, InodeMetaInner};
 use crate::fs::page_cache::PageCache;
 use crate::result::{Errno, SyscallResult};
@@ -112,10 +111,6 @@ impl FAT32Inode {
 impl Inode for FAT32Inode {
     fn metadata(&self) -> &InodeMeta {
         &self.metadata
-    }
-
-    fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
-        Ok(RegularFile::new(FileMeta::new(Some(self))))
     }
 }
 
