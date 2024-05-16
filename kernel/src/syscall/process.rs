@@ -1,11 +1,13 @@
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use log::info;
+use log::{debug, info};
+use zerocopy::AsBytes;
 use crate::arch::VirtAddr;
+use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
-use crate::process::ffi::{CloneFlags, WaitOptions};
+use crate::process::ffi::{CloneFlags, Rlimit, RlimitCmd, WaitOptions};
 use crate::process::monitor::PROCESS_MONITOR;
 use crate::process::{Pid, Tid};
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
@@ -64,6 +66,14 @@ pub fn sys_tkill(pid: Pid, tid: Tid, signal: usize) -> SyscallResult<usize> {
         }
     }
     Err(Errno::EINVAL)
+}
+
+pub fn sys_getrlimit(resource: u32, rlim: usize) -> SyscallResult<usize> {
+    sys_prlimit(current_process().pid.0, resource, 0, rlim)
+}
+
+pub fn sys_setrlimit(resource: u32, rlim: usize) -> SyscallResult<usize> {
+    sys_prlimit(current_process().pid.0, resource, rlim, 0)
 }
 
 pub fn sys_getpid() -> SyscallResult<usize> {
@@ -132,8 +142,12 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     if args_vec.is_empty() {
         args_vec.push(CString::new(path).unwrap());
     }
-    envs_vec.push(CString::new("PATH=/").unwrap());
-    envs_vec.push(CString::new("LD_LIBRARY_PATH=/").unwrap());
+    if !envs_vec.iter().any(|s| s.to_str().unwrap().contains("PATH=")) {
+        envs_vec.push(CString::new("PATH=/").unwrap());
+    }
+    if !envs_vec.iter().any(|s| s.to_str().unwrap().contains("LD_LIBRARY_PATH=")) {
+        envs_vec.push(CString::new("LD_LIBRARY_PATH=/").unwrap());
+    }
 
     let inode = resolve_path(&proc_inner, AT_FDCWD, path).await?;
     if inode.metadata().mode == InodeMode::IFDIR {
@@ -156,4 +170,24 @@ pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -
     ).await;
     info!("[wait4] ret: {:?}", ret);
     ret
+}
+
+pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) -> SyscallResult<usize> {
+    let cmd = RlimitCmd::try_from(resource).map_err(|_| Errno::EINVAL)?;
+    debug!("[prlimit] pid: {}, cmd: {:?}", pid, cmd);
+    if old_rlim != 0 {
+        let old_rlim = current_process().inner.lock().addr_space
+            .user_slice_w(VirtAddr(old_rlim), size_of::<Rlimit>())?;
+        let (cur, max) = match cmd {
+            RlimitCmd::RLIMIT_STACK => (USER_STACK_SIZE, USER_STACK_TOP.0),
+            RlimitCmd::RLIMIT_NOFILE => (MAX_FD_NUM, MAX_FD_NUM),
+            _ => (0, 0),
+        };
+        let rlimit = Rlimit { rlim_cur: cur, rlim_max: max };
+        old_rlim.copy_from_slice(rlimit.as_bytes());
+    }
+    if new_rlim != 0 {
+        // TODO: set new rlimit
+    }
+    Ok(0)
 }

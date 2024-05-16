@@ -101,6 +101,8 @@ pub enum SyscallCode {
     RtSigreturn = 139,
     Times = 153,
     Uname = 160,
+    Getrlimit = 163,
+    Setrlimit = 164,
     Getrusage = 165,
     Umask = 166,
     GetTimeOfDay = 169,
@@ -134,8 +136,8 @@ pub enum SyscallCode {
 }
 
 pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
-    let code = SyscallCode::from(code);
-    let result = match code {
+    let scode = SyscallCode::from(code);
+    let result = match scode {
         SyscallCode::Shutdown => syscall!(sys_shutdown),
         SyscallCode::Getcwd => syscall!(sys_getcwd, args[0], args[1]),
         SyscallCode::Dup => syscall!(sys_dup, args[0] as FdNum),
@@ -188,6 +190,8 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::RtSigreturn => syscall!(sys_rt_sigreturn),
         SyscallCode::Times => syscall!(sys_times, args[0]),
         SyscallCode::Uname => syscall!(sys_uname, args[0]),
+        SyscallCode::Getrlimit => syscall!(sys_getrlimit, args[0] as u32, args[1]),
+        SyscallCode::Setrlimit => syscall!(sys_setrlimit, args[0] as u32, args[1]),
         // SyscallCode::Getrusage
         // SyscallCode::Umask
         SyscallCode::GetTimeOfDay => syscall!(sys_gettimeofday, args[0], args[1]),
@@ -209,7 +213,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Mprotect
         // SyscallCode::Madvise
         SyscallCode::Wait4 => async_syscall!(sys_wait4, args[0], args[1], args[2] as u32, args[3]),
-        // SyscallCode::Prlimit
+        SyscallCode::Prlimit => syscall!(sys_prlimit, args[0], args[1] as u32, args[2], args[3]),
         SyscallCode::Renameat2 => async_syscall!(sys_renameat2, args[0] as FdNum, args[1], args[2] as FdNum, args[3], args[4] as u32),
         // SyscallCode::Seccomp
         // SyscallCode::Getrandom
@@ -217,7 +221,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Membarrier
         // SyscallCode::CopyFileRange
         _ => {
-            warn!("Unsupported syscall: {:?}", code);
+            warn!("Unsupported syscall: {:?} ({})", scode, code);
             Err(Errno::ENOSYS)
         }
     };
