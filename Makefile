@@ -1,4 +1,4 @@
-BOARD ?= qemu
+all: user kernel
 
 clean:
 	@cargo clean
@@ -7,14 +7,9 @@ env:
 	@cargo task env
 
 kernel:
-	@cargo task build kernel --board $(BOARD)
+	@cargo task build kernel
 
 user:
 	@cargo task build user
 
-debug:
-	@cargo task debug qemu
-
-all: user kernel
-
-.PHONY: clean env kernel user qemu all
+.PHONY: all clean env kernel user
