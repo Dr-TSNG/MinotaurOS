@@ -24,7 +24,7 @@ __trap_from_user:
     # 保存除 x0/sp 以外的通用寄存器
     sd x1, 1*8(sp)
     .set n, 3
-    .rept 27
+    .rept 29
         SAVE_GP %n
         .set n, n+1
     .endr
