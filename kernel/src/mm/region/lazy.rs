@@ -83,7 +83,7 @@ impl ASRegion for LazyRegion {
         }
         for i in remap {
             let vpn = self.metadata.start + i;
-            self.map_one(parent_pt, &new_pages[i], vpn, true);
+            self.map_one(parent_pt, &self.pages[i], vpn, true);
         }
         let new_region = LazyRegion {
             metadata: self.metadata.clone(),

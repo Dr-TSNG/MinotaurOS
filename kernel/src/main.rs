@@ -9,6 +9,7 @@
 #![feature(never_type)]
 #![feature(option_take_if)]
 #![feature(panic_info_message)]
+#![feature(step_trait)]
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance)]
 #![feature(sync_unsafe_cell)]

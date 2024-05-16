@@ -2,6 +2,7 @@ use core::{
     fmt::{self, Debug, Formatter},
     ops::{Add, Sub},
 };
+use core::iter::Step;
 use crate::config::KERNEL_ADDR_OFFSET;
 
 pub const SV39_PAGE_BITS: usize = 12;
@@ -224,6 +225,20 @@ impl const Sub<usize> for PhysAddr {
     }
 }
 
+impl const Step for PhysAddr {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        Some(end.0 - start.0)
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        start.0.checked_add(count).map(PhysAddr)
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        start.0.checked_sub(count).map(PhysAddr)
+    }
+}
+
 impl const Add for PhysPageNum {
     type Output = PhysPageNum;
     fn add(self, rhs: Self) -> Self::Output {
@@ -249,6 +264,20 @@ impl const Sub<usize> for PhysPageNum {
     type Output = PhysPageNum;
     fn sub(self, rhs: usize) -> Self::Output {
         PhysPageNum(self.0 - rhs)
+    }
+}
+
+impl const Step for PhysPageNum {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        Some(end.0 - start.0)
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        start.0.checked_add(count).map(PhysPageNum)
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        start.0.checked_sub(count).map(PhysPageNum)
     }
 }
 
@@ -280,6 +309,20 @@ impl const Sub<usize> for VirtAddr {
     }
 }
 
+impl const Step for VirtAddr {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        Some(end.0 - start.0)
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        start.0.checked_add(count).map(VirtAddr)
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        start.0.checked_sub(count).map(VirtAddr)
+    }
+}
+
 impl const Add for VirtPageNum {
     type Output = VirtPageNum;
     fn add(self, rhs: Self) -> Self::Output {
@@ -305,5 +348,19 @@ impl const Sub<usize> for VirtPageNum {
     type Output = VirtPageNum;
     fn sub(self, rhs: usize) -> Self::Output {
         VirtPageNum(self.0 - rhs)
+    }
+}
+
+impl const Step for VirtPageNum {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        Some(end.0 - start.0)
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        start.0.checked_add(count).map(VirtPageNum)
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        start.0.checked_sub(count).map(VirtPageNum)
     }
 }

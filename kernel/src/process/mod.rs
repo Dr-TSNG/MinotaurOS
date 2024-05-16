@@ -222,6 +222,8 @@ impl Process {
                     exit_code: None,
                 }),
             });
+            // 地址空间 fork 后需要刷新 TLB
+            unsafe { proc_inner.addr_space.activate(); }
 
             let mut trap_ctx = current_trap_ctx().clone();
             trap_ctx.user_x[10] = 0;

@@ -48,7 +48,7 @@ unsafe impl GlobalAlloc for HeapAllocator {
 }
 
 /// 分配连续的内核页帧
-/// 
+///
 /// SAFETY: 保证分配的页已经清零
 pub fn alloc_kernel_frames(pages: usize) -> HeapFrameTracker {
     let vpn = KERNEL_HEAP.0.lock()
@@ -56,7 +56,9 @@ pub fn alloc_kernel_frames(pages: usize) -> HeapFrameTracker {
         .map(|va| VirtPageNum::from(VirtAddr(va.as_ptr() as usize)))
         .expect("[HeapAllocator] Out of memory");
     let ppn = kvpn_to_ppn(vpn);
-    ppn.byte_array().fill(0);
+    for ppn in ppn..ppn + pages {
+        ppn.byte_array().fill(0);
+    }
     HeapFrameTracker { ppn, pages }
 }
 

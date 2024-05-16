@@ -110,7 +110,9 @@ impl Segment {
 /// SAFETY: 保证分配的页已经清零
 pub fn alloc_user_frames(pages: usize) -> SyscallResult<UserFrameTracker> {
     let tracker = USER_ALLOCATOR.lock().alloc(pages)?;
-    tracker.ppn.byte_array().fill(0);
+    for ppn in tracker.ppn..tracker.ppn + pages {
+        ppn.byte_array().fill(0);
+    }
     Ok(tracker)
 }
 
