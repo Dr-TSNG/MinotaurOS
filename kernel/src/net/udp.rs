@@ -1,19 +1,26 @@
 use alloc::boxed::Box;
 use alloc::vec;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll};
 use async_trait::async_trait;
-use log::info;
+use log::{info, log};
+use managed::{Managed, ManagedSlice};
 
 use smoltcp::iface::SocketHandle;
 use smoltcp::socket;
 use smoltcp::socket::udp::PacketMetadata;
 use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
+use xmas_elf::program::Flags;
+use crate::fs::ffi::{InodeMode, OpenFlags};
 
-use crate::fs::file::{File, FileMeta};
+use crate::fs::file::{File, FileMeta, Seek};
+use crate::fs::inode::Inode;
 use crate::net::iface::NET_INTERFACE;
 use crate::net::socket::Socket;
 use crate::net::socket::{endpoint, SocketAddressV4, SocketType, BUFFER_SIZE};
-use crate::result::Errno::{EINVAL, EOPNOTSUPP};
-use crate::result::SyscallResult;
+use crate::result::Errno::{EAGAIN, EINVAL, EOPNOTSUPP};
+use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
 pub struct UdpSocket {
@@ -21,13 +28,11 @@ pub struct UdpSocket {
     socket_handler: SocketHandle,
     file_data: FileMeta,
 }
-
 struct UdpSocketInner {
     remote_endpoint: Option<IpEndpoint>,
     recvbuf_size: usize,
     sendbuf_size: usize,
 }
-
 impl UdpSocket {
     pub fn new() -> Self {
         let recv = smoltcp::socket::udp::PacketBuffer::new(
@@ -57,7 +62,95 @@ impl UdpSocket {
         }
     }
 }
+#[async_trait]
+impl File for UdpSocket {
+    fn metadata(&self) -> &FileMeta {
+        &self.file_data
+    }
 
+    async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
+        let inode = self.file_data.inode.as_ref().unwrap();
+        if inode.metadata().mode == InodeMode::IFDIR{
+            return Err(Errno::EISDIR);
+        }
+        let mut inner = self.file_data.inner.lock().await;
+        let count = inode.read(buf,inner.pos).await?;
+        inner.pos+=count;
+        Ok(count)
+    }
+
+    async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
+        let inode = self.file_data.inode.as_ref().unwrap();
+        if inode.metadata().mode==InodeMode::IFDIR{
+            return Err(Errno::EISDIR);
+        }
+        let mut inner = self.file_data.inner.lock().await;
+        let count = inode.write(buf,inner.pos).await?;
+        inner.pos+=count;
+        Ok(count)
+    }
+
+    async fn truncate(&self, size: isize) -> SyscallResult {
+        let inode = self.file_data.inode.as_ref().unwrap();
+        if inode.metadata().mode == InodeMode::IFDIR{
+            return Err(Errno::EISDIR);
+        }
+        inode.truncate(size).await?;
+        Ok(())
+    }
+    async fn sync(&self) -> SyscallResult {
+        let inode = self.file_data.inode.as_ref().unwrap();
+        inode.sync().await?;
+        Ok(())
+    }
+    async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
+        let inode = self.file_data.inode.as_ref().unwrap();
+        if inode.metadata().mode == InodeMode::IFDIR {
+            return Err(Errno::EISDIR);
+        }
+        let mut inner = self.file_data.inner.lock().await;
+        inner.pos = match seek {
+            Seek::Set(offset) => {
+                if offset < 0 {
+                    return Err(Errno::EINVAL);
+                }
+                offset
+            }
+            Seek::Cur(offset) => {
+                match inner.pos.checked_add(offset) {
+                    Some(new_pos) => new_pos,
+                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
+                }
+            }
+            Seek::End(offset) => {
+                let size = self.file_data.inode.as_ref().unwrap().metadata().inner.lock().size;
+                match size.checked_add(offset) {
+                    Some(new_pos) => new_pos,
+                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
+                }
+            }
+        };
+        Ok(inner.pos)
+    }
+
+    async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
+        let _lock = self.metadata().prw_lock.lock().await;
+        let old = self.seek(Seek::Cur(0)).await?;
+        self.seek(Seek::Set(offset)).await?;
+        let ret = self.read(buf).await;
+        self.seek(Seek::Set(old)).await?;
+        ret
+    }
+
+    async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
+        let _lock = self.metadata().prw_lock.lock().await;
+        let old = self.seek(Seek::Cur(0)).await?;
+        self.seek(Seek::Set(offset)).await?;
+        let ret = self.write(buf).await;
+        self.seek(Seek::Set(old)).await?;
+        ret
+    }
+}
 #[async_trait]
 impl Socket for UdpSocket {
     fn bind(&self, addr: IpListenEndpoint) -> SyscallResult {
@@ -139,6 +232,99 @@ impl Socket for UdpSocket {
     }
 
     fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint> {
+        todo!()
+    }
+}
+impl Drop for UdpSocket{
+    fn drop(&mut self) {
+        log::info!(
+            "[UdpSocket::drop] drop socket {}, remote endpoint {:?}",
+            self.socket_handler,
+            self.inner.lock().remote_endpoint
+        );
+        NET_INTERFACE.handle_udp_socket(self.socket_handler,|socket|{
+            if socket.is_open(){
+                socket.close();
+            }
+        });
+        NET_INTERFACE.remove(self.socket_handler);
+        NET_INTERFACE.poll();
+    }
+}
+
+struct UdpRecvFuture<'a>{
+    socket: &'a UdpSocket,
+    buf:ManagedSlice<'a,u8>,
+    flags: OpenFlags,
+}
+impl<'a> UdpRecvFuture<'a> {
+    fn new<S>(socket:&'a UdpSocket,buf: S,flags: OpenFlags)->Self
+    where
+        S: Into<ManagedSlice<'a,u8>>
+    {
+        Self{
+            socket,
+            buf:buf.into(),
+            flags,
+        }
+    }
+}
+impl<'a> Future for UdpRecvFuture{
+    type Output = SyscallResult<usize>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        NET_INTERFACE.poll();
+        let ret = NET_INTERFACE.handle_udp_socket(self.socket.socket_handler,|socket|{
+            if !socket.can_recv(){
+                log::info!("[UdpRecvFuture::poll] cannot recv yet");
+                if self.flags.contains(OpenFlags::O_NONBLOCK){
+                    log::info!("[UdpRecvFuture::poll] already set nonblock");
+                    return Poll::Ready(Err(EAGAIN));
+                }
+                socket.register_recv_waker(cx.waker());
+                return Poll::Pending;
+            }
+            log::info!("[UdpRecvFuture::poll] start to recv...");
+            let this = self.get_mut();
+            Poll::Ready(
+                {
+                    let (ret,meta) = socket
+                        .recv_slice(&mut this.buf)
+                        .ok()
+                        .ok_or(Errno::ENOTCONN)?;
+                    let remote = Some(meta.endpoint);
+                    info!(
+                        "[UdpRecvFuture::poll] {:?} <- {:?}",
+                        socket.endpoint(),
+                        remote);
+                    this.socket.inner.lock().remote_endpoint = remote;
+                    log::debug!("[UdpRecvFuture::poll] recv {} bytes", ret);
+                    Ok(ret)
+                }
+            )
+        });
+        NET_INTERFACE.poll();
+        ret
+    }
+}
+struct UdpSendFuture<'a>{
+    socket: &'a UdpSocket,
+    buf: &'a [u8],
+    flags: OpenFlags,
+}
+impl<'a> UdpSendFuture<'a>{
+    fn new(socket: &'a UdpSocket,buf: &'a [u8],flags: OpenFlags)->Self{
+        Self{
+            socket,
+            buf,
+            flags,
+        }
+    }
+}
+impl<'a> Future for UdpSendFuture{
+    type Output = SyscallResult<usize>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         todo!()
     }
 }

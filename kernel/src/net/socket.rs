@@ -60,11 +60,12 @@ impl SocketTable {
     }
 }
 
-pub enum ShutDownType {
-    ShutdownRead(u32),
-    ShutdownWrite(u32),
-    ShutdownRw(u32),
-}
+/// shutdown
+#[allow(unused)]
+pub const SHUT_RD: u32 = 0;
+pub const SHUT_WR: u32 = 1;
+#[allow(unused)]
+pub const SHUT_RDWR: u32 = 2;
 
 bitflags! {
     /// socket type, use when you alloc a socket , didn't impl yet
@@ -220,7 +221,7 @@ impl From<SocketAddressV6> for IpListenEndpoint {
 
 /// for syscall on net part , return SyscallResult
 #[async_trait]
-pub trait Socket {
+pub trait Socket :File{
     fn bind(&self, addr: IpListenEndpoint) -> SyscallResult;
     async fn connect(&self, addr: &[u8]) -> SyscallResult;
     async fn listen(&self) -> SyscallResult;

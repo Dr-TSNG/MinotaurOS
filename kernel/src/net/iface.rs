@@ -4,7 +4,7 @@ use alloc::vec;
 
 use smoltcp::iface::{Config, Interface, SocketHandle, SocketSet};
 use smoltcp::phy::{Device, Loopback, Medium};
-use smoltcp::socket::{udp, AnySocket};
+use smoltcp::socket::{udp, AnySocket, tcp};
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpCidr};
 
@@ -42,6 +42,12 @@ impl<'a> NetInterface<'a> {
         self.inner.lock().as_mut().unwrap().sockets_set.add(socket)
     }
 
+    pub fn remove(&self,handler:SocketHandle){
+        self.inner_handler(|inner|{
+            inner.sockets_set.remove(handler);
+        });
+    }
+
     pub fn handle_udp_socket<T>(
         &self,
         handler: SocketHandle,
@@ -54,6 +60,27 @@ impl<'a> NetInterface<'a> {
             .unwrap()
             .sockets_set
             .get_mut::<udp::Socket>(handler))
+    }
+
+    pub fn inner_handler<T>(&self, f: impl FnOnce(&mut InterfaceInner<'a>) -> T) -> T {
+        f(
+            &mut self.inner.lock().as_mut().unwrap()
+        )
+    }
+
+    pub fn handle_tcp_socket<T>(
+        &self,
+        handler: SocketHandle,
+        f: impl FnOnce(&mut tcp::Socket) -> T,
+    ){
+        f(      self
+                .inner
+                .lock()
+                .as_mut()
+                .unwrap()
+                .sockets_set
+                .get_mut::<tcp::Socket>(handler)
+        )
     }
 
     pub fn inner_handle<T>(&self, f: impl FnOnce(&mut InterfaceInner<'a>) -> T) -> T {
