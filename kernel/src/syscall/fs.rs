@@ -431,7 +431,7 @@ pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize)
 
     let future = current_thread().event_bus.suspend_with(
         Event::KILL_THREAD,
-        IOMultiplexFuture::new(fds, ufds),
+        IOMultiplexFuture::new(fds, VirtAddr(ufds)),
     );
     let mask_bak = current_thread().signals.get_mask();
     if let Some(sigmask) = sigmask {

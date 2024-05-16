@@ -14,11 +14,11 @@ use crate::result::{Errno, SyscallResult};
 #[pin_project]
 pub struct IOMultiplexFuture {
     fds: Vec<PollFd>,
-    ufds: usize,
+    ufds: VirtAddr,
 }
 
 impl IOMultiplexFuture {
-    pub fn new(fds: Vec<PollFd>, ufds: usize) -> Self {
+    pub fn new(fds: Vec<PollFd>, ufds: VirtAddr) -> Self {
         Self { fds, ufds }
     }
 }
@@ -68,7 +68,7 @@ impl Future for IOMultiplexFuture {
         if cnt > 0 {
             debug!("[IOMultiplexFuture] event happens: {}", cnt);
             let slice = current_process().inner.lock()
-                .addr_space.user_slice_w(VirtAddr(*this.ufds), size_of::<PollFd>() * this.fds.len())?;
+                .addr_space.user_slice_w(*this.ufds, size_of::<PollFd>() * this.fds.len())?;
             bytemuck::cast_slice_mut(slice).copy_from_slice(&this.fds);
             Poll::Ready(Ok(cnt))
         } else {
