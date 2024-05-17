@@ -23,5 +23,20 @@ pub fn current_time_duration() -> Duration {
 这两个事件都使用Duration表示，转化为Duration后是否完全一致呢？
 
 
-# 
+# 关于文件系统与Socket之间的关联
+在TcpSocket::new()中，最终返回的情况是：
+
+Self {
+    socket_handle: handler,
+    inner: Mutex::new(TcpInner {
+        local_endpoint: IpListenEndpoint { addr: None, port },
+        remote_endpoint: None,
+        last_state: tcp::State::Closed,
+        recv_buf_size: BUFFER_SIZE,
+        send_buf_size: BUFFER_SIZE,
+    }),
+    file_data: FileMeta::new(),
+}
+
+中的FileMeta::new()如何创建Inode节点。
 

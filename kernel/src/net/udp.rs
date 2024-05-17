@@ -1,25 +1,28 @@
+#![allow(unused)]
+
 use alloc::boxed::Box;
 use alloc::vec;
+use async_trait::async_trait;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use async_trait::async_trait;
-use log::{info, log};
+use log::{debug, info, log};
 use managed::{Managed, ManagedSlice};
 
+use crate::fs::ffi::{InodeMode, OpenFlags};
 use smoltcp::iface::SocketHandle;
+use smoltcp::phy::PacketMeta;
 use smoltcp::socket;
-use smoltcp::socket::udp::PacketMetadata;
+use smoltcp::socket::udp::{PacketMetadata, SendError, UdpMetadata};
 use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
 use xmas_elf::program::Flags;
-use crate::fs::ffi::{InodeMode, OpenFlags};
 
 use crate::fs::file::{File, FileMeta, Seek};
 use crate::fs::inode::Inode;
 use crate::net::iface::NET_INTERFACE;
 use crate::net::socket::Socket;
 use crate::net::socket::{endpoint, SocketAddressV4, SocketType, BUFFER_SIZE};
-use crate::result::Errno::{EAGAIN, EINVAL, EOPNOTSUPP};
+use crate::result::Errno::{EAGAIN, EINVAL, ENOBUFS, ENOTCONN, EOPNOTSUPP};
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
@@ -35,17 +38,17 @@ struct UdpSocketInner {
 }
 impl UdpSocket {
     pub fn new() -> Self {
-        let recv = smoltcp::socket::udp::PacketBuffer::new(
+        let recv = socket::udp::PacketBuffer::new(
             vec![PacketMetadata::EMPTY, PacketMetadata::EMPTY],
-            vec![0 as u8; BUFFER_SIZE],
+            vec![0u8; BUFFER_SIZE],
         );
-        let send = smoltcp::socket::udp::PacketBuffer::new(
+        let send = socket::udp::PacketBuffer::new(
             vec![PacketMetadata::EMPTY, PacketMetadata::EMPTY],
-            vec![0 as u8; BUFFER_SIZE],
+            vec![0u8; BUFFER_SIZE],
         );
         let socket = socket::udp::Socket::new(recv, send);
         let socket_handle = NET_INTERFACE.add_socket(socket);
-        log::info!("[UdpSocket::new] new {}", socket_handle);
+        info!("[UdpSocket::new] new {}", socket_handle);
         NET_INTERFACE.poll();
         Self {
             inner: Mutex::new(UdpSocketInner {
@@ -70,29 +73,29 @@ impl File for UdpSocket {
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR{
+        if inode.metadata().mode == InodeMode::IFDIR {
             return Err(Errno::EISDIR);
         }
         let mut inner = self.file_data.inner.lock().await;
-        let count = inode.read(buf,inner.pos).await?;
-        inner.pos+=count;
+        let count = inode.read(buf, inner.pos).await?;
+        inner.pos += count;
         Ok(count)
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode==InodeMode::IFDIR{
+        if inode.metadata().mode == InodeMode::IFDIR {
             return Err(Errno::EISDIR);
         }
         let mut inner = self.file_data.inner.lock().await;
-        let count = inode.write(buf,inner.pos).await?;
-        inner.pos+=count;
+        let count = inode.write(buf, inner.pos).await?;
+        inner.pos += count;
         Ok(count)
     }
 
     async fn truncate(&self, size: isize) -> SyscallResult {
         let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR{
+        if inode.metadata().mode == InodeMode::IFDIR {
             return Err(Errno::EISDIR);
         }
         inode.truncate(size).await?;
@@ -112,21 +115,39 @@ impl File for UdpSocket {
         inner.pos = match seek {
             Seek::Set(offset) => {
                 if offset < 0 {
-                    return Err(Errno::EINVAL);
+                    return Err(EINVAL);
                 }
                 offset
             }
-            Seek::Cur(offset) => {
-                match inner.pos.checked_add(offset) {
-                    Some(new_pos) => new_pos,
-                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
+            Seek::Cur(offset) => match inner.pos.checked_add(offset) {
+                Some(new_pos) => new_pos,
+                None => {
+                    return Err(if offset < 0 {
+                        EINVAL
+                    } else {
+                        Errno::EOVERFLOW
+                    })
                 }
-            }
+            },
             Seek::End(offset) => {
-                let size = self.file_data.inode.as_ref().unwrap().metadata().inner.lock().size;
+                let size = self
+                    .file_data
+                    .inode
+                    .as_ref()
+                    .unwrap()
+                    .metadata()
+                    .inner
+                    .lock()
+                    .size;
                 match size.checked_add(offset) {
                     Some(new_pos) => new_pos,
-                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
+                    None => {
+                        return Err(if offset < 0 {
+                            EINVAL
+                        } else {
+                            Errno::EOVERFLOW
+                        })
+                    }
                 }
             }
         };
@@ -165,7 +186,6 @@ impl Socket for UdpSocket {
 
     async fn connect(&self, addr: &[u8]) -> SyscallResult {
         // let fut = Box::pin(async move {
-
         let remote_endpoint = endpoint(addr)?;
         let mut inner = self.inner.lock();
         inner.remote_endpoint = Some(remote_endpoint);
@@ -188,7 +208,7 @@ impl Socket for UdpSocket {
                         }
                     };
                 }
-                log::info!("[Udp::bind] bind to {:?}", endpoint);
+                info!("[Udp::bind] bind to {:?}", endpoint);
                 Ok(())
             } else {
                 // log::info!("[Udp::bind] bind to {:?}", remote_endpoint);
@@ -196,17 +216,17 @@ impl Socket for UdpSocket {
             }
         })?;
         NET_INTERFACE.poll();
-        return SyscallResult::Ok(());
+        return Ok(());
         //});
         //fut.await
     }
 
     async fn listen(&self) -> SyscallResult {
-        SyscallResult::Err(EOPNOTSUPP)
+        Err(EOPNOTSUPP)
     }
 
     async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult {
-        SyscallResult::Err(EOPNOTSUPP)
+        Err(EOPNOTSUPP)
     }
 
     fn set_send_buf_size(&self, size: usize) -> SyscallResult {
@@ -220,7 +240,7 @@ impl Socket for UdpSocket {
     }
 
     fn set_keep_live(&self, enabled: bool) -> SyscallResult {
-        SyscallResult::Err(EOPNOTSUPP)
+        Err(EOPNOTSUPP)
     }
 
     fn dis_connect(&self, how: u32) -> SyscallResult {
@@ -235,15 +255,15 @@ impl Socket for UdpSocket {
         todo!()
     }
 }
-impl Drop for UdpSocket{
+impl Drop for UdpSocket {
     fn drop(&mut self) {
-        log::info!(
+        info!(
             "[UdpSocket::drop] drop socket {}, remote endpoint {:?}",
             self.socket_handler,
             self.inner.lock().remote_endpoint
         );
-        NET_INTERFACE.handle_udp_socket(self.socket_handler,|socket|{
-            if socket.is_open(){
+        NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| {
+            if socket.is_open() {
                 socket.close();
             }
         });
@@ -252,79 +272,111 @@ impl Drop for UdpSocket{
     }
 }
 
-struct UdpRecvFuture<'a>{
+struct UdpRecvFuture<'a> {
     socket: &'a UdpSocket,
-    buf:ManagedSlice<'a,u8>,
+    buf: ManagedSlice<'a, u8>,
     flags: OpenFlags,
 }
 impl<'a> UdpRecvFuture<'a> {
-    fn new<S>(socket:&'a UdpSocket,buf: S,flags: OpenFlags)->Self
+    fn new<S>(socket: &'a UdpSocket, buf: S, flags: OpenFlags) -> Self
     where
-        S: Into<ManagedSlice<'a,u8>>
+        S: Into<ManagedSlice<'a, u8>>,
     {
-        Self{
+        Self {
             socket,
-            buf:buf.into(),
+            buf: buf.into(),
             flags,
         }
     }
 }
-impl<'a> Future for UdpRecvFuture{
+impl<'a> Future for UdpRecvFuture<'a> {
     type Output = SyscallResult<usize>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         NET_INTERFACE.poll();
-        let ret = NET_INTERFACE.handle_udp_socket(self.socket.socket_handler,|socket|{
-            if !socket.can_recv(){
-                log::info!("[UdpRecvFuture::poll] cannot recv yet");
-                if self.flags.contains(OpenFlags::O_NONBLOCK){
-                    log::info!("[UdpRecvFuture::poll] already set nonblock");
+        let ret = NET_INTERFACE.handle_udp_socket(self.socket.socket_handler, |socket| {
+            if !socket.can_recv() {
+                info!("[UdpRecvFuture::poll] cannot recv yet");
+                if self.flags.contains(OpenFlags::O_NONBLOCK) {
+                    info!("[UdpRecvFuture::poll] already set nonblock");
                     return Poll::Ready(Err(EAGAIN));
                 }
                 socket.register_recv_waker(cx.waker());
                 return Poll::Pending;
             }
-            log::info!("[UdpRecvFuture::poll] start to recv...");
+            info!("[UdpRecvFuture::poll] start to recv...");
             let this = self.get_mut();
-            Poll::Ready(
-                {
-                    let (ret,meta) = socket
-                        .recv_slice(&mut this.buf)
-                        .ok()
-                        .ok_or(Errno::ENOTCONN)?;
-                    let remote = Some(meta.endpoint);
-                    info!(
-                        "[UdpRecvFuture::poll] {:?} <- {:?}",
-                        socket.endpoint(),
-                        remote);
-                    this.socket.inner.lock().remote_endpoint = remote;
-                    log::debug!("[UdpRecvFuture::poll] recv {} bytes", ret);
-                    Ok(ret)
-                }
-            )
+            Poll::Ready({
+                let (ret, meta) = socket
+                    .recv_slice(&mut this.buf)
+                    .ok()
+                    .ok_or(ENOTCONN)?;
+                let remote = Some(meta.endpoint);
+                info!(
+                    "[UdpRecvFuture::poll] {:?} <- {:?}",
+                    socket.endpoint(),
+                    remote
+                );
+                this.socket.inner.lock().remote_endpoint = remote;
+                debug!("[UdpRecvFuture::poll] recv {} bytes", ret);
+                Ok(ret)
+            })
         });
         NET_INTERFACE.poll();
         ret
     }
 }
-struct UdpSendFuture<'a>{
+struct UdpSendFuture<'a> {
     socket: &'a UdpSocket,
     buf: &'a [u8],
     flags: OpenFlags,
 }
-impl<'a> UdpSendFuture<'a>{
-    fn new(socket: &'a UdpSocket,buf: &'a [u8],flags: OpenFlags)->Self{
-        Self{
-            socket,
-            buf,
-            flags,
-        }
+impl<'a> UdpSendFuture<'a> {
+    fn new(socket: &'a UdpSocket, buf: &'a [u8], flags: OpenFlags) -> Self {
+        Self { socket, buf, flags }
     }
 }
-impl<'a> Future for UdpSendFuture{
+impl<'a> Future for UdpSendFuture<'a> {
     type Output = SyscallResult<usize>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        todo!()
+        NET_INTERFACE.poll();
+        let ret = NET_INTERFACE.handle_udp_socket(self.socket.socket_handler, |socket| {
+            if !socket.can_send() {
+                info!("[UdpSendFuture::poll] cannot send yet");
+                if self.flags.contains(OpenFlags::O_NONBLOCK) {
+                    info!("[UdpSendFuture::poll] already set nonblock");
+                    return Poll::Ready(Err(EAGAIN));
+                }
+                socket.register_send_waker(cx.waker());
+                return Poll::Pending;
+            }
+            info!("[UdpSendFuture::poll] start to send...");
+            let remote = self.socket.inner.lock().remote_endpoint;
+            let this = self.get_mut();
+            let meta = UdpMetadata {
+                endpoint: remote.unwrap(),
+                meta: PacketMeta::default(),
+            };
+            let len = this.buf.len();
+            info!(
+                "[UdpSendFuture::poll] {:?} -> {:?}",
+                socket.endpoint(),
+                remote
+            );
+            let ret = socket.send_slice(&this.buf, meta);
+            Poll::Ready(if let Some(err) = ret.err() {
+                if err == SendError::Unaddressable {
+                    Err(ENOTCONN)
+                } else {
+                    Err(ENOBUFS)
+                }
+            } else {
+                debug!("[UdpSendFuture::poll] send {} bytes", len);
+                Ok(len)
+            })
+        });
+        NET_INTERFACE.poll();
+        ret
     }
 }

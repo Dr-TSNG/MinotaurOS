@@ -221,7 +221,7 @@ impl From<SocketAddressV6> for IpListenEndpoint {
 
 /// for syscall on net part , return SyscallResult
 #[async_trait]
-pub trait Socket :File{
+pub trait Socket: File {
     fn bind(&self, addr: IpListenEndpoint) -> SyscallResult;
     async fn connect(&self, addr: &[u8]) -> SyscallResult;
     async fn listen(&self) -> SyscallResult;
