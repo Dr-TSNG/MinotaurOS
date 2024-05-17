@@ -30,6 +30,10 @@ impl ASRegion for LazyRegion {
         &self.metadata
     }
 
+    fn metadata_mut(&mut self) -> &mut ASRegionMeta {
+        &mut self.metadata
+    }
+
     fn map(&self, root_pt: PageTable, overwrite: bool) -> Vec<HeapFrameTracker> {
         let mut dirs = vec![];
         let mut vpn = self.metadata.start;

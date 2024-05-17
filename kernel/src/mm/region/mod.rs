@@ -19,6 +19,8 @@ use crate::result::{Errno, SyscallResult};
 pub trait ASRegion: Send + Sync {
     fn metadata(&self) -> &ASRegionMeta;
 
+    fn metadata_mut(&mut self) -> &mut ASRegionMeta;
+
     /// 将区域映射到页表，返回创建的页表帧
     fn map(&self, root_pt: PageTable, overwrite: bool) -> Vec<HeapFrameTracker>;
 
@@ -39,6 +41,15 @@ pub trait ASRegion: Send + Sync {
     /// 错误处理
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
         Err(Errno::EINVAL)
+    }
+}
+
+impl dyn ASRegion {
+    /// 设置区域的权限
+    ///
+    /// SAFETY: 需要手动调用 `map` 或 `unmap` 来更新页表
+    pub fn set_perms(&mut self, perms: ASPerms) {
+        self.metadata_mut().perms = perms;
     }
 }
 

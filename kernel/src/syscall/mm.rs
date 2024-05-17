@@ -1,3 +1,4 @@
+use log::debug;
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::fd::FdNum;
 use crate::mm::ffi::{MapFlags, MapProt};
@@ -29,6 +30,10 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
         0 => None,
         _ => flags.contains(MapFlags::MAP_FIXED).then_some(VirtAddr::from(addr).into()),
     };
+    debug!(
+        "[mmap] start: {:?}, len: {}, prot: {:?}, flags: {:?}, fd: {:?}, offset: {}",
+        start, len, prot, flags, fd, offset,
+    );
     let is_shared = flags.contains(MapFlags::MAP_SHARED);
     let mut proc_inner = current_process().inner.lock();
     if !flags.contains(MapFlags::MAP_ANONYMOUS) && fd != -1 {
@@ -40,4 +45,14 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
     } else {
         proc_inner.addr_space.mmap(None, start, len.div_ceil(PAGE_SIZE), prot.into(), None, 0, is_shared)
     }
+}
+
+pub fn sys_mprotect(addr: usize, len: usize, prot: u32) -> SyscallResult<usize> {
+    if addr % PAGE_SIZE != 0 {
+        return Err(Errno::EINVAL);
+    }
+    let prot = MapProt::from_bits_truncate(prot);
+    debug!("[mprotect] addr: {:?}, len: {}, prot: {:?}",VirtAddr(addr), len, prot);
+    current_process().inner.lock().addr_space.set_perms(VirtAddr(addr).into(), len.div_ceil(PAGE_SIZE), prot.into())?;
+    Ok(0)
 }

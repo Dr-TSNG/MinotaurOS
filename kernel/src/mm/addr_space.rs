@@ -342,7 +342,10 @@ impl AddressSpace {
 
     pub fn munmap(&mut self, start: VirtPageNum, pages: usize) -> SyscallResult {
         let mut regions = vec![];
-        for (vpn, region) in self.regions.range_mut(start..start + pages) {
+        for (vpn, region) in self.regions.range_mut(..start + pages) {
+            if *vpn + pages <= start {
+                continue;
+            }
             if !region.metadata().perms.contains(ASPerms::U) {
                 return Err(Errno::EPERM);
             }
@@ -350,6 +353,17 @@ impl AddressSpace {
         }
         for vpn in regions {
             self.unmap_region(vpn);
+        }
+        Ok(())
+    }
+
+    pub fn set_perms(&mut self, start: VirtPageNum, pages: usize, perms: ASPerms) -> SyscallResult {
+        for (vpn, region) in self.regions.range_mut(..start + pages) {
+            if *vpn + pages <= start {
+                continue;
+            }
+            region.set_perms(perms);
+            region.map(self.root_pt, true);
         }
         Ok(())
     }
