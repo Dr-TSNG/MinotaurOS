@@ -92,6 +92,7 @@ impl Segment {
                     return Some(tracker);
                 }
             }
+            now += 1;
         }
         self.cur = self.end.0 - self.start.0;
         None
