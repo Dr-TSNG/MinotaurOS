@@ -5,6 +5,8 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
+pub mod ffi;
+pub mod futex;
 pub mod mutex;
 pub mod once;
 

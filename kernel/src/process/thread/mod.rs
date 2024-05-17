@@ -1,6 +1,8 @@
 use alloc::sync::Arc;
-use core::cell::UnsafeCell;
-use log::info;
+use core::cell::SyncUnsafeCell;
+use log::{debug, info};
+use crate::arch::VirtAddr;
+use crate::process::monitor::THREAD_MONITOR;
 use crate::process::Process;
 use crate::process::thread::event_bus::{Event, EventBus};
 use crate::process::thread::resource::ResourceUsage;
@@ -19,7 +21,7 @@ pub struct Thread {
     pub process: Arc<Process>,
     pub signals: SignalController,
     pub event_bus: EventBus,
-    inner: UnsafeCell<ThreadInner>,
+    inner: SyncUnsafeCell<ThreadInner>,
 }
 
 pub struct ThreadInner {
@@ -31,13 +33,9 @@ pub struct ThreadInner {
 
 #[derive(Default)]
 pub struct TidAddress {
-    pub set_tid_address: Option<usize>,
-    pub clear_tid_address: Option<usize>,
+    pub set: Option<VirtAddr>,
+    pub clear: Option<VirtAddr>,
 }
-
-unsafe impl Send for Thread {}
-
-unsafe impl Sync for Thread {}
 
 impl Thread {
     pub fn new(
@@ -58,7 +56,7 @@ impl Thread {
             process,
             signals,
             event_bus: EventBus::default(),
-            inner: UnsafeCell::new(inner),
+            inner: SyncUnsafeCell::new(inner),
         };
         Arc::new(thread)
     }
@@ -89,6 +87,14 @@ impl Thread {
     }
 
     pub fn on_exit(self: Arc<Self>) {
+        if let Some(tid_address) = self.inner().tid_address.clear {
+            if let Ok(buf) = self.process.inner.lock().addr_space.user_slice_w(tid_address, 4) {
+                buf.copy_from_slice(&0u32.to_ne_bytes());
+            }
+            debug!("[futex] Wake up clear tid address {:?}", tid_address);
+            self.process.inner.lock().futex_queue.wake(tid_address, 1);
+        }
+        THREAD_MONITOR.lock().remove(self.tid.0);
         let exit_code = self.inner().exit_code.unwrap();
         self.process.on_thread_exit(self.tid.0, exit_code);
     }

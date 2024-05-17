@@ -8,7 +8,7 @@ use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::process::ffi::{CloneFlags, Rlimit, RlimitCmd, WaitOptions};
-use crate::process::monitor::PROCESS_MONITOR;
+use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
 use crate::process::{Pid, Tid};
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
@@ -26,11 +26,12 @@ pub fn sys_exit_group(exit_code: i8) -> SyscallResult<usize> {
     Ok(0)
 }
 
-pub fn sys_set_tid_address(tidptr: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    if proc_inner.addr_space.user_slice_w(VirtAddr(tidptr), size_of::<usize>()).is_ok() {
-        current_thread().inner().tid_address.clear_tid_address = Some(tidptr);
-    }
+pub fn sys_set_tid_address(tid: usize) -> SyscallResult<usize> {
+    debug!("[set_tid_address] Set clear at {:#x}", tid);
+    current_thread().inner().tid_address.clear = match tid {
+        0 => None,
+        _ => Some(VirtAddr(tid)),
+    };
     Ok(current_thread().tid.0)
 }
 
@@ -54,16 +55,12 @@ pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
     Err(Errno::EINVAL)
 }
 
-pub fn sys_tkill(pid: Pid, tid: Tid, signal: usize) -> SyscallResult<usize> {
+pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
     let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
-    let monitor = PROCESS_MONITOR.lock();
-    if let Some(process) = monitor.get(pid).upgrade() {
-        if let Some(thread) = process.inner.lock().threads.get(&tid) {
-            if let Some(thread) = thread.upgrade() {
-                thread.recv_signal(signal);
-                return Ok(0);
-            }
-        }
+    let monitor = THREAD_MONITOR.lock();
+    if let Some(thread) = monitor.get(tid).upgrade() {
+        thread.recv_signal(signal);
+        return Ok(0);
     }
     Err(Errno::EINVAL)
 }

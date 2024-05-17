@@ -21,7 +21,7 @@ pub async fn sys_rt_sigsuspend(mask: usize) -> SyscallResult<usize> {
 
 pub fn sys_rt_sigaction(sig: i32, act: usize, oact: usize) -> SyscallResult<usize> {
     let signal = Signal::try_from(sig as usize).map_err(|_| Errno::EINVAL)?;
-    debug!("[sigaction] signal: {:?} new: {}", signal, act == 0);
+    debug!("[sigaction] signal: {:?} new: {}", signal, act != 0);
     if signal == Signal::SIGKILL || signal == Signal::SIGSTOP {
         return Err(Errno::EINVAL);
     }

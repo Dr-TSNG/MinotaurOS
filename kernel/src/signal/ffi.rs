@@ -38,9 +38,11 @@ pub enum Signal {
     SIGIO = 29,
     SIGPWR = 30,
     SIGSYS = 31,
+    SIGRTMIN = 32,
+    SIGRT1 = 33,
 }
 
-pub const SIG_MAX: usize = 32;
+pub const SIG_MAX: usize = 34;
 pub const SIG_ERR: usize = usize::MAX;
 pub const SIG_DFL: usize = 0;
 pub const SIG_IGN: usize = 1;
@@ -85,6 +87,8 @@ bitflags! {
         const SIGIO     = Signal::SIGIO.sigset_val();
         const SIGPWR    = Signal::SIGPWR.sigset_val();
         const SIGSYS    = Signal::SIGSYS.sigset_val();
+        const SIGRTMIN  = Signal::SIGRTMIN.sigset_val();
+        const SIGRT1    = Signal::SIGRT1.sigset_val();
     }
 }
 

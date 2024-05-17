@@ -1,5 +1,7 @@
 use alloc::collections::VecDeque;
+use alloc::sync::Arc;
 use alloc::vec;
+use core::ops::Deref;
 use log::{debug, info};
 use crate::processor::current_thread;
 use crate::signal::ffi::{SIG_MAX, SigAction, Signal, SigSet};
@@ -16,17 +18,9 @@ pub enum SignalHandler {
 impl SignalHandler {
     pub fn kernel(signal: Signal) -> Self {
         match signal {
-            Signal::SIGHUP => Self::Kernel(Self::k_terminate),
-            Signal::SIGINT => Self::Kernel(Self::k_terminate),
-            Signal::SIGILL => Self::Kernel(Self::k_terminate),
-            Signal::SIGABRT => Self::Kernel(Self::k_terminate),
-            Signal::SIGBUS => Self::Kernel(Self::k_terminate),
-            Signal::SIGKILL => Self::Kernel(Self::k_terminate),
-            Signal::SIGSEGV => Self::Kernel(Self::k_terminate),
-            Signal::SIGALRM => Self::Kernel(Self::k_terminate),
-            Signal::SIGTERM => Self::Kernel(Self::k_terminate),
-            Signal::SIGSTOP => Self::Kernel(Self::k_terminate),
-            _ => Self::Kernel(Self::k_ignore),
+            Signal::SIGCHLD => Self::Kernel(Self::k_ignore),
+            Signal::SIGCONT => Self::Kernel(Self::k_ignore),
+            _ => Self::Kernel(Self::k_terminate),
         }
     }
 
@@ -69,11 +63,10 @@ impl Extend<Signal> for SignalQueue {
 
 pub struct SignalController(Mutex<SignalControllerInner>);
 
-#[derive(Clone)]
 struct SignalControllerInner {
     pending: SignalQueue,
     blocked: SigSet,
-    handlers: [SignalHandler; SIG_MAX],
+    handlers: Arc<Mutex<[SignalHandler; SIG_MAX]>>,
 }
 
 pub struct SignalPoll {
@@ -82,20 +75,36 @@ pub struct SignalPoll {
     pub blocked_before: SigSet,
 }
 
-impl Clone for SignalController {
-    fn clone(&self) -> Self {
-        Self(Mutex::new(self.0.lock().clone()))
-    }
-}
-
 impl SignalController {
     pub fn new() -> Self {
+        let handlers = core::array::from_fn(|signal| {
+            SignalHandler::kernel(signal.try_into().unwrap())
+        });
         let inner = SignalControllerInner {
             pending: SignalQueue::default(),
             blocked: SigSet::default(),
-            handlers: core::array::from_fn(|signal| SignalHandler::kernel(signal.try_into().unwrap())),
+            handlers: Arc::new(Mutex::new(handlers)),
         };
         Self(Mutex::new(inner))
+    }
+
+    pub fn clone_private(&self) -> Self {
+        let inner = self.0.lock();
+        let handlers = inner.handlers.lock().deref().clone();
+        Self(Mutex::new(SignalControllerInner {
+            pending: SignalQueue::default(),
+            blocked: inner.blocked.clone(),
+            handlers: Arc::new(Mutex::new(handlers)),
+        }))
+    }
+
+    pub fn clone_shared(&self) -> Self {
+        let inner = self.0.lock();
+        Self(Mutex::new(SignalControllerInner {
+            pending: SignalQueue::default(),
+            blocked: inner.blocked.clone(),
+            handlers: inner.handlers.clone(),
+        }))
     }
 
     /// SAFETY: 该函数只应该由 [Thread::recv_signal] 调用
@@ -112,11 +121,11 @@ impl SignalController {
     }
 
     pub fn get_handler(&self, signal: Signal) -> SignalHandler {
-        self.0.lock().handlers[signal as usize]
+        self.0.lock().handlers.lock()[signal as usize]
     }
 
     pub fn set_handler(&self, signal: Signal, handler: SignalHandler) {
-        self.0.lock().handlers[signal as usize] = handler;
+        self.0.lock().handlers.lock()[signal as usize] = handler;
     }
 
     pub fn poll(&self) -> Option<SignalPoll> {
@@ -129,7 +138,7 @@ impl SignalController {
                 continue;
             }
             let blocked_before = inner.blocked;
-            let handler = inner.handlers[signal as usize];
+            let handler = inner.handlers.lock()[signal as usize];
             if let SignalHandler::User(sig_action) = &handler {
                 inner.blocked.insert(signal.into());
                 inner.blocked |= sig_action.sa_mask;

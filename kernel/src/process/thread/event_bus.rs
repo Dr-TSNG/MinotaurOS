@@ -5,7 +5,6 @@ use core::pin::{Pin, pin};
 use core::task::{Context, Poll, Waker};
 use bitflags::bitflags;
 use futures::future::{Either, select};
-use log::debug;
 use crate::arch::VirtAddr;
 use crate::process::ffi::WaitOptions;
 use crate::process::monitor::PROCESS_MONITOR;
@@ -39,14 +38,13 @@ impl EventBus {
 
     pub async fn suspend_with<T, F>(&self, event: Event, fut: F) -> SyscallResult<T>
         where F: Future<Output=SyscallResult<T>> + Unpin {
-        match select(fut, pin!(self.wait(event))).await {
-            Either::Left((ret, _)) => ret,
-            Either::Right(_) => Err(Errno::EINTR),
+        match select(pin!(self.wait(event)), fut).await {
+            Either::Left(_) => Err(Errno::EINTR),
+            Either::Right((ret, _)) => ret,
         }
     }
 
     pub(super) fn recv_event(&self, event: Event) {
-        debug!("Receive event {:?}", event);
         let mut inner = self.0.lock();
         inner.event |= event;
         let new_event = inner.event;

@@ -2,6 +2,7 @@ mod fs;
 mod mm;
 mod process;
 mod signal;
+mod sync;
 mod system;
 mod time;
 
@@ -9,6 +10,7 @@ use fs::*;
 use mm::*;
 use process::*;
 use signal::*;
+use sync::*;
 use system::*;
 use time::*;
 
@@ -59,6 +61,7 @@ pub enum SyscallCode {
     Unlinkat = 35,
     Umount2 = 39,
     Mount = 40,
+    Statfs = 43,
     Fstatfs = 44,
     Ftruncate = 46,
     Faccessat = 48,
@@ -148,6 +151,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Unlinkat => async_syscall!(sys_unlinkat, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Umount2 => async_syscall!(sys_umount2, args[0], args[1] as u32),
         SyscallCode::Mount => async_syscall!(sys_mount, args[0], args[1], args[2], args[3] as u32, args[4]),
+        SyscallCode::Statfs => async_syscall!(sys_statfs, args[0], args[1]),
         SyscallCode::Fstatfs => syscall!(sys_fstatfs, args[0] as FdNum, args[1]),
         SyscallCode::Ftruncate => async_syscall!(sys_ftruncate, args[0] as FdNum, args[1] as isize),
         SyscallCode::Faccessat => async_syscall!(sys_faccessat, args[0] as FdNum, args[1], args[2] as u32, args[3] as u32),
@@ -175,14 +179,14 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Exit => syscall!(sys_exit, args[0] as i8),
         SyscallCode::ExitGroup => syscall!(sys_exit_group, args[0] as i8),
         SyscallCode::SetTidAddress => syscall!(sys_set_tid_address, args[0]),
-        // SyscallCode::Futex
+        SyscallCode::Futex => async_syscall!(sys_futex, args[0], args[1] as i32, args[2] as u32, args[3], args[4], args[5]),
         SyscallCode::Nanosleep => async_syscall!(sys_nanosleep, args[0], args[1]),
         // SyscallCode::Setitimer
         SyscallCode::ClockGettime => syscall!(sys_clock_gettime, args[0], args[1]),
         SyscallCode::Syslog => syscall!(sys_syslog, args[0] as i32, args[1], args[2]),
         SyscallCode::SchedYield => async_syscall!(sys_yield),
         SyscallCode::Kill => syscall!(sys_kill, args[0], args[1]),
-        SyscallCode::Tkill => syscall!(sys_tkill, args[0], args[1], args[2]),
+        SyscallCode::Tkill => syscall!(sys_tkill, args[0], args[1]),
         SyscallCode::RtSigsupend => async_syscall!(sys_rt_sigsuspend, args[0]),
         SyscallCode::RtSigaction => syscall!(sys_rt_sigaction, args[0] as i32, args[1], args[2]),
         SyscallCode::RtSigprocmask => syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2]),

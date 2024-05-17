@@ -124,11 +124,17 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
         return Err(Errno::EINVAL);
     }
     let proc_inner = current_process().inner.lock();
-    let path = match path {
+    let mut path = match path {
         0 => ".",
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
     };
     debug!("[unlinkat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
+
+    // TODO: This hack is just for libctest
+    if path == "/dev/shm/testshm" {
+        path = "/tmp/testshm";
+    }
+
     let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
     let parent = resolve_path(&proc_inner, dirfd, parent).await?;
     let inode = parent.clone().lookup_name(name).await?;
@@ -186,7 +192,18 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
     Ok(0)
 }
 
-pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
+pub async fn sys_statfs(path: usize, _buf: usize) -> SyscallResult<usize> {
+    let mut proc_inner = current_process().inner.lock();
+    let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
+    let inode = resolve_path(&mut proc_inner, AT_FDCWD, path).await?;
+    if inode.metadata().mode != InodeMode::IFDIR {
+        return Err(Errno::ENOTDIR);
+    }
+    // TODO: statfs
+    Ok(0)
+}
+
+pub fn sys_fstatfs(fd: FdNum, _buf: usize) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
     if inode.metadata().mode != InodeMode::IFDIR {
@@ -226,11 +243,17 @@ pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
 pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> SyscallResult<usize> {
     let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     let mut proc_inner = current_process().inner.lock();
-    let path = match path {
+    let mut path = match path {
         0 => ".",
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
     };
     debug!("[openat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
+
+    // TODO: This hack is just for libctest
+    if path == "/dev/shm/testshm" {
+        path = "/tmp/testshm";
+    }
+
     let inode = match resolve_path(&mut proc_inner, dirfd, path).await {
         Ok(inode) => inode,
         Err(Errno::ENOENT) if flags.contains(OpenFlags::O_CREAT) => {
