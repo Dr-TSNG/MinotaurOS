@@ -35,8 +35,7 @@ Self {
         recv_buf_size: BUFFER_SIZE,
         send_buf_size: BUFFER_SIZE,
     }),
-    file_data: FileMeta::new(),
+    file_data: FileMeta::new(None),
 }
 
 中的FileMeta::new()如何创建Inode节点。
-

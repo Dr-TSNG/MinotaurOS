@@ -37,7 +37,7 @@ struct UdpSocketInner {
     sendbuf_size: usize,
 }
 impl UdpSocket {
-    pub fn new() -> Self {
+    pub fn new(metadata: FileMeta) -> Self {
         let recv = socket::udp::PacketBuffer::new(
             vec![PacketMetadata::EMPTY, PacketMetadata::EMPTY],
             vec![0u8; BUFFER_SIZE],
@@ -57,11 +57,7 @@ impl UdpSocket {
                 sendbuf_size: BUFFER_SIZE,
             }),
             socket_handler: socket_handle,
-            file_data: FileMeta {
-                inode: None,
-                prw_lock: Default::default(),
-                inner: Default::default(),
-            },
+            file_data: metadata,
         }
     }
 }
@@ -121,13 +117,7 @@ impl File for UdpSocket {
             }
             Seek::Cur(offset) => match inner.pos.checked_add(offset) {
                 Some(new_pos) => new_pos,
-                None => {
-                    return Err(if offset < 0 {
-                        EINVAL
-                    } else {
-                        Errno::EOVERFLOW
-                    })
-                }
+                None => return Err(if offset < 0 { EINVAL } else { Errno::EOVERFLOW }),
             },
             Seek::End(offset) => {
                 let size = self
@@ -141,13 +131,7 @@ impl File for UdpSocket {
                     .size;
                 match size.checked_add(offset) {
                     Some(new_pos) => new_pos,
-                    None => {
-                        return Err(if offset < 0 {
-                            EINVAL
-                        } else {
-                            Errno::EOVERFLOW
-                        })
-                    }
+                    None => return Err(if offset < 0 { EINVAL } else { Errno::EOVERFLOW }),
                 }
             }
         };
@@ -307,10 +291,7 @@ impl<'a> Future for UdpRecvFuture<'a> {
             info!("[UdpRecvFuture::poll] start to recv...");
             let this = self.get_mut();
             Poll::Ready({
-                let (ret, meta) = socket
-                    .recv_slice(&mut this.buf)
-                    .ok()
-                    .ok_or(ENOTCONN)?;
+                let (ret, meta) = socket.recv_slice(&mut this.buf).ok().ok_or(ENOTCONN)?;
                 let remote = Some(meta.endpoint);
                 info!(
                     "[UdpRecvFuture::poll] {:?} <- {:?}",
