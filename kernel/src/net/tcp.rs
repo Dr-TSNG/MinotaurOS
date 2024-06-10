@@ -45,7 +45,7 @@ struct TcpInner {
     send_buf_size: usize,
 }
 impl TcpSocket {
-    pub fn new() -> Self {
+    pub fn new(metadata: FileMeta) -> Self {
         let tcp_rx_buffer = tcp::SocketBuffer::new(vec![0u8; BUFFER_SIZE]);
         let tcp_tx_buffer = tcp::SocketBuffer::new(vec![0u8; BUFFER_SIZE]);
         let socket = tcp::Socket::new(tcp_rx_buffer, tcp_tx_buffer);
@@ -65,7 +65,7 @@ impl TcpSocket {
                 recv_buf_size: BUFFER_SIZE,
                 send_buf_size: BUFFER_SIZE,
             }),
-            file_data: FileMeta::new(None),
+            file_data: metadata,
         }
     }
 
@@ -202,6 +202,7 @@ impl File for TcpSocket {
 #[async_trait]
 impl Socket for TcpSocket {
     fn bind(&self, addr: IpListenEndpoint) -> SyscallResult {
+        info!("[tcp::bind] bind to: {:?}", addr);
         self.inner.lock().local_endpoint = addr;
         Ok(())
     }
