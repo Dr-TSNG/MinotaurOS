@@ -1,16 +1,18 @@
 use alloc::ffi::CString;
 use alloc::string::ToString;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::cmp::min;
 use core::ffi::CStr;
 use core::mem::size_of;
 use core::time::Duration;
 use log::{debug, info, warn};
+use riscv::register::mie::read;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::devfs::DevFileSystem;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd, VfsFlags};
+use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd, VfsFlags, FdSet, FD_SET_LEN, PollEvents};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
 use crate::fs::pipe::Pipe;
@@ -18,7 +20,7 @@ use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::{TimeSpec, UTIME_NOW, UTIME_OMIT};
-use crate::sched::iomultiplex::IOMultiplexFuture;
+use crate::sched::iomultiplex::{FdSetRWE, IOFormat, IOMultiplexFuture};
 use crate::sched::time::{current_time, TimeoutFuture, TimeoutResult};
 use crate::signal::ffi::SigSet;
 
@@ -176,7 +178,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
         }
     };
     info!(
-        "[mount] source: {}, target: {}, fstype: {}, flags: {:?}, data: {:?}", 
+        "[mount] source: {}, target: {}, fstype: {}, flags: {:?}, data: {:?}",
         source, target, fstype, flags, data,
     );
 
@@ -484,7 +486,7 @@ pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize)
 
     let future = current_thread().event_bus.suspend_with(
         Event::KILL_THREAD,
-        IOMultiplexFuture::new(fds, VirtAddr(ufds)),
+        IOMultiplexFuture::new(fds, IOFormat::PollFds(ufds)),
     );
     let mask_bak = current_thread().signals.get_mask();
     if let Some(sigmask) = sigmask {
@@ -504,6 +506,150 @@ pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize)
     ret
 }
 
+pub async fn sys_pselect6( nfds: FdNum, readfds: usize, writefds: usize, exceptfds: usize, timeout: usize, sigmask: usize,)->SyscallResult<usize>{
+    let proc_inner = current_process().inner.lock();
+    let mut rfds = match readfds{
+        0 => None,
+        _ => {
+            let readfds = proc_inner.addr_space.user_slice_w(VirtAddr(readfds), size_of::<FdSet>())?;
+            Some(unsafe { &mut *(readfds.as_mut_ptr() as *mut FdSet) })
+        }
+    };
+    let mut wfds = match writefds{
+        0 => None,
+        _ => {
+            let writefds = proc_inner.addr_space.user_slice_w(VirtAddr(writefds), size_of::<FdSet>())?;
+            Some(unsafe { &mut *(writefds.as_mut_ptr() as *mut FdSet) })
+        }
+    };
+    let mut efds = match exceptfds{
+        0 => None,
+        _ => {
+            let exceptfds = proc_inner.addr_space.user_slice_w(VirtAddr(readfds), size_of::<FdSet>())?;
+            Some(unsafe { &mut *(exceptfds.as_mut_ptr() as *mut FdSet) })
+        }
+    };
+
+    let timeout = match timeout {
+        0 => None,
+        _ => {
+            let timeout = proc_inner.addr_space.user_slice_r(VirtAddr(timeout), size_of::<TimeSpec>())?;
+            let timeout = TimeSpec::ref_from(timeout).unwrap();
+            Some(Duration::from(*timeout))
+        }
+    };
+    let sigmask = match sigmask {
+        0 => None,
+        _ => {
+            let sigmask = proc_inner.addr_space.user_slice_r(VirtAddr(sigmask), size_of::<SigSet>())?;
+            let sigmask = unsafe { sigmask.as_ptr().cast::<SigSet>().read() };
+            Some(sigmask)
+        }
+    };
+    debug!(
+        "[sys_pselect]: readfds {:?}, writefds {:?}, exceptfds {:?}, timeout {:?}",
+        rfds, wfds, efds, timeout
+    );
+    let fd_slot_bits = 8 * core::mem::size_of::<usize>();
+    let mut fds: Vec<PollFd> =Vec::new();
+    for fd_slot in 0..FD_SET_LEN{
+        for offset in 0..fd_slot_bits{
+            let fd = fd_slot * fd_slot_bits + offset;
+            if fd >= nfds as usize {
+                break;
+            }
+            if let Some(readfds) = rfds.as_ref() {
+                if readfds.fds_bits[fd_slot] & (1 << offset) != 0 {
+                    if !proc_inner.fd_table.get(fd as FdNum).is_ok(){
+                        log::warn!("[sys_pselect] bad fd {}", fd);
+                        return Err(Errno::EBADF);
+                    }
+
+                    fds.push(PollFd {
+                        fd: fd as i32,
+                        events: PollEvents::POLLIN.bits(),
+                        revents: PollEvents::empty().bits(),
+                    })
+                }
+            }
+            if let Some(writefds) = wfds.as_ref() {
+                if writefds.fds_bits[fd_slot] & (1 << offset) != 0 {
+                    if let Some(old_fd) = fds.last() {
+                        if old_fd.fd == fd as i32 {
+                            let events = PollEvents::from_bits(old_fd.events).unwrap()
+                                | PollEvents::POLLOUT;
+                            fds.last_mut().unwrap().events = events.bits();
+                        }
+                    }
+                    else {
+                        if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
+                            log::warn!("[sys_pselect] bad fd {}", fd);
+                            return Err(Errno::EBADF);
+                        }
+                        fds.push(PollFd {
+                            fd: fd as i32,
+                            events: PollEvents::POLLOUT.bits(),
+                            revents: PollEvents::empty().bits(),
+                        })
+                    }
+                }
+            }
+            if let Some(exceptfds) = efds.as_ref() {
+                if exceptfds.fds_bits[fd_slot] & (1 << offset) != 0 {
+                    if let Some(old_fd) = fds.last() {
+                        if old_fd.fd == fd as i32 {
+                            let events = PollEvents::from_bits(old_fd.events).unwrap()
+                                | PollEvents::POLLPRI;
+                            fds.last_mut().unwrap().events = events.bits();
+                        }
+                    }
+                    else {
+                        if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
+                            log::warn!("[sys_pselect] bad fd {}", fd);
+                            return Err(Errno::EBADF);
+                        }
+                        fds.push(PollFd {
+                            fd: fd as i32,
+                            events: PollEvents::POLLPRI.bits(),
+                            revents: PollEvents::empty().bits(),
+                        })
+                    }
+                }
+            }
+        }
+    }
+    if let Some(fds) = rfds.as_mut() {
+        fds.fds_bits.fill(0);
+    }
+    if let Some(fds) = wfds.as_mut() {
+        fds.fds_bits.fill(0);
+    }
+    if let Some(fds) = efds.as_mut() {
+        fds.fds_bits.fill(0);
+    }
+    drop(proc_inner);
+    let future = current_thread().event_bus.suspend_with(
+        Event::KILL_THREAD,
+        IOMultiplexFuture::new(fds, IOFormat::FdSets(FdSetRWE::new(readfds,writefds,exceptfds))),
+    );
+    let mask_bak = current_thread().signals.get_mask();
+    if let Some(sigmask) = sigmask {
+        current_thread().signals.set_mask(sigmask);
+    }
+    let ret = match timeout {
+        Some(timeout) => match TimeoutFuture::new(timeout, future).await {
+            TimeoutResult::Ready(ret) => ret,
+            TimeoutResult::Timeout => {
+                debug!("[ppoll] timeout");
+                Ok(0)
+            }
+        },
+        None => future.await,
+    };
+    current_thread().signals.set_mask(mask_bak);
+    ret
+
+}
 pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, _flags: u32) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let path = match path {
