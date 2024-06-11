@@ -29,7 +29,7 @@ use crate::sync::mutex::Mutex;
 pub struct UdpSocket {
     inner: Mutex<UdpSocketInner>,
     socket_handler: SocketHandle,
-    file_data: FileMeta,
+    pub file_data: FileMeta,
 }
 struct UdpSocketInner {
     remote_endpoint: Option<IpEndpoint>,
@@ -236,7 +236,16 @@ impl Socket for UdpSocket {
     }
 
     fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint> {
-        todo!()
+        NET_INTERFACE.poll();
+        let local = NET_INTERFACE.handle_udp_socket(self.socket_handler,|socket|{
+            socket.endpoint()
+        });
+        NET_INTERFACE.poll();
+        Ok(local)
+    }
+
+    fn remote_endpoint(&self) -> Option<IpEndpoint> {
+        self.inner.lock().remote_endpoint
     }
 }
 impl Drop for UdpSocket {

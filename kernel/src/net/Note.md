@@ -1,13 +1,12 @@
 ## 1
 /net/socket.rs中
 
-// 创建 inode， 赋值给 生成的 udp socket ， inode的类型为 IFSOCK
-// 现在未在 UdpSocket::new()中指定 FileMeta ， new()中设置为None
-// 是在这个函数中指定FileMeta ， 还是改变UdpSocket的new，传入FileMeta，
-// 以及怎么构造FileMeta并传入socket结构体
+// 可以不为Socket file实现具体的Inode
+
+// 在new的接口中加入metadata
 ```rust
 if socket_type.contains(SocketType::SOCK_DGRAM){
-    let socket = UdpSocket::new();
+    let socket = UdpSocket::new(。。。);
     let socket = Arc::new(socket);
     let cur = current_process().inner.lock();
     let file_desc = FileDescriptor::new(socket,flags);

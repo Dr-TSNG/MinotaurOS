@@ -18,7 +18,7 @@ pub struct NetInode {
 static INO_POOL: AtomicUsize = AtomicUsize::new(0);
 
 impl NetInode {
-    pub fn new(fs: &DevFileSystem, parent: Arc<dyn Inode>,socket_id: usize) -> SyscallResult<Arc<Self>> {
+    pub fn new(socket_id: usize) -> SyscallResult<Arc<Self>> {
         let now = TimeSpec::default();
         let metadata = InodeMeta::new(
             INO_POOL.fetch_add(1,Ordering::Acquire),
@@ -26,7 +26,7 @@ impl NetInode {
             InodeMode::IFSOCK,
             format!("socket_{}",socket_id),
             format!("/socket_file_{}",socket_id),
-            Some(parent),
+            None,
             None,
             now.clone(),
             now.clone(),

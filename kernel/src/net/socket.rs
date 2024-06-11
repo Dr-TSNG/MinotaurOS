@@ -10,12 +10,14 @@ use log::__private_api::Value;
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv6Address};
 use crate::fs::fd::{FdNum, FdTable, FileDescriptor};
 use crate::fs::ffi::OpenFlags;
-use crate::fs::file::{File, Seek};
+use crate::fs::file::{File, FileMeta, Seek};
 use crate::net::port::PORT_ALLOCATOR;
 use crate::net::udp::UdpSocket;
 use crate::processor::current_process;
 use crate::result::Errno::EINVAL;
 use crate::result::{Errno, SyscallResult};
+use crate::fs::devfs::net::NetInode;
+use crate::net::tcp::TcpSocket;
 
 /// domain
 pub const AF_UNIX: u16 = 0x0001;
@@ -224,8 +226,16 @@ pub trait Socket: File {
     fn dis_connect(&self, how: u32) -> SyscallResult;
     fn socket_type(&self) -> SocketType;
     fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint>;
+    fn remote_endpoint(&self) -> Option<IpEndpoint>;
 }
-
+pub fn to_endpoint(listen_endpoint: IpListenEndpoint) -> IpEndpoint {
+    let addr = if listen_endpoint.addr.is_none() {
+        IpAddress::v4(127, 0, 0, 1)
+    } else {
+        listen_endpoint.addr.unwrap()
+    };
+    IpEndpoint::new(addr, listen_endpoint.port)
+}
 pub fn listen_endpoint(addr_buf: &[u8]) -> SyscallResult<IpListenEndpoint> {
     let family = u16::from_ne_bytes(addr_buf[0..2].try_into().expect("family size wrong"));
     match family {
@@ -242,7 +252,6 @@ pub fn listen_endpoint(addr_buf: &[u8]) -> SyscallResult<IpListenEndpoint> {
         }
     }
 }
-
 pub fn endpoint(addr_buf: &[u8]) -> SyscallResult<IpEndpoint> {
     let listen_endpoint = listen_endpoint(addr_buf)?;
     let addr = if listen_endpoint.addr.is_none() {
@@ -252,7 +261,6 @@ pub fn endpoint(addr_buf: &[u8]) -> SyscallResult<IpEndpoint> {
     };
     Ok(IpEndpoint::new(addr, listen_endpoint.port))
 }
-
 pub fn fill_with_endpoint(
     endpoint: IpEndpoint,
     addr: usize,
@@ -292,10 +300,20 @@ impl dyn Socket{
                     let cur = current_process().inner.lock();
                     let file_desc = FileDescriptor::new(socket,flags);
                     let fd_num = cur.fd_table.put(file_desc,0).unwrap();
+                    let filemeta = FileMeta::new(Some(NetInode::new(fd_num as usize).unwrap()));
+                    socket.file_data = filemeta;
                     cur.socket_table.insert(fd_num,socket);
                     Ok(fd_num as usize)
                 }else if socket_type.contains(SocketType::SOCK_STREAM){
-                    todo!()
+                    let socket = TcpSocket::new();
+                    let socket = Arc::new(socket);
+                    let cur = current_process().inner.lock();
+                    let file_desc = FileDescriptor::new(socket,flags);
+                    let fd_num = cur.fd_table.put(file_desc,0).unwrap();
+                    let filemeta = FileMeta::new(Some(NetInode::new(fd_num as usize).unwrap()));
+                    socket.file_data = filemeta;
+                    cur.socket_table.insert(fd_num,socket);
+                    Ok(fd_num as usize)
                 }else{
                     Err(Errno::EINVAL)
                 }
@@ -310,10 +328,16 @@ impl dyn Socket{
         }
     }
     pub fn addr(self: &Arc<Self>,addr: usize,addrlen: usize) -> SyscallResult<usize>{
-        todo!()
+        let local_endpoint = self.local_endpoint().unwrap();
+        let local_endpoint = to_endpoint(local_endpoint);
+        fill_with_endpoint(local_endpoint,addr,addrlen)
     }
 
     pub fn peer_addr(self: &Arc<Self>, addr: usize, addrlen: usize) -> SyscallResult<usize>{
-        todo!()
+        let remote_endpoint = self.remote_endpoint();
+        if remote_endpoint.is_none(){
+            return Err(Errno::ENOTCONN);
+        }
+        fill_with_endpoint(remote_endpoint.unwrap(),addr,addrlen)
     }
 }

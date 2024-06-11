@@ -10,7 +10,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-mod net;
+pub(crate) mod net;
 mod null;
 pub mod tty;
 mod zero;

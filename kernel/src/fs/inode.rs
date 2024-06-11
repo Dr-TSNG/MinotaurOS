@@ -14,6 +14,7 @@ use async_trait::async_trait;
 use core::any::Any;
 use downcast_rs::{impl_downcast, DowncastSync};
 use log::warn;
+use virtio_drivers::transport::DeviceType::Socket;
 
 pub struct InodeMeta {
     /// 结点编号

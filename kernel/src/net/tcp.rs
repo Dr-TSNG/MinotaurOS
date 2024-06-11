@@ -35,7 +35,7 @@ use crate::sync::mutex::Mutex;
 pub struct TcpSocket {
     inner: Mutex<TcpInner>,
     socket_handle: SocketHandle,
-    file_data: FileMeta,
+    pub(crate) file_data: FileMeta,
 }
 struct TcpInner {
     local_endpoint: IpListenEndpoint,
@@ -253,6 +253,10 @@ impl Socket for TcpSocket {
 
     fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint> {
         Ok(self.inner.lock().local_endpoint)
+    }
+
+    fn remote_endpoint(&self) -> Option<IpEndpoint> {
+        todo!()
     }
 }
 impl Drop for TcpSocket {
