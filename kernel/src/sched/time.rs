@@ -63,7 +63,11 @@ pub enum TimeoutResult<T> {
 
 impl<F: Future> TimeoutFuture<F> {
     pub fn new(expire: Duration, fut: F) -> Self {
-        Self { expire, sched: false, fut }
+        Self {
+            expire,
+            sched: false,
+            fut,
+        }
     }
 }
 

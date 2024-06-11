@@ -1,11 +1,11 @@
-use alloc::sync::Arc;
-use log::info;
-use crate::driver::{DEVICES, Device, BlockDevice};
+use crate::driver::{BlockDevice, Device, DEVICES};
 use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::MountNamespace;
 use crate::result::SyscallResult;
 use crate::sync::block_on;
+use alloc::sync::Arc;
+use log::info;
 
 pub mod block_cache;
 pub mod devfs;
@@ -15,8 +15,8 @@ pub mod ffi;
 pub mod file;
 pub mod file_system;
 pub mod inode;
-pub mod path;
 pub mod page_cache;
+pub mod path;
 pub mod pipe;
 
 pub fn init() -> SyscallResult<Arc<MountNamespace>> {

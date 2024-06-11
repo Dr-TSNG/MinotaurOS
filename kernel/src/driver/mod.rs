@@ -1,20 +1,8 @@
-use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
-use alloc::sync::Arc;
-use alloc::{format, vec};
-use alloc::vec::Vec;
-use core::task::Waker;
-use async_trait::async_trait;
-use fdt_rs::base::DevTree;
-use fdt_rs::error::DevTreeError;
-use fdt_rs::index::{DevTreeIndex, DevTreeIndexNode};
-use fdt_rs::prelude::PropReader;
-use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
+use crate::arch::{PhysAddr, VirtAddr, PAGE_SIZE};
 use crate::config::{KERNEL_ADDR_OFFSET, KERNEL_MMIO_BASE};
 use crate::driver::plic::PLIC;
 use crate::driver::virtio::VirtIODevice;
-use crate::fs::devfs::tty::{DEFAULT_TTY, TtyFile};
+use crate::fs::devfs::tty::{TtyFile, DEFAULT_TTY};
 use crate::fs::file::FileMeta;
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::IdAllocator;
@@ -22,6 +10,18 @@ use crate::println;
 use crate::result::SyscallResult;
 use crate::sync::mutex::{Mutex, RwLock};
 use crate::sync::once::LateInit;
+use alloc::boxed::Box;
+use alloc::collections::BTreeMap;
+use alloc::string::{String, ToString};
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use alloc::{format, vec};
+use async_trait::async_trait;
+use core::task::Waker;
+use fdt_rs::base::DevTree;
+use fdt_rs::error::DevTreeError;
+use fdt_rs::index::{DevTreeIndex, DevTreeIndexNode};
+use fdt_rs::prelude::PropReader;
 
 pub mod ns16550a;
 pub mod plic;
@@ -55,7 +55,13 @@ impl GlobalMapping {
         size: usize,
         perms: ASPerms,
     ) -> Self {
-        Self { name, phys_start, virt_start, size, perms }
+        Self {
+            name,
+            phys_start,
+            virt_start,
+            size,
+            perms,
+        }
     }
 
     pub const fn phys_end(&self) -> PhysAddr {
@@ -163,7 +169,11 @@ pub fn init_driver() -> SyscallResult<()> {
 
 pub fn total_memory() -> usize {
     GLOBAL_MAPPINGS.iter().fold(0, |acc, map| {
-        if map.name.starts_with("[memory") { acc + map.size } else { acc }
+        if map.name.starts_with("[memory") {
+            acc + map.size
+        } else {
+            acc
+        }
     })
 }
 
@@ -175,9 +185,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
 
     let mut g_mappings = Vec::new();
     let mut mmio_offset = 0;
-    let fdt = unsafe {
-        DevTree::from_raw_pointer(dtb_paddr as *const u8)?
-    };
+    let fdt = unsafe { DevTree::from_raw_pointer(dtb_paddr as *const u8)? };
     let layout = DevTreeIndex::get_layout(&fdt)?;
     let mut buf = vec![0u8; layout.size() + layout.align()];
     let dti = DevTreeIndex::new(fdt, &mut buf)?;
@@ -240,8 +248,13 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     );
                     mmio_offset += reg[0].1;
                     let dev = Arc::new(VirtIODevice::new(mapping.virt_start));
-                    DEVICES.write().insert(dev.metadata().dev_id, Device::Block(dev));
-                    println!("[kernel] Register virtio device at {:?}", mapping.virt_start);
+                    DEVICES
+                        .write()
+                        .insert(dev.metadata().dev_id, Device::Block(dev));
+                    println!(
+                        "[kernel] Register virtio device at {:?}",
+                        mapping.virt_start
+                    );
                     g_mappings.push(mapping);
                 } else if name.starts_with("plic@") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
@@ -265,7 +278,8 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     let intr = node
                         .props()
                         .find(|prop| prop.name() == Ok("interrupts"))
-                        .unwrap().u32(0)?;
+                        .unwrap()
+                        .u32(0)?;
                     let mapping = GlobalMapping::new(
                         format!("[serial@{:x}]", reg[0].0),
                         PhysAddr(reg[0].0),
@@ -276,8 +290,13 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     mmio_offset += size;
                     let dev = Arc::new(ns16550a::UartDevice::new(mapping.virt_start));
                     b_plic_intr.insert(intr as usize, dev.clone());
-                    DEVICES.write().insert(dev.metadata().dev_id, Device::Character(dev));
-                    println!("[kernel] Register serial device at {:?}", mapping.virt_start);
+                    DEVICES
+                        .write()
+                        .insert(dev.metadata().dev_id, Device::Character(dev));
+                    println!(
+                        "[kernel] Register serial device at {:?}",
+                        mapping.virt_start
+                    );
                     g_mappings.push(mapping);
                 }
             }

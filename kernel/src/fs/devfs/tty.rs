@@ -1,11 +1,11 @@
-use alloc::boxed::Box;
-use alloc::sync::{Arc, Weak};
-use core::task::Waker;
-use async_trait::async_trait;
 use crate::driver::CharacterDevice;
 use crate::fs::file::{File, FileMeta};
 use crate::result::{Errno, SyscallResult};
 use crate::sync::once::LateInit;
+use alloc::boxed::Box;
+use alloc::sync::{Arc, Weak};
+use async_trait::async_trait;
+use core::task::Waker;
 
 pub static DEFAULT_TTY: LateInit<Arc<dyn File>> = LateInit::new();
 
@@ -16,7 +16,10 @@ pub struct TtyFile {
 
 impl TtyFile {
     pub fn new(metadata: FileMeta, device: Arc<dyn CharacterDevice>) -> Arc<Self> {
-        Arc::new(Self { metadata, device: Arc::downgrade(&device) })
+        Arc::new(Self {
+            metadata,
+            device: Arc::downgrade(&device),
+        })
     }
 }
 
@@ -42,7 +45,14 @@ impl File for TtyFile {
         Ok(buf.len() as isize)
     }
 
-    async fn ioctl(&self, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
+    async fn ioctl(
+        &self,
+        request: usize,
+        arg2: usize,
+        arg3: usize,
+        arg4: usize,
+        arg5: usize,
+    ) -> SyscallResult<i32> {
         // TODO: Real ioctl
         Ok(0)
     }

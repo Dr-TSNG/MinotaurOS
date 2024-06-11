@@ -23,6 +23,7 @@ mod debug;
 mod driver;
 mod fs;
 mod mm;
+mod net;
 mod process;
 mod processor;
 mod result;
@@ -32,13 +33,6 @@ mod sync;
 mod syscall;
 mod trap;
 
-use core::arch::{asm, global_asm};
-use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicBool, Ordering};
-use log::{error, info, warn};
-use sbi_spec::hsm::hart_state;
-use arch::shutdown;
-use config::KERNEL_ADDR_OFFSET;
 use crate::arch::sbi;
 use crate::config::{KERNEL_PADDR_BASE, KERNEL_STACK_SIZE, LINKAGE_EBSS, LINKAGE_SBSS};
 use crate::debug::console::dmesg_flush_tty;
@@ -49,6 +43,13 @@ use crate::processor::hart::KERNEL_STACK;
 use crate::result::SyscallResult;
 use crate::sched::executor::run_executor;
 use crate::sync::block_on;
+use arch::shutdown;
+use config::KERNEL_ADDR_OFFSET;
+use core::arch::{asm, global_asm};
+use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicBool, Ordering};
+use log::{error, info, warn};
+use sbi_spec::hsm::hart_state;
 
 global_asm!(include_str!("entry.asm"));
 

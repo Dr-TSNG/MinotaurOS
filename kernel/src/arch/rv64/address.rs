@@ -1,9 +1,9 @@
+use crate::config::KERNEL_ADDR_OFFSET;
+use core::iter::Step;
 use core::{
     fmt::{self, Debug, Formatter},
     ops::{Add, Sub},
 };
-use core::iter::Step;
-use crate::config::KERNEL_ADDR_OFFSET;
 
 pub const SV39_PAGE_BITS: usize = 12;
 pub const SV39_PAGE_SIZE: usize = 4096;

@@ -1,16 +1,6 @@
-use alloc::boxed::Box;
-use alloc::string::ToString;
-use alloc::sync::{Arc, Weak};
-use alloc::{format, vec};
-use alloc::vec::Vec;
-use core::cmp::min;
-use core::sync::atomic::{AtomicUsize, Ordering};
-use async_trait::async_trait;
-use bitvec_rs::BitVec;
-use log::debug;
 use crate::fs::fat32::dir::{FAT32Dirent, FileAttr};
-use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::fat32::fat::FATEnt;
+use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::ffi::InodeMode;
 use crate::fs::inode::{Inode, InodeChild, InodeInternal, InodeMeta, InodeMetaInner};
 use crate::fs::page_cache::PageCache;
@@ -19,6 +9,16 @@ use crate::sched::ffi::TimeSpec;
 use crate::sched::time::current_time;
 use crate::sync::block_on;
 use crate::sync::mutex::AsyncMutex;
+use alloc::boxed::Box;
+use alloc::string::ToString;
+use alloc::sync::{Arc, Weak};
+use alloc::vec::Vec;
+use alloc::{format, vec};
+use async_trait::async_trait;
+use bitvec_rs::BitVec;
+use core::cmp::min;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use log::debug;
 
 pub struct FAT32Inode {
     metadata: InodeMeta,
@@ -120,7 +120,9 @@ impl InodeInternal for FAT32Inode {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let file_size = self.metadata.inner.lock().size as usize;
         let mut offset = offset as usize;
-        if offset >= file_size { return Ok(0); }
+        if offset >= file_size {
+            return Ok(0);
+        }
         let buf_end = min(buf.len(), file_size - offset);
         buf = &mut buf[..buf_end];
 
@@ -178,7 +180,8 @@ impl InodeInternal for FAT32Inode {
             if cluster_start == 0 {
                 cluster_start = 1;
             }
-            fs.write_fat_ent(ext.clusters[cluster_start - 1], FATEnt::EOF).await?;
+            fs.write_fat_ent(ext.clusters[cluster_start - 1], FATEnt::EOF)
+                .await?;
             if cluster_start < ext.clusters.len() {
                 for cluster in &ext.clusters[cluster_start..] {
                     fs.write_fat_ent(*cluster, FATEnt::EMPTY).await?;
@@ -212,7 +215,9 @@ impl InodeInternal for FAT32Inode {
         debug!("[fat32] Load children");
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let ext = &mut *self.ext.lock().await;
-        let children = fs.read_dir(self.clone(), &ext.clusters, &mut ext.dir_occupy).await?;
+        let children = fs
+            .read_dir(self.clone(), &ext.clusters, &mut ext.dir_occupy)
+            .await?;
         for child in children {
             let name = child.inode.metadata().name.clone();
             if name == "." || name == ".." {
@@ -239,9 +244,15 @@ impl InodeInternal for FAT32Inode {
         }
         let ext = &mut *self.ext.lock().await;
         let cluster = fs.alloc_cluster().await?;
-        let attr = if mode == InodeMode::IFDIR { FileAttr::ATTR_DIRECTORY } else { FileAttr::empty() };
+        let attr = if mode == InodeMode::IFDIR {
+            FileAttr::ATTR_DIRECTORY
+        } else {
+            FileAttr::empty()
+        };
         let dirent = FAT32Dirent::new(name.to_string(), attr, cluster as u32, 0);
-        let (dir_pos, dir_len) = fs.append_dir(&mut ext.clusters, &mut ext.dir_occupy, &dirent).await?;
+        let (dir_pos, dir_len) = fs
+            .append_dir(&mut ext.clusters, &mut ext.dir_occupy, &dirent)
+            .await?;
         let now = current_time();
         let inode = Arc::new(Self {
             metadata: InodeMeta::new(
@@ -265,13 +276,31 @@ impl InodeInternal for FAT32Inode {
         });
         if mode == InodeMode::IFDIR {
             let child_ext = &mut *inode.ext.lock().await;
-            let parent_dir = FAT32Dirent::new("..".to_string(), FileAttr::ATTR_DIRECTORY, ext.clusters[0] as u32, 0);
+            let parent_dir = FAT32Dirent::new(
+                "..".to_string(),
+                FileAttr::ATTR_DIRECTORY,
+                ext.clusters[0] as u32,
+                0,
+            );
             let mut child_dir = dirent.clone();
             child_dir.name = ".".to_string();
-            fs.append_dir(&mut child_ext.clusters, &mut child_ext.dir_occupy, &parent_dir).await?;
-            fs.append_dir(&mut child_ext.clusters, &mut child_ext.dir_occupy, &child_dir).await?;
+            fs.append_dir(
+                &mut child_ext.clusters,
+                &mut child_ext.dir_occupy,
+                &parent_dir,
+            )
+            .await?;
+            fs.append_dir(
+                &mut child_ext.clusters,
+                &mut child_ext.dir_occupy,
+                &child_dir,
+            )
+            .await?;
         }
-        Ok(InodeChild::new(inode.clone(), FAT32ChildExt::new(dir_pos, dir_len)))
+        Ok(InodeChild::new(
+            inode.clone(),
+            FAT32ChildExt::new(dir_pos, dir_len),
+        ))
     }
 
     async fn do_movein(
@@ -291,10 +320,16 @@ impl InodeInternal for FAT32Inode {
 
         match inode.downcast_arc::<FAT32Inode>() {
             Ok(inode) => {
-                let attr = if inode.metadata().mode == InodeMode::IFDIR { FileAttr::ATTR_DIRECTORY } else { FileAttr::empty() };
+                let attr = if inode.metadata().mode == InodeMode::IFDIR {
+                    FileAttr::ATTR_DIRECTORY
+                } else {
+                    FileAttr::empty()
+                };
                 let cluster = inode.ext.lock().await.clusters[0];
                 let dirent = FAT32Dirent::new(name.to_string(), attr, cluster as u32, 0);
-                let (dir_pos, dir_len) = fs.append_dir(&mut ext.clusters, &mut ext.dir_occupy, &dirent).await?;
+                let (dir_pos, dir_len) = fs
+                    .append_dir(&mut ext.clusters, &mut ext.dir_occupy, &dirent)
+                    .await?;
                 let inode = Arc::new(Self {
                     metadata: InodeMeta::movein(
                         inode.as_ref(),
@@ -305,7 +340,10 @@ impl InodeInternal for FAT32Inode {
                     fs: Arc::downgrade(&fs),
                     ext: inode.ext.clone(),
                 });
-                Ok(InodeChild::new(inode.clone(), FAT32ChildExt::new(dir_pos, dir_len)))
+                Ok(InodeChild::new(
+                    inode.clone(),
+                    FAT32ChildExt::new(dir_pos, dir_len),
+                ))
             }
             Err(_) => {
                 todo!("Moving across file systems is not supported yet");
@@ -313,11 +351,7 @@ impl InodeInternal for FAT32Inode {
         }
     }
 
-    async fn do_unlink(
-        self: Arc<Self>,
-        inner: &mut InodeMetaInner,
-        name: &str,
-    ) -> SyscallResult {
+    async fn do_unlink(self: Arc<Self>, inner: &mut InodeMetaInner, name: &str) -> SyscallResult {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         if !inner.children_loaded {
             self.clone().load_children(inner).await?;
@@ -325,7 +359,13 @@ impl InodeInternal for FAT32Inode {
         let target = inner.children.get(name).ok_or(Errno::ENOENT)?;
         let ext = &mut *self.ext.lock().await;
         let child_ext = target.ext.downcast_ref::<FAT32ChildExt>().unwrap();
-        fs.remove_dir(&mut ext.clusters, &mut ext.dir_occupy, child_ext.dir_pos, child_ext.dir_len).await?;
+        fs.remove_dir(
+            &mut ext.clusters,
+            &mut ext.dir_occupy,
+            child_ext.dir_pos,
+            child_ext.dir_len,
+        )
+        .await?;
         Ok(())
     }
 }

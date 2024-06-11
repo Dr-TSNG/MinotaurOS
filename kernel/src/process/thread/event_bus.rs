@@ -1,10 +1,3 @@
-use alloc::vec::Vec;
-use core::future::Future;
-use core::mem::size_of;
-use core::pin::{Pin, pin};
-use core::task::{Context, Poll, Waker};
-use bitflags::bitflags;
-use futures::future::{Either, select};
 use crate::arch::VirtAddr;
 use crate::process::ffi::WaitOptions;
 use crate::process::monitor::PROCESS_MONITOR;
@@ -12,6 +5,13 @@ use crate::process::Pid;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
+use alloc::vec::Vec;
+use bitflags::bitflags;
+use core::future::Future;
+use core::mem::size_of;
+use core::pin::{pin, Pin};
+use core::task::{Context, Poll, Waker};
+use futures::future::{select, Either};
 
 bitflags! {
     #[derive(Default)]
@@ -37,7 +37,9 @@ impl EventBus {
     }
 
     pub async fn suspend_with<T, F>(&self, event: Event, fut: F) -> SyscallResult<T>
-        where F: Future<Output=SyscallResult<T>> + Unpin {
+    where
+        F: Future<Output = SyscallResult<T>> + Unpin,
+    {
         match select(pin!(self.wait(event)), fut).await {
             Either::Left(_) => Err(Errno::EINTR),
             Either::Right((ret, _)) => ret,
@@ -116,7 +118,11 @@ pub struct WaitPidFuture {
 
 impl WaitPidFuture {
     pub fn new(pid: Pid, options: WaitOptions, wstatus: usize) -> Self {
-        WaitPidFuture { pid, options, wstatus }
+        WaitPidFuture {
+            pid,
+            options,
+            wstatus,
+        }
     }
 }
 
@@ -126,15 +132,22 @@ impl Future for WaitPidFuture {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let _monitor = PROCESS_MONITOR.lock();
         let mut proc_inner = current_process().inner.lock();
-        if !proc_inner.children.iter()
-            .any(|p| self.pid as isize == -1 || self.pid == p.pid.0) {
+        if !proc_inner
+            .children
+            .iter()
+            .any(|p| self.pid as isize == -1 || self.pid == p.pid.0)
+        {
             return Poll::Ready(Err(Errno::ECHILD));
         }
-        if let Some((idx, _)) = proc_inner.children.iter().enumerate()
-            .find(|p| p.1.inner.lock().exit_code.is_some() && (self.pid as isize == -1 || self.pid == p.1.pid.0)) {
+        if let Some((idx, _)) = proc_inner.children.iter().enumerate().find(|p| {
+            p.1.inner.lock().exit_code.is_some()
+                && (self.pid as isize == -1 || self.pid == p.1.pid.0)
+        }) {
             let child = proc_inner.children.swap_remove(idx);
             if self.wstatus != 0 {
-                let addr = proc_inner.addr_space.user_slice_w(VirtAddr(self.wstatus), size_of::<i32>())?;
+                let addr = proc_inner
+                    .addr_space
+                    .user_slice_w(VirtAddr(self.wstatus), size_of::<i32>())?;
                 drop(proc_inner);
                 let exit_status = (child.inner.lock().exit_code.unwrap() as i32) << 8;
                 let exit_status: &[u8; size_of::<i32>()] = bytemuck::cast_ref(&exit_status);
@@ -145,7 +158,9 @@ impl Future for WaitPidFuture {
             if self.options.contains(WaitOptions::WNOHANG) {
                 Poll::Ready(Ok(0))
             } else {
-                current_thread().event_bus.register_callback(Event::CHILD_EXIT, cx.waker().clone());
+                current_thread()
+                    .event_bus
+                    .register_callback(Event::CHILD_EXIT, cx.waker().clone());
                 Poll::Pending
             }
         }

@@ -1,11 +1,11 @@
-use alloc::boxed::Box;
-use alloc::vec;
-use alloc::vec::Vec;
-use crate::arch::{PageTableEntry, PhysPageNum, PTEFlags, VirtPageNum};
+use crate::arch::{PTEFlags, PageTableEntry, PhysPageNum, VirtPageNum};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
 use crate::mm::page_table::{PageTable, SlotType};
 use crate::mm::region::{ASRegion, ASRegionMeta};
+use alloc::boxed::Box;
+use alloc::vec;
+use alloc::vec::Vec;
 
 #[derive(Clone)]
 pub struct DirectRegion {
@@ -69,7 +69,13 @@ impl DirectRegion {
 }
 
 impl DirectRegion {
-    fn map_one(&self, mut pt: PageTable, level: usize, offset: usize, overwrite: bool) -> Vec<HeapFrameTracker> {
+    fn map_one(
+        &self,
+        mut pt: PageTable,
+        level: usize,
+        offset: usize,
+        overwrite: bool,
+    ) -> Vec<HeapFrameTracker> {
         let vpn = self.metadata.start + offset;
         let mut dirs = vec![];
         for (i, idx) in vpn.indexes().iter().enumerate() {
@@ -79,9 +85,15 @@ impl DirectRegion {
                     panic!("Page already mapped: {:?}", pte.ppn());
                 }
                 let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D;
-                if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
-                if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
-                if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
+                if self.metadata.perms.contains(ASPerms::R) {
+                    flags |= PTEFlags::R;
+                }
+                if self.metadata.perms.contains(ASPerms::W) {
+                    flags |= PTEFlags::W;
+                }
+                if self.metadata.perms.contains(ASPerms::X) {
+                    flags |= PTEFlags::X;
+                }
                 *pte = PageTableEntry::new(self.ppn + offset, flags);
                 break;
             } else {

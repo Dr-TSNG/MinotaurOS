@@ -1,6 +1,6 @@
-use alloc::sync::Arc;
 use crate::mm::page_table::PageTable;
 use crate::process::thread::Thread;
+use alloc::sync::Arc;
 
 pub struct HartContext {
     pub user_task: Option<UserTask>,
@@ -13,8 +13,6 @@ pub struct UserTask {
 
 impl HartContext {
     pub const fn new(user_task: Option<UserTask>) -> Self {
-        HartContext {
-            user_task,
-        }
+        HartContext { user_task }
     }
 }

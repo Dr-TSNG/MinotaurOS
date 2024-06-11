@@ -1,11 +1,11 @@
+use crate::processor::current_thread;
+use crate::signal::ffi::{SigAction, SigSet, Signal, SIG_MAX};
+use crate::sync::mutex::Mutex;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec;
 use core::ops::Deref;
 use log::{debug, info};
-use crate::processor::current_thread;
-use crate::signal::ffi::{SIG_MAX, SigAction, Signal, SigSet};
-use crate::sync::mutex::Mutex;
 
 pub mod ffi;
 
@@ -49,12 +49,14 @@ impl SignalQueue {
     }
 
     pub fn pop(&mut self) -> Option<Signal> {
-        self.queue.pop_front().inspect(|s| self.set.remove((*s).into()))
+        self.queue
+            .pop_front()
+            .inspect(|s| self.set.remove((*s).into()))
     }
 }
 
 impl Extend<Signal> for SignalQueue {
-    fn extend<T: IntoIterator<Item=Signal>>(&mut self, iter: T) {
+    fn extend<T: IntoIterator<Item = Signal>>(&mut self, iter: T) {
         for v in iter.into_iter() {
             self.push(v);
         }
@@ -77,9 +79,8 @@ pub struct SignalPoll {
 
 impl SignalController {
     pub fn new() -> Self {
-        let handlers = core::array::from_fn(|signal| {
-            SignalHandler::kernel(signal.try_into().unwrap())
-        });
+        let handlers =
+            core::array::from_fn(|signal| SignalHandler::kernel(signal.try_into().unwrap()));
         let inner = SignalControllerInner {
             pending: SignalQueue::default(),
             blocked: SigSet::default(),
@@ -145,7 +146,11 @@ impl SignalController {
             }
 
             inner.pending.extend(popped);
-            let poll = SignalPoll { signal, handler, blocked_before };
+            let poll = SignalPoll {
+                signal,
+                handler,
+                blocked_before,
+            };
             return Some(poll);
         }
 

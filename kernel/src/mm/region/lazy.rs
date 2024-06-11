@@ -1,14 +1,16 @@
+use crate::arch::{PTEFlags, PageTableEntry, PhysPageNum, VirtPageNum, PAGE_SIZE};
+use crate::mm::addr_space::ASPerms;
+use crate::mm::allocator::{
+    alloc_kernel_frames, alloc_user_frames, HeapFrameTracker, UserFrameTracker,
+};
+use crate::mm::page_table::{PageTable, SlotType};
+use crate::mm::region::{ASRegion, ASRegionMeta};
+use crate::result::SyscallResult;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
-use crate::arch::{PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtPageNum};
-use crate::mm::addr_space::ASPerms;
-use crate::mm::allocator::{alloc_kernel_frames, alloc_user_frames, HeapFrameTracker, UserFrameTracker};
-use crate::mm::page_table::{PageTable, SlotType};
-use crate::mm::region::{ASRegion, ASRegionMeta};
-use crate::result::SyscallResult;
 
 pub struct LazyRegion {
     metadata: ASRegionMeta,
@@ -106,7 +108,10 @@ impl ASRegion for LazyRegion {
             }
             PageState::CopyOnWrite(tracker) => {
                 let new_tracker = alloc_user_frames(1)?;
-                new_tracker.ppn.byte_array().copy_from_slice(tracker.ppn.byte_array());
+                new_tracker
+                    .ppn
+                    .byte_array()
+                    .copy_from_slice(tracker.ppn.byte_array());
                 temp = PageState::Framed(new_tracker);
             }
             PageState::Framed(_) => {
@@ -147,8 +152,7 @@ impl LazyRegion {
                 continue;
             }
             let copy_cnt = min(PAGE_SIZE - offset, buf.len() - cur);
-            page.ppn
-                .byte_array()[offset..offset + copy_cnt]
+            page.ppn.byte_array()[offset..offset + copy_cnt]
                 .copy_from_slice(&buf[cur..cur + copy_cnt]);
             offset = 0;
             cur += copy_cnt;
@@ -178,16 +182,26 @@ impl LazyRegion {
                     PageState::Free => (PhysPageNum(0), PTEFlags::empty()),
                     PageState::Framed(ref tracker) => {
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
-                        if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
-                        if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
-                        if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
+                        if self.metadata.perms.contains(ASPerms::R) {
+                            flags |= PTEFlags::R;
+                        }
+                        if self.metadata.perms.contains(ASPerms::W) {
+                            flags |= PTEFlags::W;
+                        }
+                        if self.metadata.perms.contains(ASPerms::X) {
+                            flags |= PTEFlags::X;
+                        }
                         (tracker.ppn, flags)
                     }
                     PageState::CopyOnWrite(ref tracker) => {
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
-                        if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
+                        if self.metadata.perms.contains(ASPerms::R) {
+                            flags |= PTEFlags::R;
+                        }
                         // No W
-                        if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
+                        if self.metadata.perms.contains(ASPerms::X) {
+                            flags |= PTEFlags::X;
+                        }
                         (tracker.ppn, flags)
                     }
                 };

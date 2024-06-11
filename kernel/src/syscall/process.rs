@@ -1,20 +1,20 @@
+use crate::arch::VirtAddr;
+use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::fs::ffi::{InodeMode, AT_FDCWD, PATH_MAX};
+use crate::fs::path::resolve_path;
+use crate::process::ffi::{CloneFlags, Rlimit, RlimitCmd, WaitOptions};
+use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
+use crate::process::thread::event_bus::{Event, WaitPidFuture};
+use crate::process::{Pid, Tid};
+use crate::processor::{current_process, current_thread};
+use crate::result::{Errno, SyscallResult};
+use crate::sched::yield_now;
+use crate::signal::ffi::Signal;
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::mem::size_of;
 use log::{debug, info};
 use zerocopy::AsBytes;
-use crate::arch::VirtAddr;
-use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
-use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
-use crate::fs::path::resolve_path;
-use crate::process::ffi::{CloneFlags, Rlimit, RlimitCmd, WaitOptions};
-use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
-use crate::process::{Pid, Tid};
-use crate::process::thread::event_bus::{Event, WaitPidFuture};
-use crate::processor::{current_process, current_thread};
-use crate::result::{Errno, SyscallResult};
-use crate::sched::yield_now;
-use crate::signal::ffi::Signal;
 
 pub fn sys_exit(exit_code: i8) -> SyscallResult<usize> {
     current_thread().terminate(exit_code);
@@ -102,7 +102,13 @@ pub fn sys_gettid() -> SyscallResult<usize> {
     Ok(current_thread().tid.0)
 }
 
-pub fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize) -> SyscallResult<usize> {
+pub fn sys_clone(
+    flags: u32,
+    stack: usize,
+    ptid: usize,
+    tls: usize,
+    ctid: usize,
+) -> SyscallResult<usize> {
     let flags = CloneFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     if flags.contains(CloneFlags::CLONE_VM) {
         current_process().clone_thread(flags, stack, tls, ptid, ctid)
@@ -113,7 +119,9 @@ pub fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize)
 
 pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let mut path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
+    let mut path = proc_inner
+        .addr_space
+        .user_slice_str(VirtAddr(path), PATH_MAX)?;
 
     let mut args_vec: Vec<CString> = Vec::new();
     let mut envs_vec: Vec<CString> = Vec::new();
@@ -124,11 +132,19 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     }
     let push_args = |args_vec: &mut Vec<CString>, mut arg_ptr: usize| -> SyscallResult {
         loop {
-            proc_inner.addr_space.user_slice_r(VirtAddr(arg_ptr), size_of::<usize>())?;
+            proc_inner
+                .addr_space
+                .user_slice_r(VirtAddr(arg_ptr), size_of::<usize>())?;
             let arg_addr = unsafe { *(arg_ptr as *const usize) };
-            if arg_addr == 0 { break; }
-            let arg = proc_inner.addr_space.user_slice_str(VirtAddr(arg_addr), PATH_MAX)?;
-            if arg.is_empty() { break; }
+            if arg_addr == 0 {
+                break;
+            }
+            let arg = proc_inner
+                .addr_space
+                .user_slice_str(VirtAddr(arg_addr), PATH_MAX)?;
+            if arg.is_empty() {
+                break;
+            }
             args_vec.push(CString::new(arg).unwrap());
             arg_ptr += size_of::<usize>();
         }
@@ -139,10 +155,16 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     if args_vec.is_empty() {
         args_vec.push(CString::new(path).unwrap());
     }
-    if !envs_vec.iter().any(|s| s.to_str().unwrap().contains("PATH=")) {
+    if !envs_vec
+        .iter()
+        .any(|s| s.to_str().unwrap().contains("PATH="))
+    {
         envs_vec.push(CString::new("PATH=/").unwrap());
     }
-    if !envs_vec.iter().any(|s| s.to_str().unwrap().contains("LD_LIBRARY_PATH=")) {
+    if !envs_vec
+        .iter()
+        .any(|s| s.to_str().unwrap().contains("LD_LIBRARY_PATH="))
+    {
         envs_vec.push(CString::new("LD_LIBRARY_PATH=/").unwrap());
     }
 
@@ -154,33 +176,57 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     drop(proc_inner);
     let file = inode.open()?;
     let elf_data = file.read_all().await?;
-    let argc = current_process().execve(&elf_data, &args_vec, &envs_vec).await?;
+    let argc = current_process()
+        .execve(&elf_data, &args_vec, &envs_vec)
+        .await?;
     Ok(argc)
 }
 
-pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
+pub async fn sys_wait4(
+    pid: Pid,
+    wstatus: usize,
+    options: u32,
+    _rusage: usize,
+) -> SyscallResult<usize> {
     let options = WaitOptions::from_bits(options).ok_or(Errno::EINVAL)?;
-    info!("[wait4] pid: {:?}, wstatus: {:#x}, options: {:?}", pid as isize, wstatus, options);
-    let ret = current_thread().event_bus.suspend_with(
-        Event::all().difference(Event::CHILD_EXIT),
-        WaitPidFuture::new(pid, options, wstatus),
-    ).await;
+    info!(
+        "[wait4] pid: {:?}, wstatus: {:#x}, options: {:?}",
+        pid as isize, wstatus, options
+    );
+    let ret = current_thread()
+        .event_bus
+        .suspend_with(
+            Event::all().difference(Event::CHILD_EXIT),
+            WaitPidFuture::new(pid, options, wstatus),
+        )
+        .await;
     info!("[wait4] ret: {:?}", ret);
     ret
 }
 
-pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) -> SyscallResult<usize> {
+pub fn sys_prlimit(
+    pid: Pid,
+    resource: u32,
+    new_rlim: usize,
+    old_rlim: usize,
+) -> SyscallResult<usize> {
     let cmd = RlimitCmd::try_from(resource).map_err(|_| Errno::EINVAL)?;
     debug!("[prlimit] pid: {}, cmd: {:?}", pid, cmd);
     if old_rlim != 0 {
-        let old_rlim = current_process().inner.lock().addr_space
+        let old_rlim = current_process()
+            .inner
+            .lock()
+            .addr_space
             .user_slice_w(VirtAddr(old_rlim), size_of::<Rlimit>())?;
         let (cur, max) = match cmd {
             RlimitCmd::RLIMIT_STACK => (USER_STACK_SIZE, USER_STACK_TOP.0),
             RlimitCmd::RLIMIT_NOFILE => (MAX_FD_NUM, MAX_FD_NUM),
             _ => (0, 0),
         };
-        let rlimit = Rlimit { rlim_cur: cur, rlim_max: max };
+        let rlimit = Rlimit {
+            rlim_cur: cur,
+            rlim_max: max,
+        };
         old_rlim.copy_from_slice(rlimit.as_bytes());
     }
     if new_rlim != 0 {

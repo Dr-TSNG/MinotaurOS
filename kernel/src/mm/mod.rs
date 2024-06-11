@@ -1,12 +1,12 @@
-use alloc::string::ToString;
-use log::info;
-use crate::arch::{PAGE_SIZE, VirtAddr, VirtPageNum};
-use crate::mm::addr_space::{AddressSpace, ASPerms};
-use crate::mm::region::ASRegionMeta;
+use crate::arch::{VirtAddr, VirtPageNum, PAGE_SIZE};
+use crate::mm::addr_space::{ASPerms, AddressSpace};
 use crate::mm::region::lazy::LazyRegion;
+use crate::mm::region::ASRegionMeta;
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
+use alloc::string::ToString;
+use log::info;
 
 pub mod addr_space;
 pub mod allocator;
@@ -22,7 +22,9 @@ pub fn vm_init(primary: bool) -> SyscallResult {
         vm_test()?;
         info!("Kernel address space initialized");
     }
-    unsafe { KERNEL_SPACE.lock().activate(); }
+    unsafe {
+        KERNEL_SPACE.lock().activate();
+    }
     Ok(())
 }
 
@@ -45,7 +47,9 @@ fn vm_test() -> SyscallResult {
         let ptr = VirtAddr::from(VirtPageNum::from(start)).as_ptr();
         core::slice::from_raw_parts_mut(ptr, 4 * PAGE_SIZE)
     };
-    unsafe { kernel_space.activate(); }
+    unsafe {
+        kernel_space.activate();
+    }
     slice.fill(0x42);
     info!("VM test passed");
     Ok(())

@@ -1,10 +1,10 @@
+use crate::sched::time::current_time;
+use crate::sync::mutex::MutexStrategy;
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
-use crate::sched::time::current_time;
-use crate::sync::mutex::MutexStrategy;
 
 pub struct SpinMutex<T: ?Sized, S: MutexStrategy> {
     _marker: PhantomData<S>,
@@ -39,7 +39,8 @@ impl<T, S: MutexStrategy> SpinMutex<T, S> {
         if self
             .lock
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok() {
+            .is_ok()
+        {
             Some(SpinMutexGuard {
                 mutex: self,
                 _guard: guard,

@@ -8,12 +8,14 @@ use core::slice;
 use bitflags::bitflags;
 use log::__private_api::Value;
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv6Address};
-
-use crate::fs::fd::FdNum;
-use crate::fs::file::File;
+use crate::fs::fd::{FdNum, FdTable};
+use crate::fs::ffi::OpenFlags;
+use crate::fs::file::{File, Seek};
 use crate::net::port::PORT_ALLOCATOR;
+use crate::net::udp::UdpSocket;
+use crate::processor::current_process;
 use crate::result::Errno::EINVAL;
-use crate::result::SyscallResult;
+use crate::result::{Errno, SyscallResult};
 
 /// domain
 pub const AF_UNIX: u16 = 0x0001;
@@ -59,14 +61,12 @@ impl SocketTable {
         None
     }
 }
-
 /// shutdown
 #[allow(unused)]
 pub const SHUT_RD: u32 = 0;
 pub const SHUT_WR: u32 = 1;
 #[allow(unused)]
 pub const SHUT_RDWR: u32 = 2;
-
 bitflags! {
     /// socket type, use when you alloc a socket , didn't impl yet
     pub struct SocketType: u32 {
@@ -75,20 +75,17 @@ bitflags! {
         const SOCK_CLOEXEC = 1 << 19;
     }
 }
-
 /// used when you want trans a socket_address to IpEndPoint or IpListenEndPoint
 pub enum SocketAddress {
     V4(SocketAddressV4),
     V6(SocketAddressV6),
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(C)]
 pub struct SocketAddressV4 {
     port: [u8; 2],
     addr_v4: [u8; 4],
 }
-
 impl SocketAddressV4 {
     pub fn new(buf: &[u8]) -> Self {
         let addr = Self {
@@ -107,7 +104,6 @@ impl SocketAddressV4 {
         }
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(C)]
 pub struct SocketAddressV6 {
@@ -115,7 +111,6 @@ pub struct SocketAddressV6 {
     flowinfo: [u8; 4],
     addr_v6: [u8; 16],
 }
-
 impl SocketAddressV6 {
     pub fn new(buf: &[u8]) -> Self {
         let addr = Self {
@@ -136,7 +131,6 @@ impl SocketAddressV6 {
         }
     }
 }
-
 impl From<IpEndpoint> for SocketAddressV4 {
     fn from(value: IpEndpoint) -> Self {
         Self {
@@ -155,7 +149,6 @@ impl From<SocketAddressV4> for IpEndpoint {
         Self::new(IpAddress::Ipv4(Ipv4Address(value.addr_v4)), port)
     }
 }
-
 impl From<SocketAddressV4> for IpListenEndpoint {
     fn from(value: SocketAddressV4) -> Self {
         let port = u16::from_be_bytes(value.port);
@@ -177,7 +170,6 @@ impl From<SocketAddressV4> for IpListenEndpoint {
         }
     }
 }
-
 impl From<IpEndpoint> for SocketAddressV6 {
     fn from(value: IpEndpoint) -> Self {
         Self {
@@ -280,4 +272,38 @@ pub fn fill_with_endpoint(
         }
     }
     Ok(0)
+}
+
+impl dyn Socket{
+    pub fn alloc(domain: u32,socket_type: u32) -> SyscallResult<usize>{
+        todo!()
+       /* match domain as u16 {
+            AF_INET | AF_INET6 => {
+                let socket_type = SocketType::from_bits(socket_type).ok_or(Err(Errno::EINVAL))?;
+                let flags = if socket_type.contains(SocketType::SOCK_CLOEXEC){
+                    OpenFlags::O_RDWR | OpenFlags::O_CLOEXEC
+                }else{
+                    OpenFlags::O_RDWR
+                };
+                // 创建 inode， 赋值给 生成的 udp socket ， inode的类型为 IFSOCK
+                if socket_type.contains(SocketType::SOCK_DGRAM){
+                    let socket = UdpSocket::new();
+                    let socket = Arc::new(socket);
+                    let cur = current_process().inner.lock();
+                    // let fd = cur.fd_table;
+
+                    cur.socket_table.insert(fd,socket);
+                    Ok(fd)
+                }
+            }
+        }
+        */
+    }
+    pub fn addr(self: &Arc<Self>,addr: usize,addrlen: usize) -> SyscallResult<usize>{
+        todo!()
+    }
+
+    pub fn peer_addr(self: &Arc<Self>, addr: usize, addrlen: usize) -> SyscallResult<usize>{
+        todo!()
+    }
 }

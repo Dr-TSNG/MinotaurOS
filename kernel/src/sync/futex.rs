@@ -1,3 +1,7 @@
+use crate::arch::VirtAddr;
+use crate::process::Tid;
+use crate::processor::{current_process, current_thread};
+use crate::result::SyscallResult;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use core::cell::SyncUnsafeCell;
@@ -6,10 +10,6 @@ use core::pin::Pin;
 use core::sync::atomic::{AtomicU32, Ordering};
 use core::task::{Context, Poll, Waker};
 use log::info;
-use crate::arch::VirtAddr;
-use crate::process::Tid;
-use crate::processor::{current_process, current_thread};
-use crate::result::SyscallResult;
 
 #[derive(Default)]
 pub struct FutexQueue(BTreeMap<VirtAddr, BTreeMap<Tid, FutexWaker>>);
@@ -45,8 +45,13 @@ impl FutexQueue {
         for _ in 0..nval_req {
             if let Some(queue) = self.0.get_mut(&old_addr) {
                 if let Some((tid, waker)) = queue.pop_first() {
-                    info!("[futex] Requeue {} from {:?} to {:?}", tid, old_addr, new_addr);
-                    unsafe { *(waker.addr.get()) = new_addr; }
+                    info!(
+                        "[futex] Requeue {} from {:?} to {:?}",
+                        tid, old_addr, new_addr
+                    );
+                    unsafe {
+                        *(waker.addr.get()) = new_addr;
+                    }
                     self.register(tid, waker);
                     woken_req += 1;
                 } else {
@@ -118,16 +123,22 @@ impl Future for FutexFuture {
         let emplaced = this.emplaced.get_mut();
         if *emplaced {
             info!("[futex] Woken up at {:?}", addr);
-            proc_inner.futex_queue.unregister(addr, current_thread().tid.0);
+            proc_inner
+                .futex_queue
+                .unregister(addr, current_thread().tid.0);
             Poll::Ready(Ok(()))
         } else {
             let waker = FutexWaker::new(addr, cx.waker().clone());
-            proc_inner.futex_queue.register(current_thread().tid.0, waker);
+            proc_inner
+                .futex_queue
+                .register(current_thread().tid.0, waker);
             *emplaced = true;
-            let val = unsafe {
-                AtomicU32::from_ptr(addr.as_ptr().cast::<u32>()).load(Ordering::Relaxed)
-            };
-            info!("[futex] Wait at {:?} for val {:#x}, expected {:#x}", addr, val, this.val);
+            let val =
+                unsafe { AtomicU32::from_ptr(addr.as_ptr().cast::<u32>()).load(Ordering::Relaxed) };
+            info!(
+                "[futex] Wait at {:?} for val {:#x}, expected {:#x}",
+                addr, val, this.val
+            );
             if val != this.val {
                 Poll::Ready(Ok(()))
             } else {

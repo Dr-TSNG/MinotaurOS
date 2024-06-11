@@ -1,13 +1,13 @@
-use alloc::boxed::Box;
-use alloc::string::ToString;
-use core::future::poll_fn;
-use core::sync::atomic::{AtomicU8, Ordering};
-use core::task::{Poll, Waker};
-use async_trait::async_trait;
-use futures::task::AtomicWaker;
 use crate::arch::VirtAddr;
 use crate::driver::{CharacterDevice, DeviceMeta, IrqDevice};
 use crate::result::SyscallResult;
+use alloc::boxed::Box;
+use alloc::string::ToString;
+use async_trait::async_trait;
+use core::future::poll_fn;
+use core::sync::atomic::{AtomicU8, Ordering};
+use core::task::{Poll, Waker};
+use futures::task::AtomicWaker;
 
 pub struct UartDevice {
     metadata: DeviceMeta,
@@ -70,8 +70,8 @@ impl CharacterDevice for UartDevice {
     }
 
     fn has_data(&self) -> bool {
-        self.buf.load(Ordering::Relaxed) != 0xff ||
-            unsafe { self.line_status_ptr().read_volatile() & 0x01 == 0x01 }
+        self.buf.load(Ordering::Relaxed) != 0xff
+            || unsafe { self.line_status_ptr().read_volatile() & 0x01 == 0x01 }
     }
 
     fn register_waker(&self, waker: Waker) {
@@ -96,7 +96,8 @@ impl CharacterDevice for UartDevice {
             } else {
                 Poll::Pending
             }
-        }).await
+        })
+        .await
     }
 
     async fn putchar(&self, ch: u8) -> SyscallResult<()> {

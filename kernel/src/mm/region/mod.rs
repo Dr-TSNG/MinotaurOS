@@ -2,15 +2,15 @@ pub mod direct;
 pub mod file;
 pub mod lazy;
 
-use alloc::boxed::Box;
-use alloc::string::String;
-use alloc::vec::Vec;
-use core::cmp::Ordering;
 use crate::arch::VirtPageNum;
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::HeapFrameTracker;
 use crate::mm::page_table::PageTable;
 use crate::result::{Errno, SyscallResult};
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 
 /// 地址空间区域
 ///
@@ -75,7 +75,8 @@ impl ASRegionMeta {
 
 impl PartialEq<Self> for dyn ASRegion {
     fn eq(&self, other: &Self) -> bool {
-        self.metadata().start == other.metadata().start && self.metadata().pages == other.metadata().pages
+        self.metadata().start == other.metadata().start
+            && self.metadata().pages == other.metadata().pages
     }
 }
 

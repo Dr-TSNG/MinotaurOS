@@ -1,11 +1,11 @@
-use alloc::sync::Arc;
-use core::arch::asm;
-use riscv::register::mstatus::FS;
-use riscv::register::sstatus;
 use crate::config::{KERNEL_STACK_SIZE, MAX_HARTS};
 use crate::mm::KERNEL_SPACE;
 use crate::process::thread::Thread;
 use crate::processor::context::HartContext;
+use alloc::sync::Arc;
+use core::arch::asm;
+use riscv::register::mstatus::FS;
+use riscv::register::sstatus;
 
 pub struct Hart {
     pub id: usize,
@@ -39,11 +39,15 @@ impl Hart {
                 None => true,
             };
             if switch_pt {
-                unsafe { next.process.inner.lock().addr_space.activate(); }
+                unsafe {
+                    next.process.inner.lock().addr_space.activate();
+                }
             }
         } else {
             if thread_now.is_some() {
-                unsafe { KERNEL_SPACE.lock().activate(); }
+                unsafe {
+                    KERNEL_SPACE.lock().activate();
+                }
             }
         }
         core::mem::swap(&mut self.ctx, another);
@@ -54,7 +58,8 @@ const HART_EACH: Hart = Hart::new();
 static mut HARTS: [Hart; MAX_HARTS] = [HART_EACH; MAX_HARTS];
 
 #[link_section = ".bss.uninit"]
-pub static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE * MAX_HARTS] = [0; KERNEL_STACK_SIZE * MAX_HARTS];
+pub static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE * MAX_HARTS] =
+    [0; KERNEL_STACK_SIZE * MAX_HARTS];
 
 pub fn local_hart() -> &'static mut Hart {
     unsafe {

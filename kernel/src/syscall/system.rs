@@ -1,7 +1,3 @@
-use alloc::vec;
-use core::mem::size_of;
-use log::{debug, info};
-use zerocopy::AsBytes;
 use crate::arch::{shutdown, VirtAddr};
 use crate::debug::console::DMESG;
 use crate::driver::total_memory;
@@ -12,6 +8,10 @@ use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::time::current_time;
 use crate::syscall::system::ffi::{SysInfo, SyslogCmd};
+use alloc::vec;
+use core::mem::size_of;
+use log::{debug, info};
+use zerocopy::AsBytes;
 
 mod ffi {
     use num_enum::TryFromPrimitive;
@@ -90,7 +90,11 @@ pub fn sys_syslog(cmd: i32, buf: usize, len: usize) -> SyscallResult<usize> {
                 }
             });
 
-            let buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(buf), len)?;
+            let buf = current_process()
+                .inner
+                .lock()
+                .addr_space
+                .user_slice_w(VirtAddr(buf), len)?;
             let mut size = 0;
             for line in lines {
                 buf[size..size + line.len()].copy_from_slice(line.as_bytes());
@@ -104,7 +108,8 @@ pub fn sys_syslog(cmd: i32, buf: usize, len: usize) -> SyscallResult<usize> {
 
 pub fn sys_uname(buf: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let user_buf = proc_inner.addr_space
+    let user_buf = proc_inner
+        .addr_space
         .user_slice_w(VirtAddr(buf), UTS_NAME.as_bytes().len())?;
     user_buf.copy_from_slice(UTS_NAME.as_bytes());
     Ok(0)
@@ -112,7 +117,9 @@ pub fn sys_uname(buf: usize) -> SyscallResult<usize> {
 
 pub fn sys_sysinfo(buf: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<SysInfo>())?;
+    let user_buf = proc_inner
+        .addr_space
+        .user_slice_w(VirtAddr(buf), size_of::<SysInfo>())?;
     let mut sys_info = SysInfo::default();
     sys_info.uptime = current_time().as_secs() as isize;
     sys_info.totalram = total_memory();

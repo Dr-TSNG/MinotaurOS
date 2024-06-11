@@ -29,7 +29,7 @@ impl Future for TakeWakerFuture {
 /// 阻塞当前线程直到 future 执行完成
 ///
 /// future 不会被调度，而是一直被轮询直到返回 Ready
-pub fn block_on<T>(fut: impl Future<Output=T>) -> T {
+pub fn block_on<T>(fut: impl Future<Output = T>) -> T {
     let mut fut = Box::pin(fut);
 
     let waker = Arc::new(BlockWaker).into();

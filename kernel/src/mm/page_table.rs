@@ -1,4 +1,7 @@
-use crate::arch::{paddr_to_kvaddr, PageTableEntry, PhysAddr, PhysPageNum, PTE_SLOTS, PTEType, VirtAddr, VirtPageNum};
+use crate::arch::{
+    paddr_to_kvaddr, PTEType, PageTableEntry, PhysAddr, PhysPageNum, VirtAddr, VirtPageNum,
+    PTE_SLOTS,
+};
 
 #[derive(Copy, Clone, Debug)]
 pub struct PageTable {
@@ -42,7 +45,7 @@ impl PageTable {
             PTEType::Page => SlotType::Page(pte.ppn()),
         }
     }
-    
+
     pub fn translate(&self, vaddr: VirtAddr) -> PhysAddr {
         let mut pt = *self;
         let vpn = VirtPageNum::from(vaddr.floor());

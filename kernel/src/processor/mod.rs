@@ -1,8 +1,8 @@
-use alloc::sync::Arc;
-use crate::process::Process;
 use crate::process::thread::Thread;
+use crate::process::Process;
 use crate::processor::hart::local_hart;
 use crate::trap::context::TrapContext;
+use alloc::sync::Arc;
 
 pub mod context;
 pub mod hart;

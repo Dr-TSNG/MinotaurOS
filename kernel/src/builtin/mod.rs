@@ -1,10 +1,10 @@
+use crate::sync::once::LateInit;
 use alloc::vec::Vec;
 use core::arch::global_asm;
-use crate::sync::once::LateInit;
 
 global_asm!(include_str!("release.asm"));
 
-extern {
+extern "C" {
     fn builtin_apps();
     fn builtin_app_names();
 }
@@ -17,9 +17,7 @@ fn builtin_app_num() -> usize {
 fn builtin_app_data(app_id: usize) -> &'static [u8] {
     let app_num_ptr = builtin_apps as usize as *const usize;
     let app_num = builtin_app_num();
-    let app_start = unsafe {
-        core::slice::from_raw_parts(app_num_ptr.add(1), app_num + 1)
-    };
+    let app_start = unsafe { core::slice::from_raw_parts(app_num_ptr.add(1), app_num + 1) };
     assert!(app_id < app_num);
     unsafe {
         core::slice::from_raw_parts(

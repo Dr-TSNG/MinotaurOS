@@ -1,18 +1,18 @@
-use alloc::boxed::Box;
-use alloc::collections::VecDeque;
-use alloc::sync::{Arc, Weak};
-use core::cmp::min;
-use core::future::Future;
-use core::pin::Pin;
-use core::task::{Context, Poll, Waker};
-use async_trait::async_trait;
-use log::debug;
 use crate::fs::file::{File, FileMeta};
 use crate::process::thread::event_bus::Event;
 use crate::processor::current_thread;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
+use alloc::boxed::Box;
+use alloc::collections::VecDeque;
+use alloc::sync::{Arc, Weak};
+use async_trait::async_trait;
+use core::cmp::min;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
+use log::debug;
 
 pub struct Pipe {
     metadata: FileMeta,
@@ -80,18 +80,21 @@ impl File for Pipe {
             buf,
             pos: 0,
         };
-        current_thread().event_bus.suspend_with(Event::KILL_THREAD, fut).await
+        current_thread()
+            .event_bus
+            .suspend_with(Event::KILL_THREAD, fut)
+            .await
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         if self.is_reader {
             return Err(Errno::EBADF);
         }
-        let fut = PipeWriteFuture {
-            pipe: self,
-            buf,
-        };
-        current_thread().event_bus.suspend_with(Event::KILL_THREAD, fut).await
+        let fut = PipeWriteFuture { pipe: self, buf };
+        current_thread()
+            .event_bus
+            .suspend_with(Event::KILL_THREAD, fut)
+            .await
     }
 
     fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
@@ -138,7 +141,10 @@ impl Future for PipeReadFuture<'_> {
         let read = min(self.buf.len() - self.pos, inner.buf.len());
         debug!(
             "[pipe] read poll pos: {}, len: {}, buf.len: {}, read: {}",
-            self.pos, self.buf.len(), inner.buf.len(), read,
+            self.pos,
+            self.buf.len(),
+            inner.buf.len(),
+            read,
         );
         if read > 0 {
             for (i, b) in inner.buf.drain(..read).enumerate() {
@@ -167,7 +173,8 @@ impl Future for PipeWriteFuture<'_> {
         let mut inner = self.pipe.inner.lock();
         debug!(
             "[pipe] write poll len: {}, buf.len: {}",
-            self.buf.len(), inner.buf.len(),
+            self.buf.len(),
+            inner.buf.len(),
         );
         if self.pipe.other.strong_count() == 0 {
             return Poll::Ready(Err(Errno::EPIPE));

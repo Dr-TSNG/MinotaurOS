@@ -1,12 +1,12 @@
-use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
-use alloc::sync::Arc;
-use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::fs::ffi::VfsFlags;
 use crate::fs::inode::Inode;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
+use alloc::collections::BTreeMap;
+use alloc::string::{String, ToString};
+use alloc::sync::Arc;
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 #[repr(u64)]
 pub enum FileSystemType {
@@ -62,7 +62,11 @@ struct MountTree {
 impl MountTree {
     pub fn new(fs: Arc<dyn FileSystem>) -> Self {
         let mnt_id = MNT_ID_POOL.fetch_add(1, Ordering::Acquire);
-        Self { mnt_id, fs, sub_trees: BTreeMap::new() }
+        Self {
+            mnt_id,
+            fs,
+            sub_trees: BTreeMap::new(),
+        }
     }
 }
 
@@ -80,7 +84,9 @@ impl MountNamespace {
     }
 
     pub async fn mount<F>(&self, absolute_path: &str, fs_fn: F) -> SyscallResult
-        where F: FnOnce(Arc<dyn Inode>) -> Arc<dyn FileSystem> {
+    where
+        F: FnOnce(Arc<dyn Inode>) -> Arc<dyn FileSystem>,
+    {
         assert!(is_absolute_path(absolute_path));
         let inode = self.lookup_absolute(absolute_path).await?;
         let inode = inode.metadata().parent.clone().unwrap().upgrade().unwrap();
@@ -88,7 +94,12 @@ impl MountNamespace {
         let fs = fs_fn(inode.clone());
         let mut tree = self.tree.lock();
         Self::do_mount(&mut tree.sub_trees, fs.clone(), absolute_path)?;
-        inode.metadata().inner.lock().mounts.insert(dir_name, fs.root());
+        inode
+            .metadata()
+            .inner
+            .lock()
+            .mounts
+            .insert(dir_name, fs.root());
         Ok(())
     }
 
@@ -103,7 +114,11 @@ impl MountNamespace {
         Ok(())
     }
 
-    fn do_mount(sub_trees: &mut BTreeMap<String, MountTree>, fs: Arc<dyn FileSystem>, path: &str) -> SyscallResult {
+    fn do_mount(
+        sub_trees: &mut BTreeMap<String, MountTree>,
+        fs: Arc<dyn FileSystem>,
+        path: &str,
+    ) -> SyscallResult {
         for (k, v) in sub_trees.iter_mut() {
             if k == path {
                 return Err(Errno::EEXIST);
@@ -115,7 +130,10 @@ impl MountNamespace {
         Ok(())
     }
 
-    fn do_unmount(sub_trees: &mut BTreeMap<String, MountTree>, path: &str) -> SyscallResult<MountTree> {
+    fn do_unmount(
+        sub_trees: &mut BTreeMap<String, MountTree>,
+        path: &str,
+    ) -> SyscallResult<MountTree> {
         for (k, v) in sub_trees.iter_mut() {
             if k == path {
                 return if v.sub_trees.is_empty() {

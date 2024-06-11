@@ -1,10 +1,10 @@
-use core::alloc::{GlobalAlloc, Layout};
-use core::ptr::NonNull;
-use buddy_system_allocator::Heap;
-use crate::arch::{kvpn_to_ppn, PAGE_SIZE, PhysPageNum, ppn_to_kvpn, VirtAddr, VirtPageNum};
+use crate::arch::{kvpn_to_ppn, ppn_to_kvpn, PhysPageNum, VirtAddr, VirtPageNum, PAGE_SIZE};
 use crate::config::KERNEL_HEAP_SIZE;
 use crate::println;
 use crate::sync::mutex::IrqMutex;
+use buddy_system_allocator::Heap;
+use core::alloc::{GlobalAlloc, Layout};
+use core::ptr::NonNull;
 
 #[global_allocator]
 static KERNEL_HEAP: HeapAllocator = HeapAllocator::empty();
@@ -38,7 +38,9 @@ impl HeapAllocator {
 
 unsafe impl GlobalAlloc for HeapAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        self.0.lock().alloc(layout)
+        self.0
+            .lock()
+            .alloc(layout)
             .map_or(VirtAddr(0).as_ptr(), |va| va.as_ptr())
     }
 
@@ -51,7 +53,9 @@ unsafe impl GlobalAlloc for HeapAllocator {
 ///
 /// SAFETY: 保证分配的页已经清零
 pub fn alloc_kernel_frames(pages: usize) -> HeapFrameTracker {
-    let vpn = KERNEL_HEAP.0.lock()
+    let vpn = KERNEL_HEAP
+        .0
+        .lock()
         .alloc(Layout::from_size_align(pages * PAGE_SIZE, PAGE_SIZE).unwrap())
         .map(|va| VirtPageNum::from(VirtAddr(va.as_ptr() as usize)))
         .expect("[HeapAllocator] Out of memory");
@@ -66,15 +70,20 @@ fn dealloc_kernel_pages(tracker: &HeapFrameTracker) {
     let vpn = ppn_to_kvpn(tracker.ppn);
     let ptr = VirtAddr::from(vpn).as_ptr();
     let ptr = NonNull::new(ptr).unwrap();
-    KERNEL_HEAP.0.lock()
-        .dealloc(ptr, Layout::from_size_align(tracker.pages * PAGE_SIZE, PAGE_SIZE).unwrap());
+    KERNEL_HEAP.0.lock().dealloc(
+        ptr,
+        Layout::from_size_align(tracker.pages * PAGE_SIZE, PAGE_SIZE).unwrap(),
+    );
 }
 
 pub fn init() {
     unsafe {
         let start = HEAP_SPACE.as_ptr();
         let end = start.add(KERNEL_HEAP_SIZE);
-        KERNEL_HEAP.0.lock().add_to_heap(start as usize, end as usize);
+        KERNEL_HEAP
+            .0
+            .lock()
+            .add_to_heap(start as usize, end as usize);
         println!("[kernel] Initialize kernel heap: {:?} - {:?}", start, end);
     }
 }

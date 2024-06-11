@@ -1,12 +1,12 @@
-use alloc::string::String;
-use alloc::sync::Arc;
-use alloc::vec;
-use log::{debug, info};
 use crate::fs::fd::FdNum;
 use crate::fs::ffi::AT_FDCWD;
 use crate::fs::inode::Inode;
 use crate::process::ProcessInner;
 use crate::result::{Errno, SyscallResult};
+use alloc::string::String;
+use alloc::sync::Arc;
+use alloc::vec;
+use log::{debug, info};
 
 #[macro_export]
 macro_rules! split_path {
@@ -15,7 +15,11 @@ macro_rules! split_path {
     };
 }
 
-pub async fn resolve_path(proc_inner: &ProcessInner, dirfd: FdNum, path: &str) -> SyscallResult<Arc<dyn Inode>> {
+pub async fn resolve_path(
+    proc_inner: &ProcessInner,
+    dirfd: FdNum,
+    path: &str,
+) -> SyscallResult<Arc<dyn Inode>> {
     let path = normalize_path(path);
     let path = path.as_ref();
     debug!("[resolve_path] dirfd: {}, path: {:?}", dirfd, path);

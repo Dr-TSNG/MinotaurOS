@@ -30,8 +30,7 @@ impl BootSectorOffset {
     }
 
     pub fn vol_lab(sector: &[u8]) -> String {
-        String::from_utf8(section!(sector, VolLab, FilSysType))
-            .unwrap_or_default()
+        String::from_utf8(section!(sector, VolLab, FilSysType)).unwrap_or_default()
     }
 
     fn split(sector: &[u8], start: Self, end: Self) -> &[u8] {

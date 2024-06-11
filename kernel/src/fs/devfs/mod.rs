@@ -1,7 +1,3 @@
-use alloc::boxed::Box;
-use alloc::string::{String, ToString};
-use alloc::sync::{Arc, Weak};
-use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::fs::devfs::null::NullInode;
 use crate::fs::devfs::zero::ZeroInode;
 use crate::fs::ffi::{InodeMode, VfsFlags};
@@ -9,7 +5,12 @@ use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::{Inode, InodeChild, InodeInternal, InodeMeta};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::once::LateInit;
+use alloc::boxed::Box;
+use alloc::string::{String, ToString};
+use alloc::sync::{Arc, Weak};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
+mod net;
 mod null;
 pub mod tty;
 mod zero;
@@ -48,7 +49,11 @@ struct RootInode {
 }
 
 impl RootInode {
-    pub fn new(fs: &Arc<DevFileSystem>, source: String, parent: Option<Arc<dyn Inode>>) -> Arc<Self> {
+    pub fn new(
+        fs: &Arc<DevFileSystem>,
+        source: String,
+        parent: Option<Arc<dyn Inode>>,
+    ) -> Arc<Self> {
         let root = Arc::new(Self {
             metadata: InodeMeta::new(
                 fs.ino_pool.fetch_add(1, Ordering::Relaxed),
@@ -66,8 +71,14 @@ impl RootInode {
             fs: Arc::downgrade(fs),
         });
         root.metadata.inner.lock().apply_mut(|inner| {
-            inner.children.insert("null".to_string(), InodeChild::new(NullInode::new(fs, root.clone()), Box::new(())));
-            inner.children.insert("zero".to_string(), InodeChild::new(ZeroInode::new(fs, root.clone()), Box::new(())));
+            inner.children.insert(
+                "null".to_string(),
+                InodeChild::new(NullInode::new(fs, root.clone()), Box::new(())),
+            );
+            inner.children.insert(
+                "zero".to_string(),
+                InodeChild::new(ZeroInode::new(fs, root.clone()), Box::new(())),
+            );
             inner.children_loaded = true;
         });
         root

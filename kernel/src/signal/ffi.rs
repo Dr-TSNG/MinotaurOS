@@ -1,7 +1,7 @@
-use core::mem::size_of;
-use bitflags::bitflags;
-use num_enum::TryFromPrimitive;
 use crate::trap::context::TrapContext;
+use bitflags::bitflags;
+use core::mem::size_of;
+use num_enum::TryFromPrimitive;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, TryFromPrimitive)]
 #[repr(usize)]
@@ -143,5 +143,5 @@ impl UContext {
             _unused: [0; 120],
             uc_mcontext: trap_ctx.user_x,
         }
-    }    
+    }
 }

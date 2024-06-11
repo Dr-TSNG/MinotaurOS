@@ -1,10 +1,10 @@
-use core::mem::size_of;
+use crate::sched::ffi::TimeSpec;
 use bitflags::bitflags;
 use bytemuck::{Pod, Zeroable};
+use core::mem::size_of;
 use lazy_static::lazy_static;
 use num_enum::TryFromPrimitive;
 use zerocopy::{AsBytes, FromZeroes};
-use crate::sched::ffi::TimeSpec;
 
 bitflags! {
     pub struct OpenFlags: u32 {

@@ -1,6 +1,6 @@
-use log::{Level, LevelFilter, Metadata, Record};
 use crate::processor::hart::local_hart;
 use crate::sched::time::current_time;
+use log::{Level, LevelFilter, Metadata, Record};
 
 #[cfg(feature = "error")]
 const LOG_LEVEL: LevelFilter = LevelFilter::Error;
@@ -12,7 +12,13 @@ const LOG_LEVEL: LevelFilter = LevelFilter::Info;
 const LOG_LEVEL: LevelFilter = LevelFilter::Debug;
 #[cfg(feature = "trace")]
 const LOG_LEVEL: LevelFilter = LevelFilter::Trace;
-#[cfg(not(any(feature = "error", feature = "warn", feature = "info", feature = "debug", feature = "trace")))]
+#[cfg(not(any(
+    feature = "error",
+    feature = "warn",
+    feature = "info",
+    feature = "debug",
+    feature = "trace"
+)))]
 const LOG_LEVEL: LevelFilter = LevelFilter::Off;
 
 struct SimpleLogger;

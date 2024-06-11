@@ -1,11 +1,11 @@
-use alloc::sync::Arc;
-use alloc::vec;
-use alloc::vec::Vec;
 use crate::config::MAX_FD_NUM;
 use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::File;
 use crate::result::{Errno, SyscallResult};
+use alloc::sync::Arc;
+use alloc::vec;
+use alloc::vec::Vec;
 
 pub type FdNum = i32;
 
@@ -60,7 +60,10 @@ impl FdTable {
     /// 获取指定位置的文件描述符
     pub fn get(&self, fd: FdNum) -> SyscallResult<FileDescriptor> {
         let fd = fd as usize;
-        self.table.get(fd).and_then(Option::clone).ok_or(Errno::EBADF)
+        self.table
+            .get(fd)
+            .and_then(Option::clone)
+            .ok_or(Errno::EBADF)
     }
 
     /// 插入一个文件描述符，返回位置

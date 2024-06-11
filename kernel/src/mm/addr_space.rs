@@ -1,29 +1,31 @@
+use crate::arch::{PhysPageNum, VirtAddr, VirtPageNum, PAGE_SIZE};
+use crate::config::{
+    DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP,
+};
+use crate::driver::GLOBAL_MAPPINGS;
+use crate::fs::file_system::MountNamespace;
+use crate::fs::inode::Inode;
+use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
+use crate::mm::page_table::PageTable;
+use crate::mm::region::direct::DirectRegion;
+use crate::mm::region::file::FileRegion;
+use crate::mm::region::lazy::LazyRegion;
+use crate::mm::region::{ASRegion, ASRegionMeta};
+use crate::process::aux::{self, Aux};
+use crate::result::{Errno, SyscallResult};
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use bitflags::bitflags;
 use core::arch::asm;
 use core::cmp::min;
 use core::ffi::CStr;
-use bitflags::bitflags;
 use log::{debug, info, warn};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
-use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
-use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
-use crate::driver::GLOBAL_MAPPINGS;
-use crate::fs::file_system::MountNamespace;
-use crate::fs::inode::Inode;
-use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
-use crate::mm::page_table::PageTable;
-use crate::mm::region::{ASRegion, ASRegionMeta};
-use crate::mm::region::direct::DirectRegion;
-use crate::mm::region::file::FileRegion;
-use crate::mm::region::lazy::LazyRegion;
-use crate::process::aux::{self, Aux};
-use crate::result::{Errno, SyscallResult};
 
 bitflags! {
     pub struct ASPerms: u8 {
@@ -54,7 +56,10 @@ pub struct AddressSpace {
 impl AddressSpace {
     pub fn new_bare() -> Self {
         let root_pt_page = alloc_kernel_frames(1);
-        debug!("AddressSpace: create root page table {:?}", root_pt_page.ppn);
+        debug!(
+            "AddressSpace: create root page table {:?}",
+            root_pt_page.ppn
+        );
         let mut addr_space = AddressSpace {
             root_pt: PageTable::new(root_pt_page.ppn),
             asid: 0,
@@ -72,7 +77,12 @@ impl AddressSpace {
         for region in addr_space.regions.values() {
             let start = region.metadata().start;
             let end = start + region.metadata().pages;
-            info!("AddressSpace: {:?} {:x?} - {:x?}", region.metadata().name, start, end)
+            info!(
+                "AddressSpace: {:?} {:x?} - {:x?}",
+                region.metadata().name,
+                start,
+                end
+            )
         }
         addr_space
     }
@@ -114,8 +124,8 @@ impl AddressSpace {
                     if ph_flags.is_execute() {
                         perms |= ASPerms::X;
                     }
-                    let buf = &elf
-                        .input[phdr.offset() as usize..(phdr.offset() + phdr.file_size()) as usize];
+                    let buf = &elf.input
+                        [phdr.offset() as usize..(phdr.offset() + phdr.file_size()) as usize];
                     let region = LazyRegion::new_framed(
                         ASRegionMeta {
                             name: None,
@@ -148,7 +158,10 @@ impl AddressSpace {
             pages: (ustack_top_vpn - ustack_bottom_vpn).0,
         });
         addr_space.map_region(region);
-        debug!("Map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
+        debug!(
+            "Map user stack: {:?} - {:?}",
+            ustack_bottom_vpn, ustack_top_vpn
+        );
 
         // 映射用户堆
         let uheap_bottom_vpn = max_end_vpn;
@@ -161,16 +174,28 @@ impl AddressSpace {
         });
         addr_space.map_region(region);
         addr_space.brk = VirtAddr::from(uheap_top_vpn);
-        debug!("Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
+        debug!(
+            "Map user heap: {:?} - {:?}",
+            uheap_bottom_vpn, uheap_top_vpn
+        );
 
         let mut auxv: Vec<Aux> = Vec::with_capacity(64);
-        auxv.push(Aux::new(aux::AT_PHDR, load_base + elf.header.pt2.ph_offset() as usize));
-        auxv.push(Aux::new(aux::AT_PHENT, elf.header.pt2.ph_entry_size() as usize));
+        auxv.push(Aux::new(
+            aux::AT_PHDR,
+            load_base + elf.header.pt2.ph_offset() as usize,
+        ));
+        auxv.push(Aux::new(
+            aux::AT_PHENT,
+            elf.header.pt2.ph_entry_size() as usize,
+        ));
         auxv.push(Aux::new(aux::AT_PHNUM, ph_count as usize));
         auxv.push(Aux::new(aux::AT_PAGESZ, PAGE_SIZE));
         auxv.push(Aux::new(aux::AT_BASE, linker_base));
         auxv.push(Aux::new(aux::AT_FLAGS, 0));
-        auxv.push(Aux::new(aux::AT_ENTRY, elf.header.pt2.entry_point() as usize));
+        auxv.push(Aux::new(
+            aux::AT_ENTRY,
+            elf.header.pt2.entry_point() as usize,
+        ));
         auxv.push(Aux::new(aux::AT_UID, 0));
         auxv.push(Aux::new(aux::AT_EUID, 0));
         auxv.push(Aux::new(aux::AT_GID, 0));
@@ -207,7 +232,8 @@ impl AddressSpace {
 
     pub fn handle_page_fault(&mut self, addr: VirtAddr, perform: ASPerms) -> SyscallResult {
         let vpn = addr.floor();
-        let region = self.regions
+        let region = self
+            .regions
             .values_mut()
             .filter(|region| region.metadata().start <= vpn && region.metadata().end() > vpn)
             .next()
@@ -216,14 +242,26 @@ impl AddressSpace {
         let result = if region.metadata().perms.contains(perform) {
             region.fault_handler(self.root_pt, vpn)
         } else {
-            info!("Page access violation: {:?} - {:?} / {:?}", addr, perform, region.metadata().perms);
+            info!(
+                "Page access violation: {:?} - {:?} / {:?}",
+                addr,
+                perform,
+                region.metadata().perms
+            );
             return Err(Errno::EACCES);
         };
-        unsafe { self.activate(); }
+        unsafe {
+            self.activate();
+        }
         result
     }
 
-    pub fn check_addr_valid(&self, start: VirtAddr, end: VirtAddr, perms: ASPerms) -> SyscallResult<()> {
+    pub fn check_addr_valid(
+        &self,
+        start: VirtAddr,
+        end: VirtAddr,
+        perms: ASPerms,
+    ) -> SyscallResult<()> {
         let vpn_start = start.floor();
         let vpn_end = end.ceil();
         let mut cur = vpn_start;
@@ -276,7 +314,8 @@ impl AddressSpace {
     }
 
     pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult<usize> {
-        let heap_start = self.regions
+        let heap_start = self
+            .regions
             .values()
             .find(|region| region.metadata().name.as_deref() == Some("[heap]"))
             .map(|region| region.metadata().start)
@@ -312,7 +351,8 @@ impl AddressSpace {
         }
         let start = if let Some(start) = start {
             let end = start + pages;
-            let is_overlap = self.regions
+            let is_overlap = self
+                .regions
                 .values()
                 .any(|region| region.metadata().start < end && region.metadata().end() > start);
             if is_overlap {
@@ -320,7 +360,8 @@ impl AddressSpace {
             }
             start
         } else {
-            let mut iter = self.regions
+            let mut iter = self
+                .regions
                 .iter()
                 .skip_while(|(_, region)| region.metadata().name.as_deref() != Some("[heap]"));
             let mut region_low = iter.next().unwrap().1;
@@ -331,7 +372,12 @@ impl AddressSpace {
             }
             region_low.metadata().end()
         };
-        let metadata = ASRegionMeta { name, perms, start, pages };
+        let metadata = ASRegionMeta {
+            name,
+            perms,
+            start,
+            pages,
+        };
         let region: Box<dyn ASRegion> = match inode {
             Some(inode) => FileRegion::new(metadata, Arc::downgrade(&inode), offset),
             None => LazyRegion::new_free(metadata),
@@ -372,7 +418,12 @@ impl AddressSpace {
 impl AddressSpace {
     fn copy_global_mappings(&mut self) {
         for map in GLOBAL_MAPPINGS.iter() {
-            debug!("Copy global mappings: {} from {:?} to {:?}", map.name, map.phys_start, map.phys_end());
+            debug!(
+                "Copy global mappings: {} from {:?} to {:?}",
+                map.name,
+                map.phys_start,
+                map.phys_end()
+            );
             let ppn_start = PhysPageNum::from(map.phys_start);
             let vpn_start = VirtPageNum::from(map.virt_start);
             let vpn_end = VirtPageNum::from(map.virt_end());
@@ -405,7 +456,11 @@ impl AddressSpace {
         Ok(())
     }
 
-    async fn load_linker(&mut self, mnt_ns: &MountNamespace, offset: usize) -> SyscallResult<usize> {
+    async fn load_linker(
+        &mut self,
+        mnt_ns: &MountNamespace,
+        offset: usize,
+    ) -> SyscallResult<usize> {
         let inode = mnt_ns.lookup_absolute("/libc.so").await?;
         let file = inode.open().unwrap();
         let elf_data = file.read_all().await.unwrap();
@@ -431,8 +486,8 @@ impl AddressSpace {
                 if ph_flags.is_execute() {
                     perms |= ASPerms::X;
                 }
-                let buf = &elf
-                    .input[phdr.offset() as usize..(phdr.offset() + phdr.file_size()) as usize];
+                let buf =
+                    &elf.input[phdr.offset() as usize..(phdr.offset() + phdr.file_size()) as usize];
                 let region = LazyRegion::new_framed(
                     ASRegionMeta {
                         name: None,

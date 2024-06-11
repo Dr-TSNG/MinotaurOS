@@ -1,15 +1,15 @@
 use core::{future::Future, task::Poll};
 
+use crate::arch::VirtAddr;
+use crate::fs::ffi::{PollEvents, PollFd};
+use crate::processor::current_process;
+use crate::result::{Errno, SyscallResult};
 use alloc::vec::Vec;
 use core::mem::size_of;
 use core::pin::Pin;
 use core::task::Context;
 use log::{debug, warn};
 use pin_project::pin_project;
-use crate::arch::VirtAddr;
-use crate::fs::ffi::{PollEvents, PollFd};
-use crate::processor::current_process;
-use crate::result::{Errno, SyscallResult};
 
 #[pin_project]
 pub struct IOMultiplexFuture {
@@ -30,7 +30,12 @@ impl Future for IOMultiplexFuture {
         let mut cnt = 0;
 
         for poll_fd in this.fds.iter_mut() {
-            let file = current_process().inner.lock().fd_table.get(poll_fd.fd)?.file;
+            let file = current_process()
+                .inner
+                .lock()
+                .fd_table
+                .get(poll_fd.fd)?
+                .file;
             let events = PollEvents::from_bits(poll_fd.events).ok_or(Errno::EINVAL)?;
             poll_fd.revents = 0;
             if events.contains(PollEvents::POLLIN) {
@@ -67,8 +72,11 @@ impl Future for IOMultiplexFuture {
 
         if cnt > 0 {
             debug!("[IOMultiplexFuture] event happens: {}", cnt);
-            let slice = current_process().inner.lock()
-                .addr_space.user_slice_w(*this.ufds, size_of::<PollFd>() * this.fds.len())?;
+            let slice = current_process()
+                .inner
+                .lock()
+                .addr_space
+                .user_slice_w(*this.ufds, size_of::<PollFd>() * this.fds.len())?;
             bytemuck::cast_slice_mut(slice).copy_from_slice(&this.fds);
             Poll::Ready(Ok(cnt))
         } else {

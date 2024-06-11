@@ -8,11 +8,11 @@ enum FSInfoOffset {
     /// 保留位
     Reserved1 = 4,
     /// 最新的剩余簇数量
-    /// 
+    ///
     /// 如果为 0xFFFFFFFF 表示剩余簇未知，需要重新计算
     FreeCount = 488,
     /// 驱动程序最后分配出去的簇号
-    /// 
+    ///
     /// 如果为 0xFFFFFFFF，需要从簇 2 开始查找
     NxtFree = 492,
     /// 保留位
@@ -28,17 +28,17 @@ impl FSInfoOffset {
     pub fn lead_sig(sector: &[u8]) -> u32 {
         u32::from_le_bytes(section!(sector, LeadSig, Reserved1))
     }
-    
+
     /// 最新的剩余簇数量
     pub fn free_count(sector: &[u8]) -> u32 {
         u32::from_le_bytes(section!(sector, FreeCount, NxtFree))
     }
-    
+
     /// 驱动程序最后分配出去的簇号
     pub fn next_free(sector: &[u8]) -> u32 {
         u32::from_le_bytes(section!(sector, NxtFree, Reserved2))
     }
-    
+
     /// FSInfo 扇区尾部标志，值为 [SIG_END]
     pub fn trail_sig(sector: &[u8]) -> u32 {
         u32::from_le_bytes(section!(sector, TrailSig, End))

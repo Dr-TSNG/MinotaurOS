@@ -39,6 +39,7 @@ smoltcp = { version = "0.10.0", default-features = false, features = [
     "socket-dhcpv4",
     "async",
 ] }
+managed = { version = "0.8", default-features = false, features = ["map"] }
 
 [features]
 error = []

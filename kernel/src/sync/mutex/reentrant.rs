@@ -46,8 +46,14 @@ impl<T, S: MutexStrategy> ReMutex<T, S> {
             self.lock.set(self.lock.get() + 1);
         } else if self
             .owner
-            .compare_exchange(NOBODY, local_hart().id, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok() {
+            .compare_exchange(
+                NOBODY,
+                local_hart().id,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+        {
             self.lock.set(1);
         } else {
             return None;

@@ -45,7 +45,7 @@ struct TcpInner {
     send_buf_size: usize,
 }
 impl TcpSocket {
-    pub fn new(metadata: FileMeta) -> Self {
+    pub fn new() -> Self {
         let tcp_rx_buffer = tcp::SocketBuffer::new(vec![0u8; BUFFER_SIZE]);
         let tcp_tx_buffer = tcp::SocketBuffer::new(vec![0u8; BUFFER_SIZE]);
         let socket = tcp::Socket::new(tcp_rx_buffer, tcp_tx_buffer);
@@ -65,7 +65,7 @@ impl TcpSocket {
                 recv_buf_size: BUFFER_SIZE,
                 send_buf_size: BUFFER_SIZE,
             }),
-            file_data: metadata,
+            file_data: FileMeta::new(None),
         }
     }
 

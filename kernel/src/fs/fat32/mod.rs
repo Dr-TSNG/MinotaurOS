@@ -1,10 +1,3 @@
-use alloc::sync::Arc;
-use alloc::vec;
-use alloc::vec::Vec;
-use core::cmp::min;
-use core::mem::ManuallyDrop;
-use bitvec_rs::BitVec;
-use log::{info, trace, warn};
 use crate::driver::BlockDevice;
 use crate::fs::block_cache::BlockCache;
 use crate::fs::fat32::dir::FAT32Dirent;
@@ -15,18 +8,27 @@ use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::{Inode, InodeChild};
 use crate::result::{Errno, SyscallResult};
 use crate::sync::once::LateInit;
+use alloc::sync::Arc;
+use alloc::vec;
+use alloc::vec::Vec;
+use bitvec_rs::BitVec;
+use core::cmp::min;
+use core::mem::ManuallyDrop;
+use log::{info, trace, warn};
 
 macro_rules! section {
     ($buf:ident, $start:ident, $end:ident) => {
-        Self::split($buf, Self::$start, Self::$end).try_into().unwrap()
-    }
+        Self::split($buf, Self::$start, Self::$end)
+            .try_into()
+            .unwrap()
+    };
 }
 
 mod bpb;
 mod dir;
-mod inode;
 mod fat;
 mod fsinfo;
+mod inode;
 
 const BLOCK_SIZE: usize = 512;
 const BLOCK_CACHE_CAP: usize = 100;
@@ -42,10 +44,7 @@ pub struct FAT32FileSystem {
 }
 
 impl FAT32FileSystem {
-    pub async fn new(
-        device: Arc<dyn BlockDevice>,
-        flags: VfsFlags,
-    ) -> SyscallResult<Arc<Self>> {
+    pub async fn new(device: Arc<dyn BlockDevice>, flags: VfsFlags) -> SyscallResult<Arc<Self>> {
         let mut boot_sector = [0; BLOCK_SIZE];
         device.read_block(BOOT_SECTOR_ID, &mut boot_sector).await?;
         let fs = Arc::new(FAT32FileSystem {
@@ -56,14 +55,21 @@ impl FAT32FileSystem {
             root: ManuallyDrop::new(LateInit::new()),
         });
         let root_cluster = fs.fat32meta.root_cluster as u32;
-        fs.root.init(FAT32Inode::root(&fs, None, root_cluster).await?);
+        fs.root
+            .init(FAT32Inode::root(&fs, None, root_cluster).await?);
         info!("FAT32 metadata: {:?}", fs.fat32meta);
         Ok(fs)
     }
 
     /// 根据簇号和偏移读取数据
-    pub async fn read_data(&self, cluster: usize, buf: &mut [u8], mut offset: usize) -> SyscallResult {
-        buf.len().checked_add(offset)
+    pub async fn read_data(
+        &self,
+        cluster: usize,
+        buf: &mut [u8],
+        mut offset: usize,
+    ) -> SyscallResult {
+        buf.len()
+            .checked_add(offset)
             .take_if(|v| *v <= self.fat32meta.bytes_per_cluster)
             .expect("Cross boundary");
 
@@ -76,7 +82,9 @@ impl FAT32FileSystem {
                 continue;
             }
             let next = min(cur + BLOCK_SIZE - offset, buf.len());
-            self.cache.read_block(sector, &mut buf[cur..next], offset).await?;
+            self.cache
+                .read_block(sector, &mut buf[cur..next], offset)
+                .await?;
             offset = 0;
             cur = next;
             if cur == buf.len() {
@@ -89,7 +97,8 @@ impl FAT32FileSystem {
 
     /// 根据簇号和偏移写入数据
     pub async fn write_data(&self, cluster: usize, buf: &[u8], mut offset: usize) -> SyscallResult {
-        buf.len().checked_add(offset)
+        buf.len()
+            .checked_add(offset)
             .take_if(|v| *v <= self.fat32meta.bytes_per_cluster)
             .expect("Cross boundary");
 
@@ -102,7 +111,9 @@ impl FAT32FileSystem {
                 continue;
             }
             let next = min(cur + BLOCK_SIZE - offset, buf.len());
-            self.cache.write_block(sector, &buf[cur..next], offset).await?;
+            self.cache
+                .write_block(sector, &buf[cur..next], offset)
+                .await?;
             offset = 0;
             cur = next;
             if cur == buf.len() {
@@ -150,10 +161,17 @@ impl FAT32FileSystem {
                         occupy.push(true);
                         dir_len += 1;
                         dir.append_short(value);
-                        trace!("[fat32] Read fat32 dirent: {:<24} at {}-{} attr {:?}", dir.name, dir_pos, dir_len, dir.attr);
+                        trace!(
+                            "[fat32] Read fat32 dirent: {:<24} at {}-{} attr {:?}",
+                            dir.name,
+                            dir_pos,
+                            dir_len,
+                            dir.attr
+                        );
                         if dir.name != "." && dir.name != ".." {
                             let inode = FAT32Inode::new(&self, parent.clone(), dir).await?;
-                            children.push(InodeChild::new(inode, FAT32ChildExt::new(dir_pos, dir_len)));
+                            children
+                                .push(InodeChild::new(inode, FAT32ChildExt::new(dir_pos, dir_len)));
                         }
                         dir = FAT32Dirent::default();
                         dir_pos += dir_len;
@@ -165,7 +183,12 @@ impl FAT32FileSystem {
         Ok(children)
     }
 
-    pub async fn write_dir(&self, clusters: &[usize], pos: usize, dirent: &[u8; 32]) -> SyscallResult<()> {
+    pub async fn write_dir(
+        &self,
+        clusters: &[usize],
+        pos: usize,
+        dirent: &[u8; 32],
+    ) -> SyscallResult<()> {
         let dirents_per_cluster = self.fat32meta.bytes_per_cluster / 32;
         let dirents_per_sector = BLOCK_SIZE / 32;
         let cluster = clusters[pos / dirents_per_cluster];
@@ -200,15 +223,23 @@ impl FAT32FileSystem {
                 break;
             }
         }
-        trace!("Append FAT32 dirent: {:<8} at {}-{} attr {:?}", dirent.name, left, dirs.len(), dirent.attr);
+        trace!(
+            "Append FAT32 dirent: {:<8} at {}-{} attr {:?}",
+            dirent.name,
+            left,
+            dirs.len(),
+            dirent.attr
+        );
         if right == occupy.len() {
             occupy.resize(left + dirs.len(), false);
             if occupy.len().div_ceil(dirents_per_cluster) > clusters.len() {
                 let cluster = self.alloc_cluster().await?;
-                self.write_fat_ent(*clusters.last().unwrap(), FATEnt::NEXT(cluster as u32)).await?;
+                self.write_fat_ent(*clusters.last().unwrap(), FATEnt::NEXT(cluster as u32))
+                    .await?;
                 clusters.push(cluster);
             }
-            self.write_dir(clusters, occupy.len(), &FAT32Dirent::end()).await?;
+            self.write_dir(clusters, occupy.len(), &FAT32Dirent::end())
+                .await?;
         }
         for i in 0..dirs.len() {
             occupy.set(left + i, true);
@@ -235,7 +266,8 @@ impl FAT32FileSystem {
         } else {
             for i in 0..len {
                 occupy.set(pos + i, false);
-                self.write_dir(clusters, pos + i, &FAT32Dirent::empty()).await?;
+                self.write_dir(clusters, pos + i, &FAT32Dirent::empty())
+                    .await?;
             }
         }
         Ok(())
@@ -265,14 +297,18 @@ impl FAT32FileSystem {
     async fn read_fat_ent(&self, cluster: usize) -> SyscallResult<FATEnt> {
         let (block_id, block_offset) = self.ent_block_for_cluster(cluster);
         let mut ent = [0; 4];
-        self.cache.read_block(block_id, &mut ent, block_offset).await?;
+        self.cache
+            .read_block(block_id, &mut ent, block_offset)
+            .await?;
         Ok(FATEnt::from(u32::from_le_bytes(ent)))
     }
 
     /// 写入 FAT 表项
     async fn write_fat_ent(&self, cluster: usize, ent: FATEnt) -> SyscallResult {
         let (block_id, block_offset) = self.ent_block_for_cluster(cluster);
-        self.cache.write_block(block_id, &u32::from(ent).to_le_bytes(), block_offset).await?;
+        self.cache
+            .write_block(block_id, &u32::from(ent).to_le_bytes(), block_offset)
+            .await?;
         Ok(())
     }
 

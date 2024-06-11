@@ -37,7 +37,7 @@ struct UdpSocketInner {
     sendbuf_size: usize,
 }
 impl UdpSocket {
-    pub fn new(metadata: FileMeta) -> Self {
+    pub fn new() -> Self {
         let recv = socket::udp::PacketBuffer::new(
             vec![PacketMetadata::EMPTY, PacketMetadata::EMPTY],
             vec![0u8; BUFFER_SIZE],
@@ -57,7 +57,7 @@ impl UdpSocket {
                 sendbuf_size: BUFFER_SIZE,
             }),
             socket_handler: socket_handle,
-            file_data: metadata,
+            file_data: FileMeta::new(None),
         }
     }
 }
