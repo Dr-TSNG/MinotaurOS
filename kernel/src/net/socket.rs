@@ -8,7 +8,7 @@ use core::slice;
 use bitflags::bitflags;
 use log::__private_api::Value;
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv6Address};
-use crate::fs::fd::{FdNum, FdTable};
+use crate::fs::fd::{FdNum, FdTable, FileDescriptor};
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::{File, Seek};
 use crate::net::port::PORT_ALLOCATOR;
@@ -276,8 +276,8 @@ pub fn fill_with_endpoint(
 
 impl dyn Socket{
     pub fn alloc(domain: u32,socket_type: u32) -> SyscallResult<usize>{
-        todo!()
-       /* match domain as u16 {
+        //todo!()
+        match domain as u16 {
             AF_INET | AF_INET6 => {
                 let socket_type = SocketType::from_bits(socket_type).ok_or(Err(Errno::EINVAL))?;
                 let flags = if socket_type.contains(SocketType::SOCK_CLOEXEC){
@@ -290,14 +290,24 @@ impl dyn Socket{
                     let socket = UdpSocket::new();
                     let socket = Arc::new(socket);
                     let cur = current_process().inner.lock();
-                    // let fd = cur.fd_table;
-
-                    cur.socket_table.insert(fd,socket);
-                    Ok(fd)
+                    let file_desc = FileDescriptor::new(socket,flags);
+                    let fd_num = cur.fd_table.put(file_desc,0).unwrap();
+                    cur.socket_table.insert(fd_num,socket);
+                    Ok(fd_num as usize)
+                }else if socket_type.contains(SocketType::SOCK_STREAM){
+                    todo!()
+                }else{
+                    Err(Errno::EINVAL)
                 }
+            },
+            AF_UNIX => {
+                Ok(4)
+                // todo!()
+            },
+            _ => {
+                Err(Errno::EINVAL)
             }
         }
-        */
     }
     pub fn addr(self: &Arc<Self>,addr: usize,addrlen: usize) -> SyscallResult<usize>{
         todo!()
