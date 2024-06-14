@@ -1,5 +1,8 @@
-use crate::net::Socket;
+use log::info;
+use crate::fs::fd::{FdNum, FileDescriptor};
+use crate::net::{listen_endpoint, Socket, SocketType};
 use crate::processor::current_process;
+use crate::result::Errno::{ENOSTR, ENOTSOCK};
 use crate::result::SyscallResult;
 
 /// socket level
@@ -17,13 +20,50 @@ const SO_RCVBUF: u32 = 8;
 const SO_KEEPALIVE: u32 = 9;
 
 pub fn sys_socket(domain: u32,socket_type: u32,protocol: u32) -> SyscallResult<usize>{
-    todo!()
+    let sockfd = <dyn Socket>::alloc(domain,socket_type).unwrap();
+    info!("[sys_socket] new sockfd: {}", sockfd);
+    Ok(sockfd)
 }
 pub fn sys_bind(sockfd: u32,addr: usize,addrlen: u32) -> SyscallResult<usize>{
-    todo!()
+    /*
+        检查一下从addr到addr+addrlen是否满足User Readable
+    */
+    let addr_buf = unsafe{core::slice::from_raw_parts(addr as *const u8,addrlen as usize)};
+    let socket = current_process().inner.lock().socket_table.get_ref(sockfd as i32).cloned();
+    if socket.is_none(){
+        return Err(ENOTSOCK);
+    }
+    let socket = socket.unwrap();
+    let endpoint = listen_endpoint(addr_buf)?;
+    match socket.socket_type() {
+        SocketType::SOCK_STREAM => {
+            socket.bind(endpoint)
+        },
+        SocketType::SOCK_DGRAM => {
+            let mut proc = current_process().inner.lock();
+            let res = proc.socket_table.can_bind(endpoint);
+            if res.is_none(){
+                info!("[sys_bind] not find port exist");
+                socket.bind(endpoint)
+            } else {
+                let (_,sock) = res.unwrap();
+                proc.socket_table.insert(sockfd as FdNum,sock.clone());
+                let old = proc.fd_table.take(sockfd as FdNum).unwrap().unwrap();
+                proc.fd_table.insert(sockfd as FdNum, FileDescriptor::new(sock, old.flags)).expect("replace fdnum in sys_bind failed");
+                Ok(0)
+            }
+        },
+        _ => todo!(),
+    }
 }
 pub fn sys_listen(sockfd: u32, _backlog: u32) -> SyscallResult<usize>{
-    todo!()
+    let proc = current_process().inner.lock();
+    let socket = proc.socket_table.get_ref(sockfd as FdNum).cloned();
+    if socket.is_none(){
+        return Err(ENOTSOCK);
+    }
+    let socket = socket.unwrap();
+    socket.listen()
 }
 pub async fn sys_accept(sockfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize> {
     todo!()

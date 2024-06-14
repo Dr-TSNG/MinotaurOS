@@ -158,14 +158,14 @@ impl File for UdpSocket {
 }
 #[async_trait]
 impl Socket for UdpSocket {
-    fn bind(&self, addr: IpListenEndpoint) -> SyscallResult {
+    fn bind(&self, addr: IpListenEndpoint) -> SyscallResult<usize> {
         NET_INTERFACE.poll();
         let ret = NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| socket.bind(addr));
         if ret.is_err() == true {
             return Err(EINVAL);
         }
         NET_INTERFACE.poll();
-        Ok(())
+        Ok(0)
     }
 
     async fn connect(&self, addr: &[u8]) -> SyscallResult {
@@ -205,7 +205,7 @@ impl Socket for UdpSocket {
         //fut.await
     }
 
-    async fn listen(&self) -> SyscallResult {
+    fn listen(&self) -> SyscallResult<usize> {
         Err(EOPNOTSUPP)
     }
 

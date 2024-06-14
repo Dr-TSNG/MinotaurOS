@@ -216,9 +216,9 @@ impl From<SocketAddressV6> for IpListenEndpoint {
 /// for syscall on net part , return SyscallResult
 #[async_trait]
 pub trait Socket: File {
-    fn bind(&self, addr: IpListenEndpoint) -> SyscallResult;
+    fn bind(&self, addr: IpListenEndpoint) -> SyscallResult<usize>;
     async fn connect(&self, addr: &[u8]) -> SyscallResult;
-    async fn listen(&self) -> SyscallResult;
+    fn listen(&self) -> SyscallResult<usize>;
     async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult;
     fn set_send_buf_size(&self, size: usize) -> SyscallResult;
     fn set_recv_buf_size(&self, size: usize) -> SyscallResult;
@@ -287,7 +287,11 @@ impl dyn Socket{
         //todo!()
         match domain as u16 {
             AF_INET | AF_INET6 => {
-                let socket_type = SocketType::from_bits(socket_type).ok_or(Err(Errno::EINVAL))?;
+                let socket_type = SocketType::from_bits(socket_type);
+                if socket_type.is_none(){
+                    return Err(Errno::EINVAL);
+                }
+                let socket_type = socket_type.unwrap();
                 let flags = if socket_type.contains(SocketType::SOCK_CLOEXEC){
                     OpenFlags::O_RDWR | OpenFlags::O_CLOEXEC
                 }else{
@@ -295,25 +299,9 @@ impl dyn Socket{
                 };
                 // 创建 inode， 赋值给 生成的 udp socket ， inode的类型为 IFSOCK
                 if socket_type.contains(SocketType::SOCK_DGRAM){
-                    let socket = UdpSocket::new();
-                    let socket = Arc::new(socket);
-                    let cur = current_process().inner.lock();
-                    let file_desc = FileDescriptor::new(socket,flags);
-                    let fd_num = cur.fd_table.put(file_desc,0).unwrap();
-                    let filemeta = FileMeta::new(Some(NetInode::new(fd_num as usize).unwrap()));
-                    socket.file_data = filemeta;
-                    cur.socket_table.insert(fd_num,socket);
-                    Ok(fd_num as usize)
+                   todo!()
                 }else if socket_type.contains(SocketType::SOCK_STREAM){
-                    let socket = TcpSocket::new();
-                    let socket = Arc::new(socket);
-                    let cur = current_process().inner.lock();
-                    let file_desc = FileDescriptor::new(socket,flags);
-                    let fd_num = cur.fd_table.put(file_desc,0).unwrap();
-                    let filemeta = FileMeta::new(Some(NetInode::new(fd_num as usize).unwrap()));
-                    socket.file_data = filemeta;
-                    cur.socket_table.insert(fd_num,socket);
-                    Ok(fd_num as usize)
+                    todo!()
                 }else{
                     Err(Errno::EINVAL)
                 }

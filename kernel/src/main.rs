@@ -13,6 +13,7 @@
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance)]
 #![feature(sync_unsafe_cell)]
+#![feature(trait_upcasting)]
 
 extern crate alloc;
 

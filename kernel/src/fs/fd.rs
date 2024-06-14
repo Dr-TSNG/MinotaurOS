@@ -101,6 +101,15 @@ impl FdTable {
         self.table[fd] = None;
         Ok(())
     }
+
+    /// 获取一个文件描述符的所有权
+    pub fn take(&mut self,fd: FdNum) -> SyscallResult<Option<FileDescriptor>>{
+        if fd >= self.table.len() as i32 {
+            Ok(None)
+        }else{
+            Ok(self.table[fd as usize].take())
+        }
+    }
 }
 
 impl FdTable {

@@ -4,9 +4,11 @@ use crate::arch::VirtAddr;
 use crate::fs::ffi::InodeMode::IFSOCK;
 use crate::fs::ffi::{InodeMode, OpenFlags};
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::vec;
 use async_trait::async_trait;
 use core::future::Future;
+use core::ops::Deref;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use futures::future::err;
@@ -18,11 +20,12 @@ use smoltcp::time::Duration;
 use smoltcp::wire::IpEndpoint;
 use smoltcp::{iface::SocketHandle, wire::IpListenEndpoint};
 use xmas_elf::program::Flags;
+use crate::fs::fd::{FdNum, FdTable};
 
 use crate::fs::file::{File, FileMeta, Seek};
 use crate::net::iface::NET_INTERFACE;
 use crate::net::port::{PortAllocator, PORT_ALLOCATOR};
-use crate::net::socket::{endpoint, Socket, SocketType, BUFFER_SIZE};
+use crate::net::socket::{endpoint, Socket, SocketType, BUFFER_SIZE, fill_with_endpoint};
 use crate::net::socket::{SHUT_RD, SHUT_RDWR, SHUT_WR};
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
@@ -201,22 +204,49 @@ impl File for TcpSocket {
 }
 #[async_trait]
 impl Socket for TcpSocket {
-    fn bind(&self, addr: IpListenEndpoint) -> SyscallResult {
+    fn bind(&self, addr: IpListenEndpoint) -> SyscallResult<usize> {
         info!("[tcp::bind] bind to: {:?}", addr);
         self.inner.lock().local_endpoint = addr;
-        Ok(())
+        Ok(0)
     }
 
     async fn connect(&self, addr: &[u8]) -> SyscallResult {
         todo!()
     }
 
-    async fn listen(&self) -> SyscallResult {
-        todo!()
+    fn listen(&self) -> SyscallResult<usize> {
+        let local = self.inner.lock().local_endpoint;
+        info!(
+            "[Tcp::listen] {} listening: {:?}",
+            self.socket_handle, local
+        );
+        NET_INTERFACE.handle_tcp_socket(self.socket_handle,|socket|{
+            let ret = socket.listen(local).ok().ok_or(Errno::EADDRINUSE);
+            self.inner.lock().last_state = socket.state();
+            ret
+        })?;
+        Ok(0)
     }
 
     async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult {
-        todo!()
+        let proc = current_process().inner.lock();
+        let old_file = proc.fd_table.get(socketfd as FdNum).unwrap();
+        let old_flags = old_file.flags;
+        let peer_addr = self.tcp_accept(old_flags).await?;
+        log::info!("[Socket::accept] get peer_addr: {:?}", peer_addr);
+        let local = self.local_endpoint().unwrap();
+        log::info!("[Socket::accept] new socket try bind to : {:?}", local);
+        let new_socket = TcpSocket::new();
+        new_socket.bind(local.try_into().expect("cannot convert to ListenEndpoint"))?;
+        log::info!("[Socket::accept] new socket listen");
+        new_socket.listen()?;
+        fill_with_endpoint(peer_addr,addr,addrlen)?;
+
+        let new_socket = Arc::new(new_socket);
+        //
+        //  need  here ... ...
+        //
+        Ok(())
     }
 
     fn set_send_buf_size(&self, size: usize) -> SyscallResult {
@@ -256,7 +286,10 @@ impl Socket for TcpSocket {
     }
 
     fn remote_endpoint(&self) -> Option<IpEndpoint> {
-        todo!()
+        NET_INTERFACE.poll();
+        let ret = NET_INTERFACE.handle_tcp_socket(self.socket_handle, |socket| socket.remote_endpoint());
+        NET_INTERFACE.poll();
+        ret
     }
 }
 impl Drop for TcpSocket {
