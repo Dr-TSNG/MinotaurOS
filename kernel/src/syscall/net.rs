@@ -3,7 +3,7 @@ use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::net::{listen_endpoint, Socket, SocketType};
 use crate::processor::current_process;
 use crate::result::Errno::{ENOSTR, ENOTSOCK};
-use crate::result::SyscallResult;
+use crate::result::{Errno, SyscallResult};
 
 /// socket level
 const SOL_SOCKET: u32 = 1;
@@ -66,16 +66,31 @@ pub fn sys_listen(sockfd: u32, _backlog: u32) -> SyscallResult<usize>{
     socket.listen()
 }
 pub async fn sys_accept(sockfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize> {
-    todo!()
+    let socket = current_process().inner_handler(|proc|{
+        proc.socket_table.get_ref(sockfd as FdNum).cloned()
+            .ok_or(Err(ENOTSOCK))?
+    });
+    socket.accept(sockfd,addr,addrlen).await
 }
 pub async fn sys_connect(sockfd: u32, addr: usize, addrlen: u32) -> SyscallResult<usize> {
-    todo!()
+    // 需要检查一下addr到addr+addrlen是不是用户可读
+    let addr_buf = unsafe { core::slice::from_raw_parts(addr as *const u8, addrlen as usize) };
+    let socket = current_process()
+        .inner_handler(|proc| proc.socket_table.get_ref(sockfd as FdNum).cloned())
+        .ok_or(Errno::ENOTSOCK)?;
+    socket.connect(addr_buf).await
 }
 pub fn sys_getsockname(sockfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize>{
-    todo!()
+    let socket = current_process()
+        .inner_handler(|proc| proc.socket_table.get_ref(sockfd as FdNum).cloned())
+        .ok_or(Errno::ENOTSOCK)?;
+    socket.addr(addr, addrlen)
 }
 pub fn sys_getpeername(sockfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize>{
-    todo!()
+    let socket = current_process()
+        .inner_handler(|proc| proc.socket_table.get_ref(sockfd as FdNum).cloned())
+        .ok_or(Errno::ENOTSOCK)?;
+    socket.peer_addr(addr, addrlen)
 }
 pub async fn sys_sendto(
     sockfd: u32,
@@ -116,7 +131,16 @@ pub fn sys_setsockopt(
     todo!()
 }
 pub fn sys_shutdown(sockfd: u32, how: u32) -> SyscallResult<usize>{
-    todo!()
+    log::info!("[sys_shutdown] sockfd {}, how {}", sockfd, how);
+    current_process().inner_handler(|proc| {
+        let socket = proc
+            .socket_table
+            .get_ref(sockfd as FdNum)
+            .ok_or(Errno::EBADF)?
+            .clone();
+        socket.shutdown(how)?;
+        Ok(0)
+    })
 }
 pub fn sys_socketpair(domain: u32, socket_type: u32, protocol: u32, sv: usize) -> SyscallResult<usize>{
     todo!()

@@ -110,6 +110,17 @@ impl FdTable {
             Ok(self.table[fd as usize].take())
         }
     }
+
+    pub fn alloc_fd(&mut self) -> SyscallResult<usize>{
+        if let Some(fd) = self.free_slot() {
+            Ok(fd)
+        }else{
+            self.table.push(None);
+            Ok(self.table.len()-1)
+        }
+    }
+
+
 }
 
 impl FdTable {
@@ -123,5 +134,9 @@ impl FdTable {
             }
         }
         self.table.len()
+    }
+
+    fn free_slot(&self) -> Option<usize>{
+        (0..self.table.len()).find(|fd|self.table[*fd].is_none())
     }
 }

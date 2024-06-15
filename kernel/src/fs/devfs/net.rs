@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use alloc::format;
+use alloc::string::ToString;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
@@ -18,14 +18,14 @@ pub struct NetInode {
 static INO_POOL: AtomicUsize = AtomicUsize::new(0);
 
 impl NetInode {
-    pub fn new(socket_id: usize) -> SyscallResult<Arc<Self>> {
+    pub fn new() -> SyscallResult<Arc<Self>> {
         let now = TimeSpec::default();
         let metadata = InodeMeta::new(
             INO_POOL.fetch_add(1,Ordering::Acquire),
             0,
             InodeMode::IFSOCK,
-            format!("socket_{}",socket_id),
-            format!("/socket_file_{}",socket_id),
+            "socket_file".to_string(),
+            "/socket_file".to_string(),
             None,
             None,
             now.clone(),

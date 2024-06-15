@@ -1,6 +1,7 @@
 #![allow(unused)]
 
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::vec;
 use async_trait::async_trait;
 use core::future::Future;
@@ -16,6 +17,8 @@ use smoltcp::socket;
 use smoltcp::socket::udp::{PacketMetadata, SendError, UdpMetadata};
 use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
 use xmas_elf::program::Flags;
+use crate::fs::devfs::net::NetInode;
+use crate::fs::fd::FileDescriptor;
 
 use crate::fs::file::{File, FileMeta, Seek};
 use crate::fs::inode::Inode;
@@ -50,6 +53,9 @@ impl UdpSocket {
         let socket_handle = NET_INTERFACE.add_socket(socket);
         info!("[UdpSocket::new] new {}", socket_handle);
         NET_INTERFACE.poll();
+        let mut file_data = FileMeta::new(None);
+        let net_inode = NetInode::new();
+        file_data.inode = Option::from(net_inode.unwrap() as Arc<dyn Inode>);
         Self {
             inner: Mutex::new(UdpSocketInner {
                 remote_endpoint: None,
@@ -57,7 +63,7 @@ impl UdpSocket {
                 sendbuf_size: BUFFER_SIZE,
             }),
             socket_handler: socket_handle,
-            file_data: FileMeta::new(None),
+            file_data,
         }
     }
 }
@@ -168,7 +174,7 @@ impl Socket for UdpSocket {
         Ok(0)
     }
 
-    async fn connect(&self, addr: &[u8]) -> SyscallResult {
+    async fn connect(&self, addr: &[u8]) -> SyscallResult<usize> {
         // let fut = Box::pin(async move {
         let remote_endpoint = endpoint(addr)?;
         let mut inner = self.inner.lock();
@@ -200,7 +206,7 @@ impl Socket for UdpSocket {
             }
         })?;
         NET_INTERFACE.poll();
-        return Ok(());
+        return Ok(0);
         //});
         //fut.await
     }
@@ -209,7 +215,7 @@ impl Socket for UdpSocket {
         Err(EOPNOTSUPP)
     }
 
-    async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult {
+    async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize> {
         Err(EOPNOTSUPP)
     }
 
@@ -246,6 +252,11 @@ impl Socket for UdpSocket {
 
     fn remote_endpoint(&self) -> Option<IpEndpoint> {
         self.inner.lock().remote_endpoint
+    }
+
+    fn shutdown(&self, how: u32) -> SyscallResult<()> {
+        log::info!("[UdpSocket::shutdown] how {}", how);
+        Ok(())
     }
 }
 impl Drop for UdpSocket {

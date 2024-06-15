@@ -19,10 +19,13 @@ use smoltcp::socket::tcp;
 use smoltcp::time::Duration;
 use smoltcp::wire::IpEndpoint;
 use smoltcp::{iface::SocketHandle, wire::IpListenEndpoint};
+use smoltcp::socket::tcp::State;
 use xmas_elf::program::Flags;
-use crate::fs::fd::{FdNum, FdTable};
+use crate::fs::devfs::net::NetInode;
+use crate::fs::fd::{FdNum, FdTable, FileDescriptor};
 
 use crate::fs::file::{File, FileMeta, Seek};
+use crate::fs::inode::Inode;
 use crate::net::iface::NET_INTERFACE;
 use crate::net::port::{PortAllocator, PORT_ALLOCATOR};
 use crate::net::socket::{endpoint, Socket, SocketType, BUFFER_SIZE, fill_with_endpoint};
@@ -33,6 +36,7 @@ use crate::result::Errno::{EADDRINUSE, EAGAIN, EINVAL, EISCONN, ENOTCONN};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::iomultiplex::IOMultiplexFuture;
 use crate::sched::time::current_time;
+use crate::sched::yield_now;
 use crate::sync::mutex::Mutex;
 
 pub struct TcpSocket {
@@ -59,6 +63,9 @@ impl TcpSocket {
         // 没有处理分配完port，不能再多分配，返回None的情况。。。
         let port = PORT_ALLOCATOR.take().unwrap();
         info!("[TcpSocket handle{} : port is {}]", handler, port);
+        let mut file_data = FileMeta::new(None);
+        let net_inode = NetInode::new();
+        file_data.inode = Option::from(net_inode.unwrap() as Arc<dyn Inode>);
         Self {
             socket_handle: handler,
             inner: Mutex::new(TcpInner {
@@ -68,7 +75,7 @@ impl TcpSocket {
                 recv_buf_size: BUFFER_SIZE,
                 send_buf_size: BUFFER_SIZE,
             }),
-            file_data: FileMeta::new(None),
+            file_data,
         }
     }
 
@@ -210,8 +217,41 @@ impl Socket for TcpSocket {
         Ok(0)
     }
 
-    async fn connect(&self, addr: &[u8]) -> SyscallResult {
-        todo!()
+    async fn connect(&self, addr: &[u8]) -> SyscallResult<usize> {
+        let remote_endpoint = endpoint(addr)?;
+        // 若不是多核心启动，需要在这里yield
+        // yield_now().await;
+        self.tcp_connect(remote_endpoint)?;
+        loop{
+            NET_INTERFACE.poll();
+            let state = NET_INTERFACE.handle_tcp_socket(self.socket_handle, |socket| socket.state());
+            match state {
+                State::Closed => {
+                    info!(
+                            "[Tcp::connect] {} already closed, try again",
+                            self.socket_handle
+                        );
+                    self.tcp_connect(remote_endpoint)?;
+                    yield_now().await;
+                }
+                State::Established => {
+                    info!(
+                            "[Tcp::connect] {} connected, state {:?}",
+                            self.socket_handle, state
+                        );
+                    yield_now().await;
+                    return Ok(0);
+                }
+                _ => {
+                    info!(
+                            "[Tcp::connect] {} not connect yet, state {:?}",
+                            self.socket_handle, state
+                        );
+                    yield_now().await;
+                }
+            }
+        }
+
     }
 
     fn listen(&self) -> SyscallResult<usize> {
@@ -228,7 +268,7 @@ impl Socket for TcpSocket {
         Ok(0)
     }
 
-    async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult {
+    async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize> {
         let proc = current_process().inner.lock();
         let old_file = proc.fd_table.get(socketfd as FdNum).unwrap();
         let old_flags = old_file.flags;
@@ -243,10 +283,25 @@ impl Socket for TcpSocket {
         fill_with_endpoint(peer_addr,addr,addrlen)?;
 
         let new_socket = Arc::new(new_socket);
-        //
-        //  need  here ... ...
-        //
-        Ok(())
+        let res = current_process().inner_handler(|proc|{
+            let fd = proc.fd_table.alloc_fd()?;
+            let old_file = proc.fd_table.take(socketfd as FdNum).unwrap().unwrap();
+            let old_socket: Option<Arc<dyn Socket>> =
+                proc.socket_table.get_ref(socketfd as FdNum).cloned();
+            // replace old
+            log::debug!("[Socket::accept] replace old sock to new");
+            proc.fd_table.put(
+                FileDescriptor::new(new_socket.clone(), old_file.flags),
+                socketfd as FdNum
+            );
+            proc.socket_table.insert(socketfd as FdNum,new_socket.clone());
+            // insert old to newfd
+            log::info!("[Socket::accept] insert old sock to newfd: {}", fd);
+            proc.fd_table.put(old_file,fd as FdNum);
+            proc.socket_table.insert(fd as FdNum, old_socket.unwrap());
+            Ok(fd)
+        });
+        Ok(res.unwrap())
     }
 
     fn set_send_buf_size(&self, size: usize) -> SyscallResult {
@@ -290,6 +345,18 @@ impl Socket for TcpSocket {
         let ret = NET_INTERFACE.handle_tcp_socket(self.socket_handle, |socket| socket.remote_endpoint());
         NET_INTERFACE.poll();
         ret
+    }
+
+    fn shutdown(&self, how: u32) -> SyscallResult<()> {
+        info!("[TcpSocket::shutdown] how {}", how);
+        NET_INTERFACE.handle_tcp_socket(self.socket_handle,|socket|{
+           match how {
+               SHUT_WR => socket.close(),
+               _ => socket.abort(),
+           }
+        });
+        NET_INTERFACE.poll();
+        Ok(())
     }
 }
 impl Drop for TcpSocket {

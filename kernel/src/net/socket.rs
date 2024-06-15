@@ -7,6 +7,7 @@ use core::slice;
 
 use bitflags::bitflags;
 use log::__private_api::Value;
+use riscv::register::mepc::read;
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv6Address};
 use crate::fs::fd::{FdNum, FdTable, FileDescriptor};
 use crate::fs::ffi::OpenFlags;
@@ -217,9 +218,9 @@ impl From<SocketAddressV6> for IpListenEndpoint {
 #[async_trait]
 pub trait Socket: File {
     fn bind(&self, addr: IpListenEndpoint) -> SyscallResult<usize>;
-    async fn connect(&self, addr: &[u8]) -> SyscallResult;
+    async fn connect(&self, addr: &[u8]) -> SyscallResult<usize>;
     fn listen(&self) -> SyscallResult<usize>;
-    async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult;
+    async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize>;
     fn set_send_buf_size(&self, size: usize) -> SyscallResult;
     fn set_recv_buf_size(&self, size: usize) -> SyscallResult;
     fn set_keep_live(&self, enabled: bool) -> SyscallResult;
@@ -227,6 +228,7 @@ pub trait Socket: File {
     fn socket_type(&self) -> SocketType;
     fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint>;
     fn remote_endpoint(&self) -> Option<IpEndpoint>;
+    fn shutdown(&self, how: u32) -> SyscallResult<()>;
 }
 pub fn to_endpoint(listen_endpoint: IpListenEndpoint) -> IpEndpoint {
     let addr = if listen_endpoint.addr.is_none() {
@@ -284,7 +286,6 @@ pub fn fill_with_endpoint(
 
 impl dyn Socket{
     pub fn alloc(domain: u32,socket_type: u32) -> SyscallResult<usize>{
-        //todo!()
         match domain as u16 {
             AF_INET | AF_INET6 => {
                 let socket_type = SocketType::from_bits(socket_type);
@@ -299,9 +300,27 @@ impl dyn Socket{
                 };
                 // 创建 inode， 赋值给 生成的 udp socket ， inode的类型为 IFSOCK
                 if socket_type.contains(SocketType::SOCK_DGRAM){
-                   todo!()
+                    let socket = UdpSocket::new();
+                    let socket = Arc::new(socket);
+                    let res = current_process().inner_handler(|proc|{
+                        let fd = proc.fd_table.alloc_fd()?;
+                        let fd = fd as FdNum;
+                        proc.fd_table.put(FileDescriptor::new(socket.clone(), flags), fd).expect("TODO: panic message");
+                        proc.socket_table.insert(fd,socket);
+                        Ok(fd)
+                    });
+                    Ok(res.unwrap() as usize)
                 }else if socket_type.contains(SocketType::SOCK_STREAM){
-                    todo!()
+                    let socket = TcpSocket::new();
+                    let socket = Arc::new(socket);
+                    let res = current_process().inner_handler(|proc|{
+                        let fd = proc.fd_table.alloc_fd()?;
+                        let fd = fd as FdNum;
+                        proc.fd_table.put(FileDescriptor::new(socket.clone(), flags), fd).expect("TODO: panic message");
+                        proc.socket_table.insert(fd,socket);
+                        Ok(fd)
+                    });
+                    Ok(res.unwrap() as usize)
                 }else{
                     Err(Errno::EINVAL)
                 }
