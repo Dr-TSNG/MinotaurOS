@@ -86,5 +86,6 @@ pub fn sys_rt_sigreturn() -> SyscallResult<usize> {
     let ucontext = unsafe { user_sp.as_ptr().cast::<UContext>().read() };
     current_thread().signals.set_mask(ucontext.uc_sigmask);
     trap_ctx.user_x = ucontext.uc_mcontext;
+    debug!("[sigreturn] return to user for {:#x?}", trap_ctx.get_pc());
     Ok(trap_ctx.user_x[10])
 }
