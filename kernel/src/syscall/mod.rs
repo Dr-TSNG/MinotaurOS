@@ -90,6 +90,8 @@ pub enum SyscallCode {
     ExitGroup = 94,
     SetTidAddress = 96,
     Futex = 98,
+    GetRobustList = 99,
+    SetRobustList = 100,
     Nanosleep = 101,
     Setitimer = 103,
     ClockGettime = 113,
@@ -180,6 +182,8 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::ExitGroup => syscall!(sys_exit_group, args[0] as i8),
         SyscallCode::SetTidAddress => syscall!(sys_set_tid_address, args[0]),
         SyscallCode::Futex => async_syscall!(sys_futex, args[0], args[1] as i32, args[2] as u32, args[3], args[4], args[5]),
+        SyscallCode::GetRobustList => syscall!(sys_get_robust_list, args[0], args[1], args[2]),
+        SyscallCode::SetRobustList => syscall!(sys_set_robust_list, args[0], args[1]),
         SyscallCode::Nanosleep => async_syscall!(sys_nanosleep, args[0], args[1]),
         // SyscallCode::Setitimer
         SyscallCode::ClockGettime => syscall!(sys_clock_gettime, args[0], args[1]),

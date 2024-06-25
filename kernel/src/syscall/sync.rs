@@ -62,3 +62,13 @@ pub async fn sys_futex(uaddr: usize, op: i32, val: u32, timeout: usize, uaddr2: 
     }
     Ok(0)
 }
+
+pub fn sys_set_robust_list(_head: usize, _len: usize) -> SyscallResult<usize> {
+    // TODO: sys_set_robust_list
+    Ok(0)
+}
+
+pub fn sys_get_robust_list(_pid: usize, _head_ptr: usize, _len_ptr: usize) -> SyscallResult<usize> {
+    // TODO: sys_get_robust_list
+    Ok(0)
+}

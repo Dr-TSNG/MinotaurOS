@@ -10,7 +10,7 @@ use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::devfs::DevFileSystem;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd, VfsFlags};
+use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd, VfsFlags, KernelStatfs};
 use crate::fs::file::Seek;
 use crate::fs::path::resolve_path;
 use crate::fs::pipe::Pipe;
@@ -192,24 +192,47 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
     Ok(0)
 }
 
-pub async fn sys_statfs(path: usize, _buf: usize) -> SyscallResult<usize> {
+pub async fn sys_statfs(path: usize, buf: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
     let inode = resolve_path(&mut proc_inner, AT_FDCWD, path).await?;
-    if inode.metadata().mode != InodeMode::IFDIR {
-        return Err(Errno::ENOTDIR);
-    }
-    // TODO: statfs
+    let fs = inode.file_system().upgrade().ok_or(Errno::ENODEV)?;
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStatfs>())?;
+    let mut stat = KernelStatfs::default();
+    stat.f_type = fs.metadata().fstype as u64;
+    stat.f_bsize = 512; // TODO: real data
+    stat.f_blocks = 1 << 27;
+    stat.f_bfree = 1 << 26;
+    stat.f_bavail = 1 << 20;
+    stat.f_files = 1 << 10;
+    stat.f_ffree = 1 << 9;
+    stat.f_fsid = 0;
+    stat.f_namelen = MAX_NAME_LEN as u64;
+    stat.f_frsize = 512;
+    stat.f_flags = fs.metadata().flags.bits() as u64;
+    user_buf.copy_from_slice(&stat.as_bytes());
     Ok(0)
 }
 
-pub fn sys_fstatfs(fd: FdNum, _buf: usize) -> SyscallResult<usize> {
-    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
+pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let fd_impl = proc_inner.fd_table.get(fd)?;
     let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
-    if inode.metadata().mode != InodeMode::IFDIR {
-        return Err(Errno::ENOTDIR);
-    }
-    // TODO: fstatfs
+    let fs = inode.file_system().upgrade().ok_or(Errno::ENODEV)?;
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStatfs>())?;
+    let mut stat = KernelStatfs::default();
+    stat.f_type = fs.metadata().fstype as u64;
+    stat.f_bsize = 512; // TODO: real data
+    stat.f_blocks = 1 << 27;
+    stat.f_bfree = 1 << 26;
+    stat.f_bavail = 1 << 20;
+    stat.f_files = 1 << 10;
+    stat.f_ffree = 1 << 9;
+    stat.f_fsid = 0;
+    stat.f_namelen = MAX_NAME_LEN as u64;
+    stat.f_frsize = 512;
+    stat.f_flags = fs.metadata().flags.bits() as u64;
+    user_buf.copy_from_slice(&stat.as_bytes());
     Ok(0)
 }
 
