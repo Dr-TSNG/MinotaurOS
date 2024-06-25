@@ -13,6 +13,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 pub(crate) mod net;
 mod null;
 pub mod tty;
+pub mod unix_socket;
 mod zero;
 
 pub struct DevFileSystem {

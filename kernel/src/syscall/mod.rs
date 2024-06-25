@@ -1,11 +1,11 @@
 mod fs;
 mod mm;
+mod net;
 mod process;
 mod signal;
 mod sync;
 mod system;
 mod time;
-mod net;
 
 use fs::*;
 use mm::*;

@@ -8,6 +8,7 @@ use crate::config::USER_STACK_TOP;
 use crate::fs::fd::FdTable;
 use crate::fs::file_system::MountNamespace;
 use crate::mm::addr_space::AddressSpace;
+use crate::net::SocketTable;
 use crate::process::aux::Aux;
 use crate::process::ffi::CloneFlags;
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
@@ -31,7 +32,6 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
 use log::{info, warn};
-use crate::net::SocketTable;
 
 pub type Tid = usize;
 pub type Pid = usize;
@@ -409,8 +409,7 @@ impl Process {
     }
 }
 
-
-impl Process{
+impl Process {
     /// We can get whatever we want in the inner by providing a handler
     pub fn inner_handler<T>(&self, f: impl FnOnce(&mut ProcessInner) -> T) -> T {
         f(&mut self.inner.lock())

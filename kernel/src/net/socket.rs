@@ -2,23 +2,24 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use async_trait::async_trait;
+use core::f32::consts::E;
 use core::mem;
 use core::slice;
 
-use bitflags::bitflags;
-use log::__private_api::Value;
-use riscv::register::mepc::read;
-use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv6Address};
+use crate::fs::devfs::net::NetInode;
 use crate::fs::fd::{FdNum, FdTable, FileDescriptor};
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::{File, FileMeta, Seek};
 use crate::net::port::PORT_ALLOCATOR;
+use crate::net::tcp::TcpSocket;
 use crate::net::udp::UdpSocket;
 use crate::processor::current_process;
 use crate::result::Errno::EINVAL;
 use crate::result::{Errno, SyscallResult};
-use crate::fs::devfs::net::NetInode;
-use crate::net::tcp::TcpSocket;
+use bitflags::bitflags;
+use log::__private_api::Value;
+use riscv::register::mepc::read;
+use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv6Address};
 
 /// domain
 pub const AF_UNIX: u16 = 0x0001;
@@ -221,14 +222,18 @@ pub trait Socket: File {
     async fn connect(&self, addr: &[u8]) -> SyscallResult<usize>;
     fn listen(&self) -> SyscallResult<usize>;
     async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize>;
-    fn set_send_buf_size(&self, size: usize) -> SyscallResult;
-    fn set_recv_buf_size(&self, size: usize) -> SyscallResult;
+    fn set_send_buf_size(&self, size: usize) -> SyscallResult<()>;
+    fn set_recv_buf_size(&self, size: usize) -> SyscallResult<()>;
     fn set_keep_live(&self, enabled: bool) -> SyscallResult;
     fn dis_connect(&self, how: u32) -> SyscallResult;
     fn socket_type(&self) -> SocketType;
     fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint>;
     fn remote_endpoint(&self) -> Option<IpEndpoint>;
     fn shutdown(&self, how: u32) -> SyscallResult<()>;
+    fn recv_buf_size(&self) -> SyscallResult<usize>;
+    fn send_buf_size(&self) -> SyscallResult<usize>;
+    fn set_nagle_enabled(&self, enabled: bool) -> SyscallResult<usize>;
+    fn set_keep_alive(&self, enabled: bool) -> SyscallResult<usize>;
 }
 pub fn to_endpoint(listen_endpoint: IpListenEndpoint) -> IpEndpoint {
     let addr = if listen_endpoint.addr.is_none() {
@@ -284,67 +289,77 @@ pub fn fill_with_endpoint(
     Ok(0)
 }
 
-impl dyn Socket{
-    pub fn alloc(domain: u32,socket_type: u32) -> SyscallResult<usize>{
+impl dyn Socket {
+    pub fn alloc(domain: u32, socket_type: u32) -> SyscallResult<usize> {
         match domain as u16 {
             AF_INET | AF_INET6 => {
                 let socket_type = SocketType::from_bits(socket_type);
-                if socket_type.is_none(){
+                if socket_type.is_none() {
                     return Err(Errno::EINVAL);
                 }
                 let socket_type = socket_type.unwrap();
-                let flags = if socket_type.contains(SocketType::SOCK_CLOEXEC){
+                let flags = if socket_type.contains(SocketType::SOCK_CLOEXEC) {
                     OpenFlags::O_RDWR | OpenFlags::O_CLOEXEC
-                }else{
+                } else {
                     OpenFlags::O_RDWR
                 };
                 // 创建 inode， 赋值给 生成的 udp socket ， inode的类型为 IFSOCK
-                if socket_type.contains(SocketType::SOCK_DGRAM){
+                if socket_type.contains(SocketType::SOCK_DGRAM) {
                     let socket = UdpSocket::new();
                     let socket = Arc::new(socket);
-                    let res = current_process().inner_handler(|proc|{
+                    let res: Result<FdNum, Errno> = current_process().inner_handler(|proc| {
                         let fd = proc.fd_table.alloc_fd()?;
                         let fd = fd as FdNum;
-                        proc.fd_table.put(FileDescriptor::new(socket.clone(), flags), fd).expect("TODO: panic message");
-                        proc.socket_table.insert(fd,socket);
+                        proc.fd_table
+                            .put(FileDescriptor::new(socket.clone(), flags), fd)
+                            .expect("TODO: panic message");
+                        proc.socket_table.insert(fd, socket);
                         Ok(fd)
                     });
-                    Ok(res.unwrap() as usize)
-                }else if socket_type.contains(SocketType::SOCK_STREAM){
+                    if res.is_err() {
+                        Err(res.err().unwrap())
+                    } else {
+                        Ok(res.unwrap() as usize)
+                    }
+                } else if socket_type.contains(SocketType::SOCK_STREAM) {
                     let socket = TcpSocket::new();
                     let socket = Arc::new(socket);
-                    let res = current_process().inner_handler(|proc|{
+                    let res: Result<FdNum, Errno> = current_process().inner_handler(|proc| {
                         let fd = proc.fd_table.alloc_fd()?;
                         let fd = fd as FdNum;
-                        proc.fd_table.put(FileDescriptor::new(socket.clone(), flags), fd).expect("TODO: panic message");
-                        proc.socket_table.insert(fd,socket);
+                        proc.fd_table
+                            .put(FileDescriptor::new(socket.clone(), flags), fd)
+                            .expect("TODO: panic message");
+                        proc.socket_table.insert(fd, socket);
                         Ok(fd)
                     });
-                    Ok(res.unwrap() as usize)
-                }else{
+                    if res.is_err() {
+                        Err(res.err().unwrap())
+                    } else {
+                        Ok(res.unwrap() as usize)
+                    }
+                } else {
                     Err(Errno::EINVAL)
                 }
-            },
+            }
             AF_UNIX => {
                 Ok(4)
                 // todo!()
-            },
-            _ => {
-                Err(Errno::EINVAL)
             }
+            _ => Err(Errno::EINVAL),
         }
     }
-    pub fn addr(self: &Arc<Self>,addr: usize,addrlen: usize) -> SyscallResult<usize>{
+    pub fn addr(self: &Arc<Self>, addr: usize, addrlen: usize) -> SyscallResult<usize> {
         let local_endpoint = self.local_endpoint().unwrap();
         let local_endpoint = to_endpoint(local_endpoint);
-        fill_with_endpoint(local_endpoint,addr,addrlen)
+        fill_with_endpoint(local_endpoint, addr, addrlen)
     }
 
-    pub fn peer_addr(self: &Arc<Self>, addr: usize, addrlen: usize) -> SyscallResult<usize>{
+    pub fn peer_addr(self: &Arc<Self>, addr: usize, addrlen: usize) -> SyscallResult<usize> {
         let remote_endpoint = self.remote_endpoint();
-        if remote_endpoint.is_none(){
+        if remote_endpoint.is_none() {
             return Err(Errno::ENOTCONN);
         }
-        fill_with_endpoint(remote_endpoint.unwrap(),addr,addrlen)
+        fill_with_endpoint(remote_endpoint.unwrap(), addr, addrlen)
     }
 }

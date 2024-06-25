@@ -10,6 +10,8 @@ use core::task::{Context, Poll};
 use log::{debug, info, log};
 use managed::{Managed, ManagedSlice};
 
+use crate::fs::devfs::net::NetInode;
+use crate::fs::fd::FileDescriptor;
 use crate::fs::ffi::{InodeMode, OpenFlags};
 use smoltcp::iface::SocketHandle;
 use smoltcp::phy::PacketMeta;
@@ -17,8 +19,6 @@ use smoltcp::socket;
 use smoltcp::socket::udp::{PacketMetadata, SendError, UdpMetadata};
 use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
 use xmas_elf::program::Flags;
-use crate::fs::devfs::net::NetInode;
-use crate::fs::fd::FileDescriptor;
 
 use crate::fs::file::{File, FileMeta, Seek};
 use crate::fs::inode::Inode;
@@ -243,9 +243,8 @@ impl Socket for UdpSocket {
 
     fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint> {
         NET_INTERFACE.poll();
-        let local = NET_INTERFACE.handle_udp_socket(self.socket_handler,|socket|{
-            socket.endpoint()
-        });
+        let local =
+            NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| socket.endpoint());
         NET_INTERFACE.poll();
         Ok(local)
     }
@@ -257,6 +256,22 @@ impl Socket for UdpSocket {
     fn shutdown(&self, how: u32) -> SyscallResult<()> {
         log::info!("[UdpSocket::shutdown] how {}", how);
         Ok(())
+    }
+
+    fn recv_buf_size(&self) -> SyscallResult<usize> {
+        Ok(self.inner.lock().recvbuf_size)
+    }
+
+    fn send_buf_size(&self) -> SyscallResult<usize> {
+        Ok(self.inner.lock().sendbuf_size)
+    }
+
+    fn set_nagle_enabled(&self, enabled: bool) -> SyscallResult<usize> {
+        Err(Errno::EOPNOTSUPP)
+    }
+
+    fn set_keep_alive(&self, enabled: bool) -> SyscallResult<usize> {
+        Err(Errno::EOPNOTSUPP)
     }
 }
 impl Drop for UdpSocket {

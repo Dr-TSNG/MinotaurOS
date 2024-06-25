@@ -13,27 +13,15 @@ use crate::sched::ffi::TimeSpec;
 
 pub struct NetInode {
     metadata: InodeMeta,
-    socket_id: usize,   // socket handler
+    socket_id: usize, // socket handler
 }
 static INO_POOL: AtomicUsize = AtomicUsize::new(0);
 
+// 需要指定InodeMode::IFSOCK
 impl NetInode {
     pub fn new() -> SyscallResult<Arc<Self>> {
         let now = TimeSpec::default();
-        let metadata = InodeMeta::new(
-            INO_POOL.fetch_add(1,Ordering::Acquire),
-            0,
-            InodeMode::IFSOCK,
-            "socket_file".to_string(),
-            "/socket_file".to_string(),
-            None,
-            None,
-            now.clone(),
-            now.clone(),
-            now,
-            0,
-        );
-        Ok(Arc::new(Self{metadata,socket_id}))
+        todo!()
     }
 }
 
@@ -68,4 +56,3 @@ impl Drop for NetInode {
         todo!()
     }
 }
-
