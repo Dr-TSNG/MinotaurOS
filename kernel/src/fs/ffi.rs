@@ -275,3 +275,23 @@ bitflags! {
         const POLLNVAL = 1 << 5;
     }
 }
+
+
+pub const FD_SET_SIZE: usize = 1024;
+pub const FD_SET_LEN: usize = FD_SET_SIZE / (8 * core::mem::size_of::<usize>());
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+pub struct FdSet {
+    pub fds_bits: [usize; FD_SET_LEN],
+}
+
+impl FdSet {
+    pub fn mark_fd(&mut self, fd: usize) {
+        if fd >= FD_SET_SIZE {
+            return;
+        }
+        let offset = fd % FD_SET_LEN;
+        self.fds_bits[fd / FD_SET_LEN] |= 1 << offset;
+    }
+}
