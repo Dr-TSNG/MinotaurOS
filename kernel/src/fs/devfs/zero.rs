@@ -1,18 +1,19 @@
 use alloc::boxed::Box;
 use alloc::string::ToString;
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use core::sync::atomic::Ordering;
 use async_trait::async_trait;
 use crate::fs::devfs::DevFileSystem;
 use crate::fs::ffi::InodeMode;
+use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::result::SyscallResult;
 use crate::sched::ffi::TimeSpec;
 
-pub struct ZeroInode(InodeMeta);
+pub struct ZeroInode(InodeMeta, Weak<DevFileSystem>);
 
 impl ZeroInode {
-    pub fn new(fs: &DevFileSystem, parent: Arc<dyn Inode>) -> Arc<Self> {
+    pub fn new(fs: Arc<DevFileSystem>, parent: Arc<dyn Inode>) -> Arc<Self> {
         Arc::new(Self(InodeMeta::new(
             fs.ino_pool.fetch_add(1, Ordering::Relaxed),
             0,
@@ -25,7 +26,7 @@ impl ZeroInode {
             TimeSpec::default(),
             TimeSpec::default(),
             0,
-        )))
+        ), Arc::downgrade(&fs)))
     }
 }
 
@@ -44,5 +45,9 @@ impl InodeInternal for ZeroInode {
 impl Inode for ZeroInode {
     fn metadata(&self) -> &InodeMeta {
         &self.0
+    }
+
+    fn file_system(&self) -> Weak<dyn FileSystem> {
+        self.1.clone()
     }
 }

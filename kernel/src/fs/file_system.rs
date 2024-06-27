@@ -8,6 +8,7 @@ use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
+#[derive(Copy, Clone)]
 #[repr(u64)]
 pub enum FileSystemType {
     DEVFS = 0x62646576,

@@ -66,8 +66,12 @@ impl RootInode {
             fs: Arc::downgrade(fs),
         });
         root.metadata.inner.lock().apply_mut(|inner| {
-            inner.children.insert("null".to_string(), InodeChild::new(NullInode::new(fs, root.clone()), Box::new(())));
-            inner.children.insert("zero".to_string(), InodeChild::new(ZeroInode::new(fs, root.clone()), Box::new(())));
+            let inode = NullInode::new(fs.clone(), root.clone());
+            inner.children.insert("null".to_string(), InodeChild::new(inode, Box::new(())));
+
+            let inode = ZeroInode::new(fs.clone(), root.clone());
+            inner.children.insert("zero".to_string(), InodeChild::new(inode, Box::new(())));
+
             inner.children_loaded = true;
         });
         root
@@ -79,5 +83,9 @@ impl InodeInternal for RootInode {}
 impl Inode for RootInode {
     fn metadata(&self) -> &InodeMeta {
         &self.metadata
+    }
+
+    fn file_system(&self) -> Weak<dyn FileSystem> {
+        self.fs.clone()
     }
 }
