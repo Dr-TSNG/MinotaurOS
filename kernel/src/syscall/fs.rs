@@ -528,23 +528,23 @@ pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize)
     ret
 }
 
-pub async fn sys_pselect6( nfds: FdNum, readfds: usize, writefds: usize, exceptfds: usize, timeout: usize, sigmask: usize,)->SyscallResult<usize>{
+pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfds: usize, timeout: usize, sigmask: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let mut rfds = match readfds{
+    let mut rfds = match readfds {
         0 => None,
         _ => {
             let readfds = proc_inner.addr_space.user_slice_w(VirtAddr(readfds), size_of::<FdSet>())?;
             Some(unsafe { &mut *(readfds.as_mut_ptr() as *mut FdSet) })
         }
     };
-    let mut wfds = match writefds{
+    let mut wfds = match writefds {
         0 => None,
         _ => {
             let writefds = proc_inner.addr_space.user_slice_w(VirtAddr(writefds), size_of::<FdSet>())?;
             Some(unsafe { &mut *(writefds.as_mut_ptr() as *mut FdSet) })
         }
     };
-    let mut efds = match exceptfds{
+    let mut efds = match exceptfds {
         0 => None,
         _ => {
             let exceptfds = proc_inner.addr_space.user_slice_w(VirtAddr(readfds), size_of::<FdSet>())?;
@@ -572,17 +572,17 @@ pub async fn sys_pselect6( nfds: FdNum, readfds: usize, writefds: usize, exceptf
         "[sys_pselect]: readfds {:?}, writefds {:?}, exceptfds {:?}, timeout {:?}",
         rfds, wfds, efds, timeout
     );
-    let fd_slot_bits = 8 * core::mem::size_of::<usize>();
-    let mut fds: Vec<PollFd> =Vec::new();
-    for fd_slot in 0..FD_SET_LEN{
-        for offset in 0..fd_slot_bits{
+    let fd_slot_bits = 8 * size_of::<usize>();
+    let mut fds: Vec<PollFd> = Vec::new();
+    for fd_slot in 0..FD_SET_LEN {
+        for offset in 0..fd_slot_bits {
             let fd = fd_slot * fd_slot_bits + offset;
             if fd >= nfds as usize {
                 break;
             }
             if let Some(readfds) = rfds.as_ref() {
                 if readfds.fds_bits[fd_slot] & (1 << offset) != 0 {
-                    if !proc_inner.fd_table.get(fd as FdNum).is_ok(){
+                    if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
                         log::warn!("[sys_pselect] bad fd {}", fd);
                         return Err(Errno::EBADF);
                     }
@@ -602,8 +602,7 @@ pub async fn sys_pselect6( nfds: FdNum, readfds: usize, writefds: usize, exceptf
                                 | PollEvents::POLLOUT;
                             fds.last_mut().unwrap().events = events.bits();
                         }
-                    }
-                    else {
+                    } else {
                         if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
                             log::warn!("[sys_pselect] bad fd {}", fd);
                             return Err(Errno::EBADF);
@@ -624,8 +623,7 @@ pub async fn sys_pselect6( nfds: FdNum, readfds: usize, writefds: usize, exceptf
                                 | PollEvents::POLLPRI;
                             fds.last_mut().unwrap().events = events.bits();
                         }
-                    }
-                    else {
+                    } else {
                         if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
                             log::warn!("[sys_pselect] bad fd {}", fd);
                             return Err(Errno::EBADF);
@@ -652,7 +650,7 @@ pub async fn sys_pselect6( nfds: FdNum, readfds: usize, writefds: usize, exceptf
     drop(proc_inner);
     let future = current_thread().event_bus.suspend_with(
         Event::KILL_THREAD,
-        IOMultiplexFuture::new(fds, IOFormat::FdSets(FdSetRWE::new(readfds,writefds,exceptfds))),
+        IOMultiplexFuture::new(fds, IOFormat::FdSets(FdSetRWE::new(readfds, writefds, exceptfds))),
     );
     let mask_bak = current_thread().signals.get_mask();
     if let Some(sigmask) = sigmask {

@@ -85,6 +85,7 @@ impl FdSetRWE {
         }
     }
 }
+
 impl IOMultiplexFuture {
     pub fn new(fds: Vec<PollFd>, ufds: IOFormat) -> Self {
         Self { fds, ufds }
@@ -140,8 +141,8 @@ impl Future for IOMultiplexFuture {
                     let slice = current_process().inner.lock()
                         .addr_space.user_slice_w(VirtAddr(*pollfd), size_of::<PollFd>() * this.fds.len())?;
                     bytemuck::cast_slice_mut(slice).copy_from_slice(&this.fds);
-                },
-                IOFormat::FdSets(fdset)=>{
+                }
+                IOFormat::FdSets(fdset) => {
                     fdset.update(&this.fds);
                 }
             }
