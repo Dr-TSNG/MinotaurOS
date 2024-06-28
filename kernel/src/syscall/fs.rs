@@ -94,7 +94,7 @@ pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
             // TODO: Only change status flags
             warn!("F_SETFL");
             let flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
-            fd_impl.flags = flags;
+            fd_impl.flags |= flags;
             proc_inner.fd_table.insert(fd, fd_impl)?;
         }
     }
@@ -403,7 +403,7 @@ pub async fn sys_writev(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<u
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
     if !fd_impl.flags.writable() {
-        return Err(Errno::EBADF);
+        return Err(Errno::EPERM);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(iov), size_of::<IoVec>() * iovcnt)?;
     let iovs: &[IoVec] = unsafe { core::mem::transmute(user_buf) };
@@ -660,7 +660,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
         Some(timeout) => match TimeoutFuture::new(timeout, future).await {
             TimeoutResult::Ready(ret) => ret,
             TimeoutResult::Timeout => {
-                debug!("[ppoll] timeout");
+                debug!("[pselect] timeout");
                 Ok(0)
             }
         },

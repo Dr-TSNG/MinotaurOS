@@ -5,7 +5,7 @@ use log::{debug, info};
 use zerocopy::AsBytes;
 use crate::arch::VirtAddr;
 use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
-use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
+use crate::fs::ffi::{AT_FDCWD, FdSet, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::process::ffi::{CloneFlags, Rlimit, RlimitCmd, WaitOptions};
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
@@ -171,20 +171,33 @@ pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -
 
 pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) -> SyscallResult<usize> {
     let cmd = RlimitCmd::try_from(resource).map_err(|_| Errno::EINVAL)?;
-    debug!("[prlimit] pid: {}, cmd: {:?}", pid, cmd);
+    let mut proc_inner = current_process().inner.lock();
+    debug!("[prlimit] pid: {}, cmd: {:?}, nrlim: {}, orlim :{}", pid, cmd, new_rlim, old_rlim);
     if old_rlim != 0 {
         let old_rlim = current_process().inner.lock().addr_space
             .user_slice_w(VirtAddr(old_rlim), size_of::<Rlimit>())?;
+        let orlim=unsafe { &mut *(old_rlim.as_mut_ptr() as *mut Rlimit) };
         let (cur, max) = match cmd {
             RlimitCmd::RLIMIT_STACK => (USER_STACK_SIZE, USER_STACK_TOP.0),
-            RlimitCmd::RLIMIT_NOFILE => (MAX_FD_NUM, MAX_FD_NUM),
+            RlimitCmd::RLIMIT_NOFILE => (orlim.rlim_cur,orlim.rlim_max),
             _ => (0, 0),
         };
-        let rlimit = Rlimit { rlim_cur: cur, rlim_max: max };
-        old_rlim.copy_from_slice(rlimit.as_bytes());
+        let limit = Rlimit { rlim_cur: cur, rlim_max: max };
+        old_rlim.copy_from_slice(limit.as_bytes());
     }
     if new_rlim != 0 {
-        // TODO: set new rlimit
+        let new_rlim = current_process().inner.lock().addr_space
+            .user_slice_w(VirtAddr(new_rlim), size_of::<Rlimit>())?;
+        let nrlim=unsafe { &mut *(new_rlim.as_mut_ptr() as *mut Rlimit) };
+        let (cur, max) = match cmd {
+            RlimitCmd::RLIMIT_NOFILE => (nrlim.rlim_cur,nrlim.rlim_max),
+            _ => (MAX_FD_NUM, MAX_FD_NUM)
+        };
+        if cur > max {
+            return Err(Errno::EINVAL);
+        }
+        let limit = Rlimit { rlim_cur: cur, rlim_max: max };
+        proc_inner.fd_table.set_rlimit(limit);
     }
     Ok(0)
 }
