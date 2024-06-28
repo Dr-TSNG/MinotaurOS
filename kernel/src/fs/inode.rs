@@ -239,7 +239,7 @@ impl dyn Inode {
     }
 
     pub async fn lookup_name(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
-        if self.metadata().mode != InodeMode::IFDIR{
+        if self.metadata().mode != InodeMode::IFDIR {
             return Err(Errno::ENOTDIR);
         }
         let mut inner = self.metadata().inner.lock();

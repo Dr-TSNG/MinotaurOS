@@ -278,7 +278,7 @@ bitflags! {
 
 
 pub const FD_SET_SIZE: usize = 1024;
-pub const FD_SET_LEN: usize = FD_SET_SIZE / (8 * core::mem::size_of::<usize>());
+pub const FD_SET_LEN: usize = FD_SET_SIZE / (8 * size_of::<usize>());
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
