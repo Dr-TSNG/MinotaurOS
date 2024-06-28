@@ -10,7 +10,7 @@ use crate::fs::devfs::net::NetInode;
 use crate::fs::fd::{FdNum, FdTable, FileDescriptor};
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::{File, FileMeta, Seek};
-use crate::net::port::PORT_ALLOCATOR;
+use crate::net::port::Ports;
 use crate::net::tcp::TcpSocket;
 use crate::net::udp::UdpSocket;
 use crate::processor::current_process;
@@ -163,7 +163,7 @@ impl From<SocketAddressV4> for IpListenEndpoint {
             } else {
                 IpListenEndpoint {
                     addr: None,
-                    port: unsafe { PORT_ALLOCATOR.take().unwrap() as u16 },
+                    port: unsafe { Ports.positive_u32() as u16 },
                 }
             }
         } else {
@@ -203,7 +203,7 @@ impl From<SocketAddressV6> for IpListenEndpoint {
             } else {
                 IpListenEndpoint {
                     addr: None,
-                    port: unsafe { PORT_ALLOCATOR.take().unwrap() as u16 },
+                    port: unsafe { Ports.positive_u32() as u16 },
                 }
             }
         } else {

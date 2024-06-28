@@ -15,9 +15,22 @@ pub struct UnixSockNode {
 
 // 需要指定InodeMode::IFSOCK
 impl UnixSockNode {
-    pub fn new() -> SyscallResult<Arc<Self>> {
-        let now = TimeSpec::default();
-        todo!()
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            metadata: InodeMeta::new(
+                0,
+                0,
+                InodeMode::IFSOCK,
+                "".to_string(),
+                "".to_string(),
+                None,
+                None,
+                TimeSpec::default(),
+                TimeSpec::default(),
+                TimeSpec::default(),
+                0,
+            ),
+        })
     }
 }
 

@@ -286,7 +286,7 @@ pub fn sys_setsockopt(
     }
     Ok(0)
 }
-pub fn sys_shutdown(sockfd: u32, how: u32) -> SyscallResult<usize> {
+pub fn sys_sockshutdown(sockfd: u32, how: u32) -> SyscallResult<usize> {
     log::info!("[sys_shutdown] sockfd {}, how {}", sockfd, how);
     current_process().inner_handler(|proc| {
         let socket = proc

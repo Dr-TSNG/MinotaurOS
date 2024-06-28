@@ -18,15 +18,15 @@ pub struct UnixSocket {
 #[async_trait]
 impl File for UnixSocket {
     fn metadata(&self) -> &FileMeta {
-        todo!()
+        &self.file_meta
     }
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
-        todo!()
+        self.read_end.read(buf).await
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
-        todo!()
+        self.write_end.write(buf).await
     }
 }
 #[async_trait]
@@ -99,7 +99,7 @@ impl Socket for UnixSocket {
 
 impl UnixSocket {
     pub fn new(read_end: Arc<Pipe>, write_end: Arc<Pipe>) -> Self {
-        let unix_node = UnixSockNode::new().unwrap();
+        let unix_node = UnixSockNode::new();
         Self {
             file_meta: FileMeta::new(Some(unix_node)),
             // buf: Mutex::new(VecDeque::new()),

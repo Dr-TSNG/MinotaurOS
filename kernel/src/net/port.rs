@@ -3,41 +3,50 @@ use lazy_static::lazy_static;
 use log::info;
 use spin::Mutex;
 
-const MAX_PORT: u16 = 0xFFFF;
+pub static mut Ports: Rng::Rng = Rng::Rng {
+    seed: Rng::BIGPRIME,
+};
 
-lazy_static! {
-    pub static ref PORT_ALLOCATOR: PortAllocator = PortAllocator::new(MAX_PORT);
-}
-
-pub struct PortAllocator {
-    pub ports: Mutex<VecDeque<u16>>,
-}
-
-impl PortAllocator {
-    pub fn new(max_port: u16) -> Self {
-        let mut decode: VecDeque<u16> = VecDeque::with_capacity(max_port as usize);
-        for i in 0..decode.len() {
-            decode[i] = i as u16;
+mod Rng {
+    use crate::sched::time::current_time;
+    use rand_core::RngCore;
+    pub struct Rng {
+        pub seed: usize,
+    }
+    pub const BIGPRIME: usize = 1242132739;
+    impl RngCore for Rng {
+        fn next_u32(&mut self) -> u32 {
+            let next = self.seed + current_time().as_micros() as usize;
+            self.seed = next;
+            next as u32
         }
-        PortAllocator {
-            ports: Mutex::new(decode),
+
+        fn next_u64(&mut self) -> u64 {
+            let next = self.seed + current_time().as_micros() as usize;
+            self.seed = next;
+            next as u64
+        }
+
+        fn fill_bytes(&mut self, dest: &mut [u8]) {
+            for i in 0..dest.len() {
+                let number = self.next_u32();
+                dest[i] = ((number >> 16) ^ (number << 8) ^ number) as u8;
+            }
+        }
+
+        fn try_fill_bytes(&mut self, _dest: &mut [u8]) -> Result<(), rand_core::Error> {
+            todo!()
         }
     }
 
-    pub fn take(&self) -> Option<u16> {
-        if self.is_empty() {
-            info!("Net Port is Not Enough!!");
-            None
-        } else {
-            Some(self.ports.lock().pop_front().unwrap())
+    impl Rng {
+        pub fn positive_u32(&mut self) -> u32 {
+            let mut next = self.seed + current_time().as_micros() as usize;
+            while (next & 0xff) as u32 == 0 {
+                self.seed = next;
+                next = self.seed + current_time().as_micros() as usize;
+            }
+            (next & 0xff) as u32
         }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        return self.ports.lock().is_empty();
-    }
-
-    pub fn recycle(&self, port: u16) {
-        self.ports.lock().push_back(port);
     }
 }

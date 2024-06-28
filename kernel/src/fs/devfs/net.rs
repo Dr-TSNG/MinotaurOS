@@ -4,10 +4,12 @@ use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
+use spin::Mutex;
 
 use crate::fs::devfs::DevFileSystem;
 use crate::fs::ffi::InodeMode;
-use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
+use crate::fs::file::{File, FileMeta, FileMetaInner};
+use crate::fs::inode::{Inode, InodeInternal, InodeMeta, InodeMetaInner};
 use crate::result::SyscallResult;
 use crate::sched::ffi::TimeSpec;
 
@@ -19,9 +21,23 @@ static INO_POOL: AtomicUsize = AtomicUsize::new(0);
 
 // 需要指定InodeMode::IFSOCK
 impl NetInode {
-    pub fn new() -> SyscallResult<Arc<Self>> {
-        let now = TimeSpec::default();
-        todo!()
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            metadata: InodeMeta::new(
+                0,
+                0,
+                InodeMode::IFSOCK,
+                "".to_string(),
+                "".to_string(),
+                None,
+                None,
+                TimeSpec::default(),
+                TimeSpec::default(),
+                TimeSpec::default(),
+                0,
+            ),
+            socket_id: 0,
+        })
     }
 }
 
@@ -49,10 +65,8 @@ impl Inode for NetInode {
 }
 
 ///
-/// 未完成，可能需要进行Drop之前关闭套接字等
+/// 不需要直接操作net file的inode
 ///
 impl Drop for NetInode {
-    fn drop(&mut self) {
-        todo!()
-    }
+    fn drop(&mut self) {}
 }

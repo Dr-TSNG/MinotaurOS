@@ -27,7 +27,7 @@ use xmas_elf::program::Flags;
 use crate::fs::file::{File, FileMeta, Seek};
 use crate::fs::inode::Inode;
 use crate::net::iface::NET_INTERFACE;
-use crate::net::port::{PortAllocator, PORT_ALLOCATOR};
+use crate::net::port::Ports;
 use crate::net::socket::{endpoint, fill_with_endpoint, Socket, SocketType, BUFFER_SIZE};
 use crate::net::socket::{SHUT_RD, SHUT_RDWR, SHUT_WR};
 use crate::net::MAX_BUFFER_SIZE;
@@ -68,12 +68,11 @@ impl TcpSocket {
         let handler = NET_INTERFACE.add_socket(socket);
         info!("[TcpSocket::new] new{}", handler);
         NET_INTERFACE.poll();
-        // 没有处理分配完port，不能再多分配，返回None的情况。。。
-        let port = PORT_ALLOCATOR.take().unwrap();
+        let port = unsafe { Ports.positive_u32() as u16 };
         info!("[TcpSocket handle{} : port is {}]", handler, port);
         let mut file_data = FileMeta::new(None);
         let net_inode = NetInode::new();
-        file_data.inode = Option::from(net_inode.unwrap() as Arc<dyn Inode>);
+        file_data.inode = Option::from(net_inode as Arc<dyn Inode>);
         Self {
             socket_handle: handler,
             inner: Mutex::new(TcpInner {
@@ -227,8 +226,8 @@ impl Socket for TcpSocket {
 
     async fn connect(&self, addr: &[u8]) -> SyscallResult<usize> {
         let remote_endpoint = endpoint(addr)?;
-        // 若不是多核心启动，需要在这里yield
-        // yield_now().await;
+        // 若不是多核心启动，需要在这里yield ,防止单核心Debug 没有Yeild，这里直接Yield
+        yield_now().await;
         self.tcp_connect(remote_endpoint)?;
         loop {
             NET_INTERFACE.poll();
@@ -407,7 +406,6 @@ impl Drop for TcpSocket {
         });
         NET_INTERFACE.poll();
         NET_INTERFACE.remove(self.socket_handle);
-        PORT_ALLOCATOR.recycle(self.inner.lock().local_endpoint.port);
         NET_INTERFACE.poll();
     }
 }

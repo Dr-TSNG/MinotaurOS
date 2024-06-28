@@ -55,7 +55,7 @@ impl UdpSocket {
         NET_INTERFACE.poll();
         let mut file_data = FileMeta::new(None);
         let net_inode = NetInode::new();
-        file_data.inode = Option::from(net_inode.unwrap() as Arc<dyn Inode>);
+        file_data.inode = Option::from(net_inode as Arc<dyn Inode>);
         Self {
             inner: Mutex::new(UdpSocketInner {
                 remote_endpoint: None,
