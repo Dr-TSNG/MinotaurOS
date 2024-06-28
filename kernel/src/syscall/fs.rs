@@ -660,7 +660,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
         Some(timeout) => match TimeoutFuture::new(timeout, future).await {
             TimeoutResult::Ready(ret) => ret,
             TimeoutResult::Timeout => {
-                debug!("[ppoll] timeout");
+                debug!("[pselect] timeout");
                 Ok(0)
             }
         },

@@ -6,12 +6,15 @@ use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::File;
 use crate::result::{Errno, SyscallResult};
+use crate::process::ffi::{Rlimit};
+use crate::processor::current_process;
 
 pub type FdNum = i32;
 
 #[derive(Clone)]
 pub struct FdTable {
     table: Vec<Option<FileDescriptor>>,
+    pub rlimit: Rlimit
 }
 
 #[derive(Clone)]
@@ -44,7 +47,12 @@ impl FdTable {
         table.push(Some(stdin));
         table.push(Some(stdout));
         table.push(Some(stderr));
-        FdTable { table }
+        FdTable {
+            table,
+            rlimit: Rlimit {
+            rlim_cur: MAX_FD_NUM,
+            rlim_max: MAX_FD_NUM},
+        }
     }
 
     pub fn cloexec(&mut self) {
@@ -66,7 +74,8 @@ impl FdTable {
     /// 插入一个文件描述符，返回位置
     pub fn put(&mut self, fd_impl: FileDescriptor, start: FdNum) -> SyscallResult<FdNum> {
         let fd = self.find_slot(start as usize);
-        if fd > MAX_FD_NUM {
+        let mut proc_inner = current_process().inner.lock();
+        if fd > proc_inner.fd_table.rlimit.rlim_max - 1 {
             return Err(Errno::EMFILE);
         }
         if fd >= self.table.len() {
@@ -111,5 +120,9 @@ impl FdTable {
             }
         }
         self.table.len()
+    }
+
+    pub fn set_rlimit(&mut self, rlimit: Rlimit) {
+        self.rlimit = rlimit;
     }
 }
