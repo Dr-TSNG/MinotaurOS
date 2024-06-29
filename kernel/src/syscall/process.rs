@@ -5,7 +5,7 @@ use log::{debug, info};
 use zerocopy::AsBytes;
 use crate::arch::VirtAddr;
 use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
-use crate::fs::ffi::{AT_FDCWD, FdSet, InodeMode, PATH_MAX};
+use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::process::ffi::{CloneFlags, Rlimit, RlimitCmd, WaitOptions};
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
@@ -176,10 +176,10 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
     if old_rlim != 0 {
         let old_rlim = current_process().inner.lock().addr_space
             .user_slice_w(VirtAddr(old_rlim), size_of::<Rlimit>())?;
-        let orlim=unsafe { &mut *(old_rlim.as_mut_ptr() as *mut Rlimit) };
+        let orlim = unsafe { &mut *(old_rlim.as_mut_ptr() as *mut Rlimit) };
         let (cur, max) = match cmd {
             RlimitCmd::RLIMIT_STACK => (USER_STACK_SIZE, USER_STACK_TOP.0),
-            RlimitCmd::RLIMIT_NOFILE => (orlim.rlim_cur,orlim.rlim_max),
+            RlimitCmd::RLIMIT_NOFILE => (orlim.rlim_cur, orlim.rlim_max),
             _ => (0, 0),
         };
         let limit = Rlimit { rlim_cur: cur, rlim_max: max };
@@ -188,9 +188,9 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
     if new_rlim != 0 {
         let new_rlim = current_process().inner.lock().addr_space
             .user_slice_w(VirtAddr(new_rlim), size_of::<Rlimit>())?;
-        let nrlim=unsafe { &mut *(new_rlim.as_mut_ptr() as *mut Rlimit) };
+        let nrlim = unsafe { &mut *(new_rlim.as_mut_ptr() as *mut Rlimit) };
         let (cur, max) = match cmd {
-            RlimitCmd::RLIMIT_NOFILE => (nrlim.rlim_cur,nrlim.rlim_max),
+            RlimitCmd::RLIMIT_NOFILE => (nrlim.rlim_cur, nrlim.rlim_max),
             _ => (MAX_FD_NUM, MAX_FD_NUM)
         };
         if cur > max {

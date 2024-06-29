@@ -28,7 +28,7 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
     }
     let start = match addr {
         0 => None,
-        _ => flags.contains(MapFlags::MAP_FIXED).then_some(VirtAddr::from(addr).into()),
+        _ => flags.contains(MapFlags::MAP_FIXED).then_some(VirtAddr(addr).into()),
     };
     debug!(
         "[mmap] start: {:?}, len: {}, prot: {:?}, flags: {:?}, fd: {:?}, offset: {}",
@@ -53,6 +53,6 @@ pub fn sys_mprotect(addr: usize, len: usize, prot: u32) -> SyscallResult<usize> 
     }
     let prot = MapProt::from_bits_truncate(prot);
     debug!("[mprotect] addr: {:?}, len: {}, prot: {:?}",VirtAddr(addr), len, prot);
-    current_process().inner.lock().addr_space.set_perms(VirtAddr(addr).into(), len.div_ceil(PAGE_SIZE), prot.into())?;
+    current_process().inner.lock().addr_space.mprotect(VirtAddr(addr).into(), len.div_ceil(PAGE_SIZE), prot.into())?;
     Ok(0)
 }

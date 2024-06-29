@@ -35,7 +35,7 @@ impl PageTableEntry {
         }
     }
     pub fn ppn(&self) -> PhysPageNum {
-        (self.bits >> 10 & ((1usize << 44) - 1)).into()
+        PhysPageNum(self.bits >> 10 & ((1usize << 44) - 1))
     }
     pub fn flags(&self) -> PTEFlags {
         PTEFlags::from_bits(self.bits as u8).unwrap()
