@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::arch::asm;
-use core::cmp::min;
+use core::cmp::{max, min};
 use core::ffi::CStr;
 use bitflags::bitflags;
 use log::{debug, info, warn};
@@ -121,7 +121,7 @@ impl AddressSpace {
                             name: None,
                             perms,
                             start: start_vpn,
-                            pages: (end_vpn - start_vpn).0,
+                            pages: end_vpn - start_vpn,
                         },
                         buf,
                         start_addr.page_offset(2),
@@ -145,7 +145,7 @@ impl AddressSpace {
             name: Some("[stack]".to_string()),
             perms: ASPerms::U | ASPerms::R | ASPerms::W,
             start: ustack_bottom_vpn,
-            pages: (ustack_top_vpn - ustack_bottom_vpn).0,
+            pages: ustack_top_vpn - ustack_bottom_vpn,
         });
         addr_space.map_region(region);
         debug!("Map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
@@ -157,7 +157,7 @@ impl AddressSpace {
             name: Some("[heap]".to_string()),
             perms: ASPerms::U | ASPerms::R | ASPerms::W,
             start: uheap_bottom_vpn,
-            pages: (uheap_top_vpn - uheap_bottom_vpn).0,
+            pages: uheap_top_vpn - uheap_bottom_vpn,
         });
         addr_space.map_region(region);
         addr_space.brk = VirtAddr::from(uheap_top_vpn);
@@ -290,12 +290,16 @@ impl AddressSpace {
             }
         }
         let mut brk = self.unmap_region(heap_start).unwrap();
-        brk.resize((addr.ceil() - heap_start).0);
+        let heap_end = brk.metadata().start + brk.metadata().pages;
+
+        if addr.ceil() < heap_end {
+            brk.split(0, heap_end - addr.ceil());
+        } else if addr.ceil() > heap_end {
+            brk.extend(addr.ceil() - heap_end);
+        }
         self.map_region(brk);
-        let prev = self.brk;
-        self.brk = addr;
         unsafe { self.activate(); }
-        Ok(prev.0)
+        Ok(core::mem::replace(&mut self.brk, addr).0)
     }
 
     pub fn mmap(
@@ -312,13 +316,7 @@ impl AddressSpace {
             warn!("Shared mapping is not supported yet");
         }
         let start = if let Some(start) = start {
-            let end = start + pages;
-            let is_overlap = self.regions
-                .values()
-                .any(|region| region.metadata().start < end && region.metadata().end() > start);
-            if is_overlap {
-                return Err(Errno::EINVAL);
-            }
+            self.munmap(start, pages)?;
             start
         } else {
             let mut iter = self.regions
@@ -343,37 +341,68 @@ impl AddressSpace {
     }
 
     pub fn munmap(&mut self, start: VirtPageNum, pages: usize) -> SyscallResult {
-        let mut regions = vec![];
-        for (vpn, region) in self.regions.range_mut(..start + pages) {
-            if *vpn + pages <= start {
-                continue;
-            }
-            if !region.metadata().perms.contains(ASPerms::U) {
-                return Err(Errno::EPERM);
-            }
-            regions.push(*vpn);
-        }
-        for vpn in regions {
-            self.unmap_region(vpn);
-        }
-        unsafe { self.activate(); }
-        Ok(())
+        self.modify_region(start, pages, |region| false)
     }
 
-    pub fn set_perms(&mut self, start: VirtPageNum, pages: usize, perms: ASPerms) -> SyscallResult {
-        for (vpn, region) in self.regions.range_mut(..start + pages) {
-            if *vpn + pages <= start {
-                continue;
-            }
+    pub fn mprotect(&mut self, start: VirtPageNum, pages: usize, perms: ASPerms) -> SyscallResult {
+        self.modify_region(start, pages, |region| {
             region.set_perms(perms);
-            region.map(self.root_pt, true);
-        }
-        unsafe { self.activate(); }
-        Ok(())
+            true
+        })
     }
 }
 
 impl AddressSpace {
+    fn modify_region(
+        &mut self,
+        start: VirtPageNum,
+        pages: usize,
+        f: impl Fn(&mut Box<dyn ASRegion>) -> bool,
+    ) -> SyscallResult {
+        let mut to_handle = vec![];
+        for (vpn, region) in self.regions.range_mut(..start + pages) {
+            if region.metadata().end() > start {
+                if !region.metadata().perms.contains(ASPerms::U) {
+                    return Err(Errno::EPERM);
+                }
+                to_handle.push(*vpn);
+            }
+        }
+        let mut handled = vec![];
+        for vpn in to_handle {
+            let mut region = self.unmap_region(vpn).unwrap();
+            let r_start = region.metadata().start;
+            let r_end = region.metadata().end();
+            let t_start = max(start, r_start);
+            let t_end = min(start + pages, r_end);
+            if r_start == t_start {
+                if r_end == t_end {
+                    if f(&mut region) {
+                        handled.push(region);
+                    }
+                } else {
+                    handled.extend(region.split(t_end - r_start, r_end - t_end));
+                    if f(&mut region) {
+                        handled.push(region);
+                    }
+                }
+            } else {
+                let mut split = region.split(0, t_start - r_start);
+                let mut target = split.swap_remove(0);
+                handled.push(region);
+                handled.extend(split);
+                if f(&mut target) {
+                    handled.push(target);
+                }
+            }
+        }
+        for region in handled {
+            self.map_region(region);
+        }
+        unsafe { self.activate(); }
+        Ok(())
+    }
+
     fn copy_global_mappings(&mut self) {
         for map in GLOBAL_MAPPINGS.iter() {
             debug!("Copy global mappings: {} from {:?} to {:?}", map.name, map.phys_start, map.phys_end());
@@ -385,7 +414,7 @@ impl AddressSpace {
                 name: Some(map.name.to_string()),
                 perms: map.perms,
                 start: vpn_start,
-                pages: (vpn_end - vpn_start).0,
+                pages: vpn_end - vpn_start,
             };
             let region = DirectRegion::new(metadata, ppn_start);
             self.map_region(region);
@@ -442,7 +471,7 @@ impl AddressSpace {
                         name: None,
                         perms,
                         start: start_vpn,
-                        pages: (end_vpn - start_vpn).0,
+                        pages: end_vpn - start_vpn,
                     },
                     buf,
                     start_addr.page_offset(2),

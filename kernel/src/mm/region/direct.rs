@@ -52,8 +52,12 @@ impl ASRegion for DirectRegion {
         }
     }
 
-    fn resize(&mut self, new_pages: usize) {
-        self.metadata.pages = new_pages;
+    fn split(&mut self, _start: usize, _size: usize) -> Vec<Box<dyn ASRegion>> {
+        panic!("DirectRegion cannot be split");
+    }
+
+    fn extend(&mut self, _size: usize) {
+        panic!("DirectRegion cannot be extended");
     }
 
     fn fork(&mut self, _parent_pt: PageTable) -> Box<dyn ASRegion> {

@@ -54,8 +54,59 @@ impl ASRegion for FileRegion {
         }
     }
 
-    fn resize(&mut self, _new_pages: usize) {
-        panic!("Resize is not supported for file region");
+    fn split(&mut self, start: usize, size: usize) -> Vec<Box<dyn ASRegion>> {
+        assert!(size < self.metadata.pages);
+        assert!(start + size <= self.metadata.pages);
+        let mut regions: Vec<Box<dyn ASRegion>> = vec![];
+        if start != 0 {
+            let mut off = self.pages.split_off(start);
+            if size != 0 {
+                let mid = FileRegion {
+                    metadata: ASRegionMeta {
+                        start: self.metadata.start + start,
+                        pages: size,
+                        ..self.metadata.clone()
+                    },
+                    inode: self.inode.clone(),
+                    pages: off.drain(..size).collect(),
+                    offset: self.offset + start,
+                };
+                regions.push(Box::new(mid));
+            }
+            if !off.is_empty() {
+                let right = FileRegion {
+                    metadata: ASRegionMeta {
+                        start: self.metadata.start + start + size,
+                        pages: self.metadata.pages - start - size,
+                        ..self.metadata.clone()
+                    },
+                    inode: self.inode.clone(),
+                    pages: off,
+                    offset: self.offset + start + size,
+                };
+                regions.push(Box::new(right));
+            }
+            self.metadata.pages = start;
+        } else {
+            let off = self.pages.split_off(size);
+            let right = FileRegion {
+                metadata: ASRegionMeta {
+                    start: self.metadata.start + size,
+                    pages: self.metadata.pages - size,
+                    ..self.metadata.clone()
+                },
+                inode: self.inode.clone(),
+                pages: off,
+                offset: self.offset + size,
+            };
+            regions.push(Box::new(right));
+            self.metadata.pages = size;
+        }
+        regions
+    }
+
+    fn extend(&mut self, _size: usize) {
+        panic!("FileRegion cannot be extended");
     }
 
     fn fork(&mut self, _parent_pt: PageTable) -> Box<dyn ASRegion> {
@@ -69,7 +120,7 @@ impl ASRegion for FileRegion {
     }
 
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
-        let page_num = (vpn - self.metadata.start).0;
+        let page_num = vpn - self.metadata.start;
         self.pages[page_num] = match self.pages[page_num] {
             PageState::Free => PageState::Clean,
             PageState::Clean => PageState::Dirty,

@@ -3,6 +3,7 @@ use core::{
     ops::{Add, Sub},
 };
 use core::iter::Step;
+use core::ops::{AddAssign, SubAssign};
 use crate::config::KERNEL_ADDR_OFFSET;
 
 pub const SV39_PAGE_BITS: usize = 12;
@@ -56,30 +57,6 @@ impl Debug for VirtPageNum {
 }
 
 // Transforms
-
-impl const From<usize> for PhysAddr {
-    fn from(v: usize) -> Self {
-        Self(v & ((1 << SV39_PA_WIDTH) - 1))
-    }
-}
-
-impl const From<usize> for PhysPageNum {
-    fn from(v: usize) -> Self {
-        Self(v & ((1 << SV39_PPN_WIDTH) - 1))
-    }
-}
-
-impl const From<usize> for VirtAddr {
-    fn from(v: usize) -> Self {
-        Self(v)
-    }
-}
-
-impl const From<usize> for VirtPageNum {
-    fn from(v: usize) -> Self {
-        Self(v)
-    }
-}
 
 impl const From<PhysAddr> for PhysPageNum {
     fn from(v: PhysAddr) -> Self {
@@ -197,13 +174,6 @@ impl VirtPageNum {
     }
 }
 
-impl const Add for PhysAddr {
-    type Output = PhysAddr;
-    fn add(self, rhs: Self) -> Self::Output {
-        PhysAddr(self.0 + rhs.0)
-    }
-}
-
 impl const Add<usize> for PhysAddr {
     type Output = PhysAddr;
     fn add(self, rhs: usize) -> Self::Output {
@@ -211,10 +181,16 @@ impl const Add<usize> for PhysAddr {
     }
 }
 
+impl const AddAssign<usize> for PhysAddr {
+    fn add_assign(&mut self, rhs: usize) {
+        self.0 += rhs;
+    }
+}
+
 impl const Sub for PhysAddr {
-    type Output = PhysAddr;
+    type Output = usize;
     fn sub(self, rhs: Self) -> Self::Output {
-        PhysAddr(self.0 - rhs.0)
+        self.0 - rhs.0
     }
 }
 
@@ -222,6 +198,12 @@ impl const Sub<usize> for PhysAddr {
     type Output = PhysAddr;
     fn sub(self, rhs: usize) -> Self::Output {
         PhysAddr(self.0 - rhs)
+    }
+}
+
+impl const SubAssign<usize> for PhysAddr {
+    fn sub_assign(&mut self, rhs: usize) {
+        self.0 -= rhs;
     }
 }
 
@@ -239,13 +221,6 @@ impl const Step for PhysAddr {
     }
 }
 
-impl const Add for PhysPageNum {
-    type Output = PhysPageNum;
-    fn add(self, rhs: Self) -> Self::Output {
-        PhysPageNum(self.0 + rhs.0)
-    }
-}
-
 impl const Add<usize> for PhysPageNum {
     type Output = PhysPageNum;
     fn add(self, rhs: usize) -> Self::Output {
@@ -253,10 +228,16 @@ impl const Add<usize> for PhysPageNum {
     }
 }
 
+impl const AddAssign<usize> for PhysPageNum {
+    fn add_assign(&mut self, rhs: usize) {
+        self.0 += rhs;
+    }
+}
+
 impl const Sub for PhysPageNum {
-    type Output = PhysPageNum;
+    type Output = usize;
     fn sub(self, rhs: Self) -> Self::Output {
-        PhysPageNum(self.0 - rhs.0)
+        self.0 - rhs.0
     }
 }
 
@@ -264,6 +245,12 @@ impl const Sub<usize> for PhysPageNum {
     type Output = PhysPageNum;
     fn sub(self, rhs: usize) -> Self::Output {
         PhysPageNum(self.0 - rhs)
+    }
+}
+
+impl const SubAssign<usize> for PhysPageNum {
+    fn sub_assign(&mut self, rhs: usize) {
+        self.0 -= rhs;
     }
 }
 
@@ -281,13 +268,6 @@ impl const Step for PhysPageNum {
     }
 }
 
-impl const Add for VirtAddr {
-    type Output = VirtAddr;
-    fn add(self, rhs: Self) -> Self::Output {
-        VirtAddr(self.0 + rhs.0)
-    }
-}
-
 impl const Add<usize> for VirtAddr {
     type Output = VirtAddr;
     fn add(self, rhs: usize) -> Self::Output {
@@ -295,10 +275,16 @@ impl const Add<usize> for VirtAddr {
     }
 }
 
+impl const AddAssign<usize> for VirtAddr {
+    fn add_assign(&mut self, rhs: usize) {
+        self.0 += rhs;
+    }
+}
+
 impl const Sub for VirtAddr {
-    type Output = VirtAddr;
+    type Output = usize;
     fn sub(self, rhs: Self) -> Self::Output {
-        VirtAddr(self.0 - rhs.0)
+        self.0 - rhs.0
     }
 }
 
@@ -306,6 +292,12 @@ impl const Sub<usize> for VirtAddr {
     type Output = VirtAddr;
     fn sub(self, rhs: usize) -> Self::Output {
         VirtAddr(self.0 - rhs)
+    }
+}
+
+impl const SubAssign<usize> for VirtAddr {
+    fn sub_assign(&mut self, rhs: usize) {
+        self.0 -= rhs;
     }
 }
 
@@ -323,13 +315,6 @@ impl const Step for VirtAddr {
     }
 }
 
-impl const Add for VirtPageNum {
-    type Output = VirtPageNum;
-    fn add(self, rhs: Self) -> Self::Output {
-        VirtPageNum(self.0 + rhs.0)
-    }
-}
-
 impl const Add<usize> for VirtPageNum {
     type Output = VirtPageNum;
     fn add(self, rhs: usize) -> Self::Output {
@@ -337,10 +322,16 @@ impl const Add<usize> for VirtPageNum {
     }
 }
 
+impl const AddAssign<usize> for VirtPageNum {
+    fn add_assign(&mut self, rhs: usize) {
+        self.0 += rhs;
+    }
+}
+
 impl const Sub for VirtPageNum {
-    type Output = VirtPageNum;
+    type Output = usize;
     fn sub(self, rhs: Self) -> Self::Output {
-        VirtPageNum(self.0 - rhs.0)
+        self.0 - rhs.0
     }
 }
 
@@ -348,6 +339,12 @@ impl const Sub<usize> for VirtPageNum {
     type Output = VirtPageNum;
     fn sub(self, rhs: usize) -> Self::Output {
         VirtPageNum(self.0 - rhs)
+    }
+}
+
+impl const SubAssign<usize> for VirtPageNum {
+    fn sub_assign(&mut self, rhs: usize) {
+        self.0 -= rhs;
     }
 }
 
