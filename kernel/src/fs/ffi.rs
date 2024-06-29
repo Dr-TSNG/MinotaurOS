@@ -98,7 +98,7 @@ pub enum FcntlCmd {
 }
 
 /// Inode 类型
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(TryFromPrimitive, PartialEq, Debug, Clone, Copy)]
 #[repr(u32)]
 pub enum InodeMode {
     /// FIFO

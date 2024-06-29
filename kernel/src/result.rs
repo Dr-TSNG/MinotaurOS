@@ -8,6 +8,7 @@ use crate::arch::{PhysPageNum, VirtAddr, VirtPageNum};
 
 pub type SyscallResult<T = ()> = Result<T, Errno>;
 
+#[repr(i32)]
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Errno {
     EUNDEF = 0,

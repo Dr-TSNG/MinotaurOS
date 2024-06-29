@@ -128,7 +128,7 @@ impl AddressSpace {
                     )?;
                     max_end_vpn = region.metadata().end();
                     addr_space.map_region(region);
-                    debug!("Map elf section: {:?} - {:?}", start_vpn, end_vpn);
+                    debug!("Map elf section: {:?} - {:?} for {:?}", start_vpn, end_vpn, perms);
                 }
                 xmas_elf::program::Type::Interp => {
                     linker_base = DYNAMIC_LINKER_BASE;
