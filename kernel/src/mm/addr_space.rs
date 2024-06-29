@@ -316,13 +316,7 @@ impl AddressSpace {
             warn!("Shared mapping is not supported yet");
         }
         let start = if let Some(start) = start {
-            let end = start + pages;
-            let is_overlap = self.regions
-                .values()
-                .any(|region| region.metadata().start < end && region.metadata().end() > start);
-            if is_overlap {
-                return Err(Errno::EINVAL);
-            }
+            self.munmap(start, pages)?;
             start
         } else {
             let mut iter = self.regions
@@ -395,6 +389,7 @@ impl AddressSpace {
             } else {
                 let mut split = region.split(0, t_start - r_start);
                 let mut target = split.swap_remove(0);
+                handled.push(region);
                 handled.extend(split);
                 if f(&mut target) {
                     handled.push(target);
