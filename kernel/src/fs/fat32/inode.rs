@@ -229,19 +229,8 @@ impl InodeInternal for FAT32Inode {
         Ok(())
     }
 
-    async fn do_create(
-        self: Arc<Self>,
-        inner: &mut InodeMetaInner,
-        mode: InodeMode,
-        name: &str,
-    ) -> SyscallResult<InodeChild> {
+    async fn do_create(self: Arc<Self>, mode: InodeMode, name: &str) -> SyscallResult<InodeChild> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
-        if !inner.children_loaded {
-            self.clone().load_children(inner).await?;
-        }
-        if inner.children.contains_key(name) {
-            return Err(Errno::EEXIST);
-        }
         let ext = &mut *self.ext.lock().await;
         let cluster = fs.alloc_cluster().await?;
         let attr = if mode == InodeMode::IFDIR { FileAttr::ATTR_DIRECTORY } else { FileAttr::empty() };
@@ -279,21 +268,9 @@ impl InodeInternal for FAT32Inode {
         Ok(InodeChild::new(inode.clone(), FAT32ChildExt::new(dir_pos, dir_len)))
     }
 
-    async fn do_movein(
-        self: Arc<Self>,
-        inner: &mut InodeMetaInner,
-        name: &str,
-        inode: Arc<dyn Inode>,
-    ) -> SyscallResult<InodeChild> {
+    async fn do_movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>) -> SyscallResult<InodeChild> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
-        if !inner.children_loaded {
-            self.clone().load_children(inner).await?;
-        }
-        if inner.children.contains_key(name) {
-            return Err(Errno::EEXIST);
-        }
         let ext = &mut *self.ext.lock().await;
-
         match inode.downcast_arc::<FAT32Inode>() {
             Ok(inode) => {
                 let attr = if inode.metadata().mode == InodeMode::IFDIR { FileAttr::ATTR_DIRECTORY } else { FileAttr::empty() };
@@ -318,16 +295,8 @@ impl InodeInternal for FAT32Inode {
         }
     }
 
-    async fn do_unlink(
-        self: Arc<Self>,
-        inner: &mut InodeMetaInner,
-        name: &str,
-    ) -> SyscallResult {
+    async fn do_unlink(self: Arc<Self>, target: &InodeChild) -> SyscallResult {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
-        if !inner.children_loaded {
-            self.clone().load_children(inner).await?;
-        }
-        let target = inner.children.get(name).ok_or(Errno::ENOENT)?;
         let ext = &mut *self.ext.lock().await;
         let child_ext = target.ext.downcast_ref::<FAT32ChildExt>().unwrap();
         fs.remove_dir(&mut ext.clusters, &mut ext.dir_occupy, child_ext.dir_pos, child_ext.dir_len).await?;

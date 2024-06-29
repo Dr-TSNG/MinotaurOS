@@ -4,6 +4,7 @@ use alloc::string::ToString;
 use alloc::sync::{Arc, Weak};
 use core::time::Duration;
 use async_trait::async_trait;
+use log::{debug, trace};
 use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::ext4::wrapper::map_errno;
 use crate::fs::ffi::InodeMode;
@@ -76,10 +77,16 @@ impl InodeInternal for Ext4Inode {
     }
 
     async fn load_children(self: Arc<Self>, inner: &mut InodeMetaInner) -> SyscallResult {
+        debug!("[ext4] Load children");
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         for entry in fs.ext4.dir_get_entries(self.metadata.ino as u32) {
+            let name = entry.get_name();
+            if name == "." || name == ".." {
+                continue;
+            }
+            trace!("[ext4] Read ext4 child: {}", name);
             let ctx = fs.ext4.get_inode_ref(entry.inode);
-            let mode = InodeMode::try_from((ctx.inode.mode as u32) << 16).unwrap();
+            let mode = InodeMode::try_from(ctx.inode.mode & 0xf000).unwrap();
             let page_cache = match mode {
                 InodeMode::IFREG => Some(PageCache::new()),
                 _ => None,
@@ -89,8 +96,8 @@ impl InodeInternal for Ext4Inode {
                     entry.inode as usize,
                     fs.device.metadata().dev_id,
                     mode,
-                    entry.get_name(),
-                    format!("{}/{}", self.metadata.path, entry.get_name()),
+                    name.clone(),
+                    format!("{}/{}", self.metadata.path, name),
                     Some(self.clone()),
                     page_cache,
                     Duration::from_nanos(ctx.inode.atime as u64).into(),
@@ -101,21 +108,16 @@ impl InodeInternal for Ext4Inode {
                 fs: self.fs.clone(),
             });
             let child = InodeChild::new(inode, Box::new(()));
-            inner.children.insert(entry.get_name(), child);
+            inner.children.insert(name, child);
         }
         inner.children_loaded = true;
         Ok(())
     }
 
-    async fn do_create(
-        self: Arc<Self>,
-        inner: &mut InodeMetaInner,
-        mode: InodeMode,
-        name: &str,
-    ) -> SyscallResult<InodeChild> {
+    async fn do_create(self: Arc<Self>, mode: InodeMode, name: &str) -> SyscallResult<InodeChild> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let ctx = fs.ext4
-            .create(self.metadata.ino as u32, name, ((mode as u32) >> 16) as u16)
+            .create(self.metadata.ino as u32, name, mode as u16 & 0o755)
             .map_err(map_errno)?;
         let page_cache = match mode {
             InodeMode::IFREG => Some(PageCache::new()),
@@ -140,12 +142,7 @@ impl InodeInternal for Ext4Inode {
         Ok(InodeChild::new(inode, Box::new(())))
     }
 
-    async fn do_movein(
-        self: Arc<Self>,
-        inner: &mut InodeMetaInner,
-        name: &str,
-        inode: Arc<dyn Inode>,
-    ) -> SyscallResult<InodeChild> {
+    async fn do_movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>) -> SyscallResult<InodeChild> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         if let Ok(inode) = inode.downcast_arc::<Ext4Inode>() {
             let mut parent_ctx = fs.ext4.get_inode_ref(self.metadata.ino as u32);
@@ -167,8 +164,9 @@ impl InodeInternal for Ext4Inode {
         }
     }
 
-    async fn do_unlink(self: Arc<Self>, inner: &mut InodeMetaInner, name: &str) -> SyscallResult {
+    async fn do_unlink(self: Arc<Self>, target: &InodeChild) -> SyscallResult {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let name = target.inode.metadata().name.as_str();
         fs.ext4.dir_remove(self.metadata.ino as u32, name).map_err(map_errno)?;
         Ok(())
     }

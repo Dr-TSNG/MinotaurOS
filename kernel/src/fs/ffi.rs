@@ -99,7 +99,7 @@ pub enum FcntlCmd {
 
 /// Inode 类型
 #[derive(TryFromPrimitive, PartialEq, Debug, Clone, Copy)]
-#[repr(u32)]
+#[repr(u16)]
 pub enum InodeMode {
     /// FIFO
     IFIFO = 0x1000,

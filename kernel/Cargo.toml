@@ -22,6 +22,7 @@ num_enum = { version = "0.7.2", default-features = false }
 pin-project = "1.1.5"
 sbi-spec = "0.0.7"
 spin = "0.9"
+tap = "1.0"
 time = { version = "0.3", default-features = false }
 virtio-drivers = "0.7.1"
 xmas-elf = "0.7.0"
