@@ -51,12 +51,13 @@ where
 /// 开始执行任务
 pub fn run_executor() {
     loop {
-        while let Some(task) = TASK_QUEUE.take() {
+        if let Some(task) = TASK_QUEUE.take() {
             task.run();
+        } else {
+            core::hint::spin_loop();
         }
         query_timer();
         BOARD_INFO.plic.handle_irq(local_hart().id);
-        core::hint::spin_loop();
         if PROCESS_MONITOR.lock().init_proc().strong_count() == 0 {
             break;
         }

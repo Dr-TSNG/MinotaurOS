@@ -1,7 +1,6 @@
-use crate::trap::context::TrapContext;
 use bitflags::bitflags;
-use core::mem::size_of;
 use num_enum::TryFromPrimitive;
+use crate::trap::context::TrapContext;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, TryFromPrimitive)]
 #[repr(usize)]
@@ -39,7 +38,7 @@ pub enum Signal {
     SIGPWR = 30,
     SIGSYS = 31,
     SIGRTMIN = 32,
-    SIGRT1 = 33,
+    SIGCANCEL = 33,
 }
 
 pub const SIG_MAX: usize = 34;
@@ -88,7 +87,7 @@ bitflags! {
         const SIGPWR    = Signal::SIGPWR.sigset_val();
         const SIGSYS    = Signal::SIGSYS.sigset_val();
         const SIGRTMIN  = Signal::SIGRTMIN.sigset_val();
-        const SIGRT1    = Signal::SIGRT1.sigset_val();
+        const SIGCANCEL = Signal::SIGCANCEL.sigset_val();
     }
 }
 
@@ -121,7 +120,7 @@ pub struct UContext {
     pub uc_link: usize,
     pub uc_stack: SignalStack,
     pub uc_sigmask: SigSet,
-    _unused: [u8; 1024 / 8 - size_of::<SigSet>()],
+    _unused: [u8; 128],
     pub uc_mcontext: [usize; 32],
 }
 
@@ -140,8 +139,8 @@ impl UContext {
             uc_link: 0,
             uc_stack: SignalStack::default(),
             uc_sigmask: sigmask,
-            _unused: [0; 120],
+            _unused: [0; 128],
             uc_mcontext: trap_ctx.user_x,
         }
-    }
+    }    
 }

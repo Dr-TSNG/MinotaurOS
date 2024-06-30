@@ -1,3 +1,7 @@
+use core::mem::size_of;
+use log::{debug, error, info, trace};
+use riscv::register::{scause, sepc, stval};
+use riscv::register::scause::{Exception, Interrupt, Trap};
 use crate::arch::VirtAddr;
 use crate::config::TRAMPOLINE_BASE;
 use crate::mm::addr_space::ASPerms;
@@ -9,17 +13,10 @@ use crate::signal::ffi::{Signal, UContext};
 use crate::signal::SignalHandler;
 use crate::syscall::syscall;
 use crate::trap::{__restore_to_user, set_kernel_trap_entry, set_user_trap_entry};
-use core::mem::size_of;
-use log::{debug, error, info, trace};
-use riscv::register::scause::{Exception, Interrupt, Trap};
-use riscv::register::{scause, sepc, stval};
 
 pub fn trap_return() {
     set_user_trap_entry();
-    trace!(
-        "Trap return to user, pc: {:#x}",
-        current_trap_ctx().get_pc()
-    );
+    trace!("Trap return to user, pc: {:#x}", current_trap_ctx().get_pc());
 
     unsafe {
         current_thread().inner().rusage.trap_out();
@@ -49,14 +46,15 @@ pub async fn trap_from_user() {
                     ctx.user_x[14],
                     ctx.user_x[15],
                 ],
-            )
-            .await;
+            ).await;
             ctx.user_x[10] = result.unwrap_or_else(|err| -(err as isize) as usize)
         }
-        Trap::Exception(Exception::LoadFault) | Trap::Exception(Exception::LoadPageFault) => {
+        | Trap::Exception(Exception::LoadFault)
+        | Trap::Exception(Exception::LoadPageFault) => {
             handle_page_fault(VirtAddr(stval), ASPerms::R);
         }
-        Trap::Exception(Exception::StoreFault) | Trap::Exception(Exception::StorePageFault) => {
+        Trap::Exception(Exception::StoreFault)
+        | Trap::Exception(Exception::StorePageFault) => {
             handle_page_fault(VirtAddr(stval), ASPerms::W);
         }
         Trap::Exception(Exception::InstructionFault)
@@ -77,28 +75,20 @@ pub async fn trap_from_user() {
 pub fn check_signal() {
     if let Some(poll) = current_thread().signals.poll() {
         let trap_ctx = current_trap_ctx();
-        info!(
-            "Handle signal {:?}, pc {:#x}",
-            poll.signal,
-            trap_ctx.get_pc()
-        );
+        info!("Handle signal {:?} at {:#x}", poll.signal, trap_ctx.get_pc());
         match poll.handler {
             SignalHandler::Kernel(f) => f(poll.signal),
             SignalHandler::User(sig_action) => {
+                debug!("Switch pc to {:#x}", sig_action.sa_handler);
                 let ucontext = UContext::new(poll.blocked_before, &trap_ctx);
                 let mut user_sp = VirtAddr(trap_ctx.get_sp());
                 if let Err(e) = current_process()
-                    .inner
-                    .lock()
-                    .addr_space
-                    .user_slice_w(user_sp, size_of::<UContext>())
-                {
+                    .inner.lock().addr_space
+                    .user_slice_w(user_sp, size_of::<UContext>()) {
                     todo!("Stack Overflow: {:?}", e)
                 }
                 user_sp = user_sp - size_of::<UContext>();
-                unsafe {
-                    user_sp.as_ptr().cast::<UContext>().write(ucontext);
-                }
+                unsafe { user_sp.as_ptr().cast::<UContext>().write(ucontext); }
 
                 trap_ctx.set_pc(sig_action.sa_handler);
                 trap_ctx.set_sp(user_sp.0);

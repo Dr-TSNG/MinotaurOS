@@ -8,6 +8,7 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+#[derive(Copy, Clone)]
 #[repr(u64)]
 pub enum FileSystemType {
     DEVFS = 0x62646576,

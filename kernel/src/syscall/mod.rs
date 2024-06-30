@@ -1,11 +1,11 @@
 mod fs;
 mod mm;
-mod net;
 mod process;
 mod signal;
 mod sync;
 mod system;
 mod time;
+mod net;
 
 use fs::*;
 use mm::*;
@@ -15,15 +15,12 @@ use sync::*;
 use system::*;
 use time::*;
 
+use log::warn;
+use num_enum::FromPrimitive;
 use crate::fs::fd::FdNum;
 use crate::result::{Errno, SyscallResult};
 use crate::strace;
-use crate::syscall::net::{
-    sys_accept, sys_bind, sys_connect, sys_getpeername, sys_getsockname, sys_getsockopt,
-    sys_listen, sys_recvfrom, sys_sendto, sys_setsockopt, sys_socket, sys_sockshutdown,
-};
-use log::warn;
-use num_enum::FromPrimitive;
+use crate::syscall::net::{sys_accept, sys_bind, sys_connect, sys_getpeername, sys_getsockname, sys_getsockopt, sys_listen, sys_recvfrom, sys_sendto, sys_setsockopt, sys_socket, sys_sockshutdown};
 
 macro_rules! syscall {
     ($handler: ident $(, $args:expr)*) => {
@@ -95,6 +92,8 @@ pub enum SyscallCode {
     ExitGroup = 94,
     SetTidAddress = 96,
     Futex = 98,
+    GetRobustList = 99,
+    SetRobustList = 100,
     Nanosleep = 101,
     Setitimer = 103,
     ClockGettime = 113,
@@ -163,116 +162,42 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Dup => syscall!(sys_dup, args[0] as FdNum),
         SyscallCode::Dup3 => syscall!(sys_dup3, args[0] as FdNum, args[1] as FdNum, args[2] as u32),
         SyscallCode::Fcntl => syscall!(sys_fcntl, args[0] as FdNum, args[1], args[2]),
-        SyscallCode::Ioctl => async_syscall!(
-            sys_ioctl,
-            args[0] as FdNum,
-            args[1],
-            args[2],
-            args[3],
-            args[4],
-            args[5]
-        ),
-        SyscallCode::Mkdirat => {
-            async_syscall!(sys_mkdirat, args[0] as FdNum, args[1], args[2] as u32)
-        }
-        SyscallCode::Unlinkat => {
-            async_syscall!(sys_unlinkat, args[0] as FdNum, args[1], args[2] as u32)
-        }
+        SyscallCode::Ioctl => async_syscall!(sys_ioctl, args[0] as FdNum, args[1], args[2], args[3], args[4], args[5]),
+        SyscallCode::Mkdirat => async_syscall!(sys_mkdirat, args[0] as FdNum, args[1], args[2] as u32),
+        SyscallCode::Unlinkat => async_syscall!(sys_unlinkat, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Umount2 => async_syscall!(sys_umount2, args[0], args[1] as u32),
-        SyscallCode::Mount => async_syscall!(
-            sys_mount,
-            args[0],
-            args[1],
-            args[2],
-            args[3] as u32,
-            args[4]
-        ),
+        SyscallCode::Mount => async_syscall!(sys_mount, args[0], args[1], args[2], args[3] as u32, args[4]),
         SyscallCode::Statfs => async_syscall!(sys_statfs, args[0], args[1]),
         SyscallCode::Fstatfs => syscall!(sys_fstatfs, args[0] as FdNum, args[1]),
         SyscallCode::Ftruncate => async_syscall!(sys_ftruncate, args[0] as FdNum, args[1] as isize),
-        SyscallCode::Faccessat => async_syscall!(
-            sys_faccessat,
-            args[0] as FdNum,
-            args[1],
-            args[2] as u32,
-            args[3] as u32
-        ),
+        SyscallCode::Faccessat => async_syscall!(sys_faccessat, args[0] as FdNum, args[1], args[2] as u32, args[3] as u32),
         SyscallCode::Chdir => async_syscall!(sys_chdir, args[0]),
-        SyscallCode::Openat => async_syscall!(
-            sys_openat,
-            args[0] as i32,
-            args[1],
-            args[2] as u32,
-            args[3] as u32
-        ),
+        SyscallCode::Openat => async_syscall!(sys_openat, args[0] as i32, args[1], args[2] as u32, args[3] as u32),
         SyscallCode::Close => syscall!(sys_close, args[0] as FdNum),
         SyscallCode::Pipe2 => syscall!(sys_pipe2, args[0], args[1] as u32),
-        SyscallCode::Getdents64 => {
-            async_syscall!(sys_getdents, args[0] as FdNum, args[1], args[2] as u32)
-        }
-        SyscallCode::Lseek => async_syscall!(
-            sys_lseek,
-            args[0] as FdNum,
-            args[1] as isize,
-            args[2] as i32
-        ),
+        SyscallCode::Getdents64 => async_syscall!(sys_getdents, args[0] as FdNum, args[1], args[2] as u32),
+        SyscallCode::Lseek => async_syscall!(sys_lseek, args[0] as FdNum, args[1] as isize, args[2] as i32),
         SyscallCode::Read => async_syscall!(sys_read, args[0] as FdNum, args[1], args[2]),
         SyscallCode::Write => async_syscall!(sys_write, args[0] as FdNum, args[1], args[2]),
         SyscallCode::Readv => async_syscall!(sys_readv, args[0] as FdNum, args[1], args[2]),
         SyscallCode::Writev => async_syscall!(sys_writev, args[0] as FdNum, args[1], args[2]),
-        SyscallCode::Pread64 => async_syscall!(
-            sys_pread,
-            args[0] as FdNum,
-            args[1],
-            args[2],
-            args[3] as isize
-        ),
-        SyscallCode::Pwrite64 => async_syscall!(
-            sys_pwrite,
-            args[0] as FdNum,
-            args[1],
-            args[2],
-            args[3] as isize
-        ),
-        SyscallCode::Sendfile => async_syscall!(
-            sys_sendfile,
-            args[0] as FdNum,
-            args[1] as FdNum,
-            args[2],
-            args[3]
-        ),
-        // SyscallCode::Pselect6
+        SyscallCode::Pread64 => async_syscall!(sys_pread, args[0] as FdNum, args[1], args[2], args[3] as isize),
+        SyscallCode::Pwrite64 => async_syscall!(sys_pwrite, args[0] as FdNum, args[1], args[2], args[3] as isize),
+        SyscallCode::Sendfile => async_syscall!(sys_sendfile, args[0] as FdNum, args[1] as FdNum, args[2], args[3]),
+        SyscallCode::Pselect6 => async_syscall!(sys_pselect6, args[0] as FdNum , args[1],args[2],args[3], args[4], args[5]),
         SyscallCode::Ppoll => async_syscall!(sys_ppoll, args[0], args[1], args[2], args[3]),
         // SyscallCode::Readlinkat
-        SyscallCode::Newfstatat => async_syscall!(
-            sys_newfstatat,
-            args[0] as FdNum,
-            args[1],
-            args[2],
-            args[3] as u32
-        ),
+        SyscallCode::Newfstatat => async_syscall!(sys_newfstatat, args[0] as FdNum, args[1], args[2], args[3] as u32),
         SyscallCode::Fstat => syscall!(sys_fstat, args[0] as FdNum, args[1]),
         // SyscallCode::Sync
         SyscallCode::Fsync => async_syscall!(sys_fsync, args[0] as FdNum),
-        SyscallCode::Utimensat => async_syscall!(
-            sys_utimensat,
-            args[0] as FdNum,
-            args[1],
-            args[2],
-            args[3] as u32
-        ),
+        SyscallCode::Utimensat => async_syscall!(sys_utimensat, args[0] as FdNum, args[1], args[2], args[3] as u32),
         SyscallCode::Exit => syscall!(sys_exit, args[0] as i8),
         SyscallCode::ExitGroup => syscall!(sys_exit_group, args[0] as i8),
         SyscallCode::SetTidAddress => syscall!(sys_set_tid_address, args[0]),
-        SyscallCode::Futex => async_syscall!(
-            sys_futex,
-            args[0],
-            args[1] as i32,
-            args[2] as u32,
-            args[3],
-            args[4],
-            args[5]
-        ),
+        SyscallCode::Futex => async_syscall!(sys_futex, args[0], args[1] as i32, args[2] as u32, args[3], args[4], args[5]),
+        SyscallCode::GetRobustList => syscall!(sys_get_robust_list, args[0], args[1], args[2]),
+        SyscallCode::SetRobustList => syscall!(sys_set_robust_list, args[0], args[1]),
         SyscallCode::Nanosleep => async_syscall!(sys_nanosleep, args[0], args[1]),
         // SyscallCode::Setitimer
         SyscallCode::ClockGettime => syscall!(sys_clock_gettime, args[0], args[1]),
@@ -282,9 +207,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Tkill => syscall!(sys_tkill, args[0], args[1]),
         SyscallCode::RtSigsupend => async_syscall!(sys_rt_sigsuspend, args[0]),
         SyscallCode::RtSigaction => syscall!(sys_rt_sigaction, args[0] as i32, args[1], args[2]),
-        SyscallCode::RtSigprocmask => {
-            syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2])
-        }
+        SyscallCode::RtSigprocmask => syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2]),
         SyscallCode::RtSigtimedwait => syscall!(sys_rt_sigtimedwait, args[0], args[1], args[2]),
         SyscallCode::RtSigreturn => syscall!(sys_rt_sigreturn),
         SyscallCode::Times => syscall!(sys_times, args[0]),
@@ -304,6 +227,9 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         // SyscallCode::Shmget
         // SyscallCode::Shmctl
         // SyscallCode::Shmat
+        SyscallCode::Brk => syscall!(sys_brk, args[0]),
+        SyscallCode::Munmap => syscall!(sys_munmap, args[0], args[1]),
+        SyscallCode::Clone => syscall!(sys_clone, args[0] as u32, args[1], args[2], args[3], args[4]),
         SyscallCode::Socket => syscall!(sys_socket, args[0] as u32, args[1] as u32, args[2] as u32),
         SyscallCode::Bind => syscall!(sys_bind, args[0] as u32, args[1], args[2] as u32),
         SyscallCode::Listen => syscall!(sys_listen, args[0] as u32, args[1] as u32),
@@ -359,27 +285,12 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
             args[4]
         ),
         SyscallCode::Execve => async_syscall!(sys_execve, args[0], args[1], args[2]),
-        SyscallCode::Mmap => syscall!(
-            sys_mmap,
-            args[0],
-            args[1],
-            args[2] as u32,
-            args[3] as u32,
-            args[4] as FdNum,
-            args[5]
-        ),
+        SyscallCode::Mmap => syscall!(sys_mmap, args[0], args[1], args[2] as u32, args[3] as u32, args[4] as FdNum, args[5]),
         SyscallCode::Mprotect => syscall!(sys_mprotect, args[0], args[1], args[2] as u32),
         // SyscallCode::Madvise
         SyscallCode::Wait4 => async_syscall!(sys_wait4, args[0], args[1], args[2] as u32, args[3]),
         SyscallCode::Prlimit => syscall!(sys_prlimit, args[0], args[1] as u32, args[2], args[3]),
-        SyscallCode::Renameat2 => async_syscall!(
-            sys_renameat2,
-            args[0] as FdNum,
-            args[1],
-            args[2] as FdNum,
-            args[3],
-            args[4] as u32
-        ),
+        SyscallCode::Renameat2 => async_syscall!(sys_renameat2, args[0] as FdNum, args[1], args[2] as FdNum, args[3], args[4] as u32),
         // SyscallCode::Seccomp
         // SyscallCode::Getrandom
         // SyscallCode::MemfdCreate

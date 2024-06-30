@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use core::future::Future;
 use core::ops::Deref;
 use core::pin::Pin;
-use core::task::{Context, Poll};
+use core::task::{Context, Poll, Waker};
 use futures::future::err;
 use log::info;
 use managed::ManagedSlice;
@@ -128,92 +128,27 @@ impl File for TcpSocket {
     }
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
-        let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        let mut inner = self.file_data.inner.lock().await;
-        let count = inode.read(buf, inner.pos).await?;
-        inner.pos += count;
-        Ok(count)
+        todo!()
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
-        let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        let mut inner = self.file_data.inner.lock().await;
-        let count = inode.write(buf, inner.pos).await?;
-        inner.pos += count;
-        Ok(count)
+        todo!()
     }
 
-    async fn truncate(&self, size: isize) -> SyscallResult {
-        let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        inode.truncate(size).await?;
-        Ok(())
-    }
-    async fn sync(&self) -> SyscallResult {
-        let inode = self.file_data.inode.as_ref().unwrap();
-        inode.sync().await?;
-        Ok(())
-    }
-    async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
-        let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        let mut inner = self.file_data.inner.lock().await;
-        inner.pos = match seek {
-            Seek::Set(offset) => {
-                if offset < 0 {
-                    return Err(EINVAL);
-                }
-                offset
-            }
-            Seek::Cur(offset) => match inner.pos.checked_add(offset) {
-                Some(new_pos) => new_pos,
-                None => return Err(if offset < 0 { EINVAL } else { Errno::EOVERFLOW }),
-            },
-            Seek::End(offset) => {
-                let size = self
-                    .file_data
-                    .inode
-                    .as_ref()
-                    .unwrap()
-                    .metadata()
-                    .inner
-                    .lock()
-                    .size;
-                match size.checked_add(offset) {
-                    Some(new_pos) => new_pos,
-                    None => return Err(if offset < 0 { EINVAL } else { Errno::EOVERFLOW }),
-                }
-            }
-        };
-        Ok(inner.pos)
+    fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        todo!()
     }
 
-    async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
-        let _lock = self.metadata().prw_lock.lock().await;
-        let old = self.seek(Seek::Cur(0)).await?;
-        self.seek(Seek::Set(offset)).await?;
-        let ret = self.read(buf).await;
-        self.seek(Seek::Set(old)).await?;
-        ret
+    fn pollout(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        todo!()
     }
 
-    async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
-        let _lock = self.metadata().prw_lock.lock().await;
-        let old = self.seek(Seek::Cur(0)).await?;
-        self.seek(Seek::Set(offset)).await?;
-        let ret = self.write(buf).await;
-        self.seek(Seek::Set(old)).await?;
-        ret
+    async fn socket_read(&self, buf: &mut [u8], flags: OpenFlags) -> SyscallResult<isize> {
+        todo!()
+    }
+
+    async fn socket_write(&self, buf: &mut [u8], flags: OpenFlags) -> SyscallResult<isize> {
+        todo!()
     }
 }
 #[async_trait]

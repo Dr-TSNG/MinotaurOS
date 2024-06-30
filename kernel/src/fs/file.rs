@@ -1,5 +1,5 @@
 use crate::arch::PAGE_SIZE;
-use crate::fs::ffi::InodeMode;
+use crate::fs::ffi::{InodeMode, OpenFlags};
 use crate::fs::inode::Inode;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::AsyncMutex;
@@ -104,6 +104,13 @@ pub trait File: Send + Sync {
 
     fn pollout(&self, waker: Option<Waker>) -> SyscallResult<bool> {
         Ok(true)
+    }
+
+    async fn socket_read(&self,buf: &mut[u8],flags: OpenFlags) -> SyscallResult<isize> {
+        return Err(Errno::EINVAL)
+    }
+    async fn socket_write(&self,buf: &mut[u8],flags: OpenFlags) -> SyscallResult<isize> {
+        return Err(Errno::EINVAL)
     }
 }
 

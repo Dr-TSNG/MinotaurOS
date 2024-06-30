@@ -291,8 +291,8 @@ impl Process {
             .add(new_thread.tid.0, Arc::downgrade(&new_thread));
         spawn_user_thread(new_thread);
         info!(
-            "[fork_process] New process (pid = {}) created from parent process (pid = {}, tid = {}), flags {:?}",
-            new_pid.0, self.pid.0, current_thread().tid.0, flags,
+            "[fork_process] New process (pid = {}) created, flags {:?}",
+            new_pid.0, flags,
         );
         Ok(new_pid.0)
     }
@@ -360,20 +360,20 @@ impl Process {
             .add(new_tid, Arc::downgrade(&new_thread));
         spawn_user_thread(new_thread);
         info!(
-            "[clone_thread] New thread (tid = {}) for process (pid = {}) created, flags {:?}",
-            new_tid, self.pid.0, flags,
+            "[clone_thread] New thread (tid = {}) created, flags {:?}, ptid {:#x}, ctid {:#x}",
+            new_tid, flags, ptid, ctid,
         );
         Ok(new_tid)
     }
 
     pub fn terminate(&self, exit_code: i8) {
-        self.inner.lock().apply_mut(|inner| {
-            inner.exit_code = Some(exit_code);
-            inner.threads.iter().for_each(|(_, thread)| {
-                if let Some(thread) = thread.upgrade() {
-                    thread.terminate(exit_code);
-                }
-            });
+        let mut proc_inner = self.inner.lock();
+        proc_inner.exit_code = Some(exit_code);
+        proc_inner.threads.retain(|_, thread| {
+            if let Some(thread) = thread.upgrade() {
+                thread.inner().exit_code = Some(exit_code);
+            }
+            false
         });
     }
 

@@ -1,5 +1,6 @@
 use crate::fs::ffi::InodeMode;
 use crate::fs::file::{CharacterFile, DirFile, File, FileMeta, RegularFile};
+use crate::fs::file_system::FileSystem;
 use crate::fs::page_cache::PageCache;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
@@ -178,6 +179,9 @@ pub(super) trait InodeInternal {
 pub trait Inode: DowncastSync + InodeInternal {
     /// 获取 Inode 元数据
     fn metadata(&self) -> &InodeMeta;
+
+    /// 获取文件系统
+    fn file_system(&self) -> Weak<dyn FileSystem>;
 }
 impl_downcast!(sync Inode);
 
@@ -236,6 +240,9 @@ impl dyn Inode {
     }
 
     pub async fn lookup_name(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+        if self.metadata().mode != InodeMode::IFDIR {
+            return Err(Errno::ENOTDIR);
+        }
         let mut inner = self.metadata().inner.lock();
         if !inner.children_loaded {
             self.clone().load_children(&mut inner).await?;

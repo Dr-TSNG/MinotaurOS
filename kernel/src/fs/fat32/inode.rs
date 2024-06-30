@@ -2,6 +2,7 @@ use crate::fs::fat32::dir::{FAT32Dirent, FileAttr};
 use crate::fs::fat32::fat::FATEnt;
 use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::ffi::InodeMode;
+use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeChild, InodeInternal, InodeMeta, InodeMetaInner};
 use crate::fs::page_cache::PageCache;
 use crate::result::{Errno, SyscallResult};
@@ -111,6 +112,10 @@ impl FAT32Inode {
 impl Inode for FAT32Inode {
     fn metadata(&self) -> &InodeMeta {
         &self.metadata
+    }
+
+    fn file_system(&self) -> Weak<dyn FileSystem> {
+        self.fs.clone()
     }
 }
 

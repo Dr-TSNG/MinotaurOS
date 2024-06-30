@@ -333,6 +333,7 @@ impl AddressSpace {
         self.map_region(brk);
         let prev = self.brk;
         self.brk = addr;
+        unsafe { self.activate(); }
         Ok(prev.0)
     }
 
@@ -383,6 +384,7 @@ impl AddressSpace {
             None => LazyRegion::new_free(metadata),
         };
         self.map_region(region);
+        unsafe { self.activate(); }
         Ok(VirtAddr::from(start).0)
     }
 
@@ -400,6 +402,7 @@ impl AddressSpace {
         for vpn in regions {
             self.unmap_region(vpn);
         }
+        unsafe { self.activate(); }
         Ok(())
     }
 
@@ -411,6 +414,7 @@ impl AddressSpace {
             region.set_perms(perms);
             region.map(self.root_pt, true);
         }
+        unsafe { self.activate(); }
         Ok(())
     }
 }

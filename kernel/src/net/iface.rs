@@ -10,7 +10,12 @@ use smoltcp::wire::{EthernetAddress, IpCidr};
 
 use crate::net::netaddress::IpAddr;
 use crate::sched::time::current_time;
+use crate::strace;
 use crate::sync::mutex::Mutex;
+
+pub fn init() {
+    NET_INTERFACE.init();
+}
 
 pub static NET_INTERFACE: NetInterface = NetInterface::new();
 

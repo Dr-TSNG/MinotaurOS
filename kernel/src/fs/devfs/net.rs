@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::sync::Weak;
 use alloc::string::ToString;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -9,13 +10,15 @@ use spin::Mutex;
 use crate::fs::devfs::DevFileSystem;
 use crate::fs::ffi::InodeMode;
 use crate::fs::file::{File, FileMeta, FileMetaInner};
+use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta, InodeMetaInner};
 use crate::result::SyscallResult;
 use crate::sched::ffi::TimeSpec;
 
 pub struct NetInode {
     metadata: InodeMeta,
-    socket_id: usize, // socket handler
+    socket_id: usize, // socket handler, no use now
+    fs: Weak<DevFileSystem>,
 }
 static INO_POOL: AtomicUsize = AtomicUsize::new(0);
 
@@ -37,6 +40,7 @@ impl NetInode {
                 0,
             ),
             socket_id: 0,
+            fs: Default::default(),
         })
     }
 }
@@ -46,21 +50,17 @@ impl NetInode {
 ///
 #[async_trait]
 impl InodeInternal for NetInode {
-    async fn read_direct(&self, mut buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
-        todo!()
-    }
-    async fn write_direct(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
-        todo!()
-    }
-    async fn truncate_direct(&self, size: isize) -> SyscallResult {
-        todo!()
-    }
+
 }
 
 #[async_trait]
 impl Inode for NetInode {
     fn metadata(&self) -> &InodeMeta {
         &self.metadata
+    }
+
+    fn file_system(&self) -> alloc::sync::Weak<dyn FileSystem> {
+        self.fs.clone()
     }
 }
 

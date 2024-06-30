@@ -11,7 +11,12 @@ pub const TRAMPOLINE_BASE: VirtAddr = VirtAddr(0xFFFF_FFFF_8FFF_E000);
 pub const DYNAMIC_LINKER_BASE: usize = 1 << 37;
 pub const USER_STACK_TOP: VirtAddr = VirtAddr(0xFFFF_FFFF_8000_0000);
 
+#[cfg(debug_assertions)]
+pub const KERNEL_STACK_SIZE: usize = PAGE_SIZE * 256; // 1 MB
+
+#[cfg(not(debug_assertions))]
 pub const KERNEL_STACK_SIZE: usize = PAGE_SIZE * 64; // 256 KB
+
 pub const KERNEL_HEAP_SIZE: usize = PAGE_SIZE * 4096; // 4 MB
 pub const USER_STACK_SIZE: usize = PAGE_SIZE * 16; // 64 KB
 pub const USER_HEAP_SIZE: usize = PAGE_SIZE * 4096; // 4 MB

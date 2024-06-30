@@ -6,7 +6,8 @@ use alloc::vec;
 use async_trait::async_trait;
 use core::future::Future;
 use core::pin::Pin;
-use core::task::{Context, Poll};
+use core::task::{Context, Poll, Waker};
+use core::time::Duration;
 use log::{debug, info, log};
 use managed::{Managed, ManagedSlice};
 
@@ -23,10 +24,14 @@ use xmas_elf::program::Flags;
 use crate::fs::file::{File, FileMeta, Seek};
 use crate::fs::inode::Inode;
 use crate::net::iface::NET_INTERFACE;
+use crate::net::MAX_BUFFER_SIZE;
 use crate::net::socket::Socket;
 use crate::net::socket::{endpoint, SocketAddressV4, SocketType, BUFFER_SIZE};
+use crate::process::thread::event_bus::Event;
+use crate::processor::current_thread;
 use crate::result::Errno::{EAGAIN, EINVAL, ENOBUFS, ENOTCONN, EOPNOTSUPP};
 use crate::result::{Errno, SyscallResult};
+use crate::sched::{sleep_for, yield_now};
 use crate::sync::mutex::Mutex;
 
 pub struct UdpSocket {
@@ -72,94 +77,88 @@ impl File for UdpSocket {
     fn metadata(&self) -> &FileMeta {
         &self.file_data
     }
-
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
-        let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        let mut inner = self.file_data.inner.lock().await;
-        let count = inode.read(buf, inner.pos).await?;
-        inner.pos += count;
-        Ok(count)
+        Err(EINVAL)
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
-        let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        let mut inner = self.file_data.inner.lock().await;
-        let count = inode.write(buf, inner.pos).await?;
-        inner.pos += count;
-        Ok(count)
+        Err(EINVAL)
     }
-
-    async fn truncate(&self, size: isize) -> SyscallResult {
-        let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        inode.truncate(size).await?;
-        Ok(())
-    }
-    async fn sync(&self) -> SyscallResult {
-        let inode = self.file_data.inode.as_ref().unwrap();
-        inode.sync().await?;
-        Ok(())
-    }
-    async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
-        let inode = self.file_data.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        let mut inner = self.file_data.inner.lock().await;
-        inner.pos = match seek {
-            Seek::Set(offset) => {
-                if offset < 0 {
-                    return Err(EINVAL);
+    fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        debug!("[Udp::pollin] {} enter", self.socket_handler);
+        NET_INTERFACE.poll();
+        NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| {
+            if socket.can_recv() {
+                log::info!("[Udp::pollin] {} recv buf have item", self.socket_handler);
+                Ok(true)
+            } else {
+                if let Some(waker) = waker {
+                    socket.register_recv_waker(&waker);
                 }
-                offset
+                Ok(false)
             }
-            Seek::Cur(offset) => match inner.pos.checked_add(offset) {
-                Some(new_pos) => new_pos,
-                None => return Err(if offset < 0 { EINVAL } else { Errno::EOVERFLOW }),
-            },
-            Seek::End(offset) => {
-                let size = self
-                    .file_data
-                    .inode
-                    .as_ref()
-                    .unwrap()
-                    .metadata()
-                    .inner
-                    .lock()
-                    .size;
-                match size.checked_add(offset) {
-                    Some(new_pos) => new_pos,
-                    None => return Err(if offset < 0 { EINVAL } else { Errno::EOVERFLOW }),
+        })
+    }
+
+    fn pollout(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        debug!("[Udp::pollout] {} enter", self.socket_handler);
+        NET_INTERFACE.poll();
+        NET_INTERFACE.handle_udp_socket(self.socket_handler, |socket| {
+            if socket.can_send() {
+                log::info!("[Udp::pollout] {} tx buf have slots", self.socket_handler);
+                Ok(true)
+            } else {
+                if let Some(waker) = waker {
+                    socket.register_send_waker(&waker);
                 }
+                Ok(false)
             }
-        };
-        Ok(inner.pos)
+        })
     }
 
-    async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
-        let _lock = self.metadata().prw_lock.lock().await;
-        let old = self.seek(Seek::Cur(0)).await?;
-        self.seek(Seek::Set(offset)).await?;
-        let ret = self.read(buf).await;
-        self.seek(Seek::Set(old)).await?;
-        ret
+    async fn socket_read(&self, buf: &mut [u8], flags: OpenFlags) -> SyscallResult<isize> {
+        log::info!("[Ucp::read] {} enter", self.socket_handler);
+
+        let future = current_thread().event_bus.suspend_with(
+            Event::KILL_THREAD,
+            UdpRecvFuture::new(self,buf,flags),
+        );
+        match future.await {
+            Ok(len) => {
+                if len> MAX_BUFFER_SIZE/2{
+                    // need to be slow
+                    sleep_for(Duration::from_millis(2)).await;
+                }else{
+                    // for one heart
+                    yield_now().await;
+                }
+                Ok(len as isize)
+            }
+            Err(e) => {Err(e)}
+        }
     }
 
-    async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
-        let _lock = self.metadata().prw_lock.lock().await;
-        let old = self.seek(Seek::Cur(0)).await?;
-        self.seek(Seek::Set(offset)).await?;
-        let ret = self.write(buf).await;
-        self.seek(Seek::Set(old)).await?;
-        ret
+    async fn socket_write(&self, buf: &mut [u8], flags: OpenFlags) -> SyscallResult<isize> {
+        log::info!("[Udp::write] {} enter", self.socket_handler);
+        let future = current_thread().event_bus.suspend_with(
+            Event::KILL_THREAD,
+            UdpSendFuture::new(self,buf,flags),
+        );
+        match future.await {
+            Ok(len) => {
+                if len > MAX_BUFFER_SIZE / 2 {
+                    // need to be slow
+                    sleep_for(Duration::from_millis(2)).await;
+                } else {
+                    // for one heart
+                    yield_now().await;
+                }
+                Ok(len as isize)
+            }
+            Err(e) => {
+                Err(e)
+            }
+        }
     }
 }
 #[async_trait]
