@@ -27,10 +27,11 @@ pub trait ASRegion: Send + Sync {
     /// 将区域取消映射到页表
     fn unmap(&self, root_pt: PageTable);
 
-    /// 调整区域大小
-    ///
-    /// SAFETY: 需要手动调用 `map` 或 `unmap` 来更新页表
-    fn resize(&mut self, new_pages: usize);
+    /// 分割区域
+    fn split(&mut self, start: usize, size: usize) -> Vec<Box<dyn ASRegion>>;
+
+    /// 扩展区域
+    fn extend(&mut self, size: usize);
 
     /// 拷贝区域
     fn fork(&mut self, parent_pt: PageTable) -> Box<dyn ASRegion>;

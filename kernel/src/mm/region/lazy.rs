@@ -54,15 +54,56 @@ impl ASRegion for LazyRegion {
         }
     }
 
-    fn resize(&mut self, new_pages: usize) {
-        if new_pages > self.pages.len() {
-            for _ in 0..new_pages - self.pages.len() {
-                self.pages.push(PageState::Free);
+    fn split(&mut self, start: usize, size: usize) -> Vec<Box<dyn ASRegion>> {
+        assert!(size < self.metadata.pages);
+        assert!(start + size <= self.metadata.pages);
+        let mut regions: Vec<Box<dyn ASRegion>> = vec![];
+        if start != 0 {
+            let mut off = self.pages.split_off(start);
+            if size != 0 {
+                let mid = LazyRegion {
+                    metadata: ASRegionMeta {
+                        start: self.metadata.start + start,
+                        pages: size,
+                        ..self.metadata.clone()
+                    },
+                    pages: off.drain(..size).collect(),
+                };
+                regions.push(Box::new(mid));
             }
+            if !off.is_empty() {
+                let right = LazyRegion {
+                    metadata: ASRegionMeta {
+                        start: self.metadata.start + start + size,
+                        pages: self.metadata.pages - start - size,
+                        ..self.metadata.clone()
+                    },
+                    pages: off,
+                };
+                regions.push(Box::new(right));
+            }
+            self.metadata.pages = start;
         } else {
-            self.pages.truncate(new_pages);
+            let off = self.pages.split_off(size);
+            let right = LazyRegion {
+                metadata: ASRegionMeta {
+                    start: self.metadata.start + size,
+                    pages: self.metadata.pages - size,
+                    ..self.metadata.clone()
+                },
+                pages: off,
+            };
+            regions.push(Box::new(right));
+            self.metadata.pages = size;
         }
-        self.metadata.pages = new_pages;
+        regions
+    }
+
+    fn extend(&mut self, size: usize) {
+        self.metadata.pages += size;
+        for _ in 0..size {
+            self.pages.push(PageState::Free);
+        }
     }
 
     fn fork(&mut self, parent_pt: PageTable) -> Box<dyn ASRegion> {
@@ -101,7 +142,7 @@ impl ASRegion for LazyRegion {
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
         let id = vpn - self.metadata.start;
         let mut temp = PageState::Free;
-        core::mem::swap(&mut temp, &mut self.pages[id.0]);
+        core::mem::swap(&mut temp, &mut self.pages[id]);
         match temp {
             PageState::Free => {
                 temp = PageState::Framed(alloc_user_frames(1)?);
@@ -120,7 +161,7 @@ impl ASRegion for LazyRegion {
             }
         }
         self.map_one(root_pt, &temp, vpn, true);
-        core::mem::swap(&mut temp, &mut self.pages[id.0]);
+        core::mem::swap(&mut temp, &mut self.pages[id]);
         Ok(())
     }
 }
