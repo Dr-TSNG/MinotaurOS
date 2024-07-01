@@ -78,7 +78,10 @@ pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
             return proc_inner.fd_table.put(fd_impl, arg2 as FdNum).map(|fd| fd as usize);
         }
         FcntlCmd::F_GETFD => {
-            let flags = fd_impl.flags & OpenFlags::O_CLOEXEC;
+            let flags = fd_impl.flags;
+            if flags.contains(OpenFlags::O_CLOEXEC){
+                return Ok(1usize);
+            }
             return Ok(flags.bits() as usize);
         }
         FcntlCmd::F_SETFD => {

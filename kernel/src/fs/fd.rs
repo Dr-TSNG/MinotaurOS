@@ -71,6 +71,15 @@ impl FdTable {
         self.table.get(fd).and_then(Option::clone).ok_or(Errno::EBADF)
     }
 
+    /// 获取引用
+    pub fn get_ref(&self, fd: FdNum) -> Option<&FileDescriptor> {
+        if fd > self.table.len() as i32 {
+            None
+        } else {
+            self.table[fd as usize].as_ref()
+        }
+    }
+
     /// 插入一个文件描述符，返回位置
     pub fn put(&mut self, fd_impl: FileDescriptor, start: FdNum) -> SyscallResult<FdNum> {
         let fd = self.find_slot(start as usize);
@@ -107,6 +116,24 @@ impl FdTable {
         self.table[fd] = None;
         Ok(())
     }
+
+    /// 获取一个文件描述符的所有权
+    pub fn take(&mut self, fd: FdNum) -> SyscallResult<Option<FileDescriptor>> {
+        if fd >= self.table.len() as i32 {
+            Ok(None)
+        } else {
+            Ok(self.table[fd as usize].take())
+        }
+    }
+
+    pub fn alloc_fd(&mut self) -> SyscallResult<usize> {
+        if let Some(fd) = self.free_slot() {
+            Ok(fd)
+        } else {
+            self.table.push(None);
+            Ok(self.table.len() - 1)
+        }
+    }
 }
 
 impl FdTable {
@@ -120,6 +147,10 @@ impl FdTable {
             }
         }
         self.table.len()
+    }
+
+    fn free_slot(&self) -> Option<usize> {
+        (0..self.table.len()).find(|fd| self.table[*fd].is_none())
     }
 
     pub fn set_rlimit(&mut self, rlimit: Rlimit) {
