@@ -19,9 +19,9 @@ use managed::ManagedSlice;
 use smoltcp::phy::Medium;
 use smoltcp::socket::tcp;
 use smoltcp::socket::tcp::State;
-use smoltcp::time::Duration;
 use smoltcp::wire::IpEndpoint;
 use smoltcp::{iface::SocketHandle, wire::IpListenEndpoint};
+use core::time::Duration;
 use xmas_elf::program::Flags;
 
 use crate::fs::file::{File, FileMeta, Seek};
@@ -37,7 +37,7 @@ use crate::result::Errno::{EADDRINUSE, EAGAIN, EINVAL, EISCONN, ENOTCONN};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::iomultiplex::IOMultiplexFuture;
 use crate::sched::time::current_time;
-use crate::sched::yield_now;
+use crate::sched::{sleep_for, yield_now};
 use crate::sync::mutex::Mutex;
 
 pub const TCP_MSS_DEFAULT: u32 = 1 << 15;
@@ -127,28 +127,93 @@ impl File for TcpSocket {
         &self.file_data
     }
 
-    async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
-        todo!()
-    }
-
-    async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
-        todo!()
-    }
-
     fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
-        todo!()
+        info!("[Tcp::pollin] {} enter", self.socket_handle);
+        NET_INTERFACE.poll();
+        NET_INTERFACE.handle_tcp_socket(self.socket_handle,|socket|{
+           if socket.can_recv(){
+               log::info!("[Tcp::pollin] {} recv buf have item", self.socket_handle);
+               Ok(true)
+           } else if socket.state() == tcp::State::CloseWait
+               || socket.state() == tcp::State::FinWait2
+               || socket.state() == tcp::State::TimeWait
+               || (self.inner.lock().last_state == tcp::State::Listen
+               && socket.state() == tcp::State::Established)
+               || socket.state() == tcp::State::SynReceived
+           {
+               log::info!("[Tcp::pollin] state become {:?}", socket.state());
+               Ok(true)
+           }else{
+               log::info!("[Tcp::pollin] nothing to read, state {:?}", socket.state());
+               if let Some(waker) = waker {
+                   socket.register_recv_waker(&waker);
+               }
+               Ok(false)
+           }
+        })
     }
 
     fn pollout(&self, waker: Option<Waker>) -> SyscallResult<bool> {
-        todo!()
+        info!("[Tcp::pollout] {} enter", self.socket_handle);
+        NET_INTERFACE.poll();
+        NET_INTERFACE.handle_tcp_socket(self.socket_handle, |socket| {
+            if socket.can_send() {
+                log::info!("[Tcp::pollout] {} tx buf have slots", self.socket_handle);
+                Ok(true)
+            } else {
+                if let Some(waker) = waker {
+                    socket.register_send_waker(&waker);
+                }
+                Ok(false)
+            }
+        })
     }
 
     async fn socket_read(&self, buf: &mut [u8], flags: OpenFlags) -> SyscallResult<isize> {
-        todo!()
+        log::info!("[Tcp::read] {} enter", self.socket_handle);
+
+        let future = current_thread().event_bus.suspend_with(
+            Event::KILL_THREAD,
+            TcpRecvFuture::new(self,buf,flags),
+        );
+        match future.await {
+            Ok(len) => {
+                if len>MAX_BUFFER_SIZE/2{
+                    sleep_for(Duration::from_millis(2)).await;
+
+                }else{
+                    yield_now().await;
+                }
+                Ok(len as isize)
+            }
+            Err(e) => {
+                Err(e)
+            }
+        }
+
     }
 
-    async fn socket_write(&self, buf: &mut [u8], flags: OpenFlags) -> SyscallResult<isize> {
-        todo!()
+    async fn socket_write(&self, buf: &[u8], flags: OpenFlags) -> SyscallResult<isize> {
+        log::info!("[Tcp::write] {} enter", self.socket_handle);
+
+        let future = current_thread().event_bus.suspend_with(
+            Event::KILL_THREAD,
+            TcpSendFuture::new(self,buf,flags),
+        );
+        match future.await {
+            Ok(len) => {
+                if len>MAX_BUFFER_SIZE/2{
+                    sleep_for(Duration::from_millis(2)).await;
+
+                }else{
+                    yield_now().await;
+                }
+                Ok(len as isize)
+            }
+            Err(e) => {
+                Err(e)
+            }
+        }
     }
 }
 #[async_trait]

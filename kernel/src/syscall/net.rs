@@ -121,7 +121,7 @@ pub async fn sys_sendto(
         .ok_or(Errno::ENOTSOCK)?;
     info!("[sys_sendto] get socket sockfd: {}", sockfd);
     let len = match socket.socket_type() {
-        SocketType::SOCK_STREAM => socketfile.file.write(buf).await?,
+        SocketType::SOCK_STREAM => socketfile.file.socket_write(buf,socketfile.flags).await?,
         SocketType::SOCK_DGRAM => {
             info!("[sys_sendto] socket is udp");
             // 在此处检查 dest_addr到addrlen长度是否用户可读
@@ -133,7 +133,7 @@ pub async fn sys_sendto(
             let dest_addr =
                 unsafe { core::slice::from_raw_parts(dest_addr as *const u8, addrlen as usize) };
             socket.connect(dest_addr).await?;
-            socketfile.file.write(buf).await?
+            socketfile.file.socket_write(buf,socketfile.flags).await?
         }
         _ => todo!(),
     };
@@ -166,7 +166,7 @@ pub async fn sys_recvfrom(
             Ok(len as usize)
         }
         SocketType::SOCK_DGRAM => {
-            let len = socket_file.file.read(buf).await?;
+            let len = socket_file.file.socket_read(buf,socket_file.flags).await?;
             if src_addr != 0 {
                 socket.peer_addr(src_addr, addrlen)?;
             }

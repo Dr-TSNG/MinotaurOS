@@ -106,10 +106,10 @@ pub trait File: Send + Sync {
         Ok(true)
     }
 
-    async fn socket_read(&self,buf: &mut[u8],flags: OpenFlags) -> SyscallResult<isize> {
+    async fn socket_read(&self,buf: &mut [u8],flags: OpenFlags) -> SyscallResult<isize> {
         return Err(Errno::EINVAL)
     }
-    async fn socket_write(&self,buf: &mut[u8],flags: OpenFlags) -> SyscallResult<isize> {
+    async fn socket_write(&self,buf: &[u8],flags: OpenFlags) -> SyscallResult<isize> {
         return Err(Errno::EINVAL)
     }
 }

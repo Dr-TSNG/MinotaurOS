@@ -138,7 +138,7 @@ impl File for UdpSocket {
         }
     }
 
-    async fn socket_write(&self, buf: &mut [u8], flags: OpenFlags) -> SyscallResult<isize> {
+    async fn socket_write(&self, buf: &[u8], flags: OpenFlags) -> SyscallResult<isize> {
         log::info!("[Udp::write] {} enter", self.socket_handler);
         let future = current_thread().event_bus.suspend_with(
             Event::KILL_THREAD,
