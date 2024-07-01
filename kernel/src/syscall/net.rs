@@ -25,7 +25,7 @@ const SO_RCVBUF: u32 = 8;
 const SO_KEEPALIVE: u32 = 9;
 
 pub fn sys_socket(domain: u32, socket_type: u32, protocol: u32) -> SyscallResult<usize> {
-    let sockfd = <dyn Socket>::alloc(domain, socket_type).unwrap();
+    let sockfd = <dyn Socket>::alloc(domain, socket_type)?;
     info!("[sys_socket] new sockfd: {}", sockfd);
     Ok(sockfd)
 }
