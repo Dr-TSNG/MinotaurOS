@@ -1,5 +1,5 @@
-use crate::arch::{PhysAddr, VirtAddr, PAGE_SIZE};
 use lazy_static::lazy_static;
+use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 
 pub const MAX_HARTS: usize = 4;
 
@@ -23,7 +23,7 @@ pub const USER_HEAP_SIZE: usize = PAGE_SIZE * 4096; // 4 MB
 
 pub const MAX_FD_NUM: usize = 1024;
 
-extern "C" {
+extern {
     fn sbss();
     fn ebss();
     fn ekernel();

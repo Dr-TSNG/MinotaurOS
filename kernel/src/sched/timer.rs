@@ -1,10 +1,10 @@
-use crate::sched::time::current_time;
-use crate::sync::mutex::IrqMutex;
 use alloc::collections::BinaryHeap;
 use core::cmp::Reverse;
 use core::task::Waker;
 use core::time::Duration;
 use lazy_static::lazy_static;
+use crate::sched::time::current_time;
+use crate::sync::mutex::IrqMutex;
 
 struct Timer {
     expire: Duration,

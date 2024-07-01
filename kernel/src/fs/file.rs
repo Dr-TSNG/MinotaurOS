@@ -1,13 +1,14 @@
-use crate::arch::PAGE_SIZE;
-use crate::fs::ffi::{InodeMode, OpenFlags};
-use crate::fs::inode::Inode;
-use crate::result::{Errno, SyscallResult};
-use crate::sync::mutex::AsyncMutex;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use async_trait::async_trait;
 use core::task::Waker;
+use async_trait::async_trait;
+use crate::arch::PAGE_SIZE;
+use crate::fs::ffi::InodeMode;
+use crate::fs::inode::Inode;
+use crate::result::{Errno, SyscallResult};
+use crate::sync::mutex::AsyncMutex;
+use crate::fs::ffi::OpenFlags;
 
 pub struct FileMeta {
     pub inode: Option<Arc<dyn Inode>>,
@@ -79,14 +80,7 @@ pub trait File: Send + Sync {
         Err(Errno::ESPIPE)
     }
 
-    async fn ioctl(
-        &self,
-        request: usize,
-        arg2: usize,
-        arg3: usize,
-        arg4: usize,
-        arg5: usize,
-    ) -> SyscallResult<i32> {
+    async fn ioctl(&self, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
         Err(Errno::ENOTTY)
     }
 
@@ -109,6 +103,7 @@ pub trait File: Send + Sync {
     async fn socket_read(&self,buf: &mut [u8],flags: OpenFlags) -> SyscallResult<isize> {
         return Err(Errno::EINVAL)
     }
+
     async fn socket_write(&self,buf: &[u8],flags: OpenFlags) -> SyscallResult<isize> {
         return Err(Errno::EINVAL)
     }
@@ -246,35 +241,17 @@ impl File for RegularFile {
                 }
                 offset
             }
-            Seek::Cur(offset) => match inner.pos.checked_add(offset) {
-                Some(new_pos) => new_pos,
-                None => {
-                    return Err(if offset < 0 {
-                        Errno::EINVAL
-                    } else {
-                        Errno::EOVERFLOW
-                    })
+            Seek::Cur(offset) => {
+                match inner.pos.checked_add(offset) {
+                    Some(new_pos) => new_pos,
+                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
                 }
-            },
+            }
             Seek::End(offset) => {
-                let size = self
-                    .metadata
-                    .inode
-                    .as_ref()
-                    .unwrap()
-                    .metadata()
-                    .inner
-                    .lock()
-                    .size;
+                let size = self.metadata.inode.as_ref().unwrap().metadata().inner.lock().size;
                 match size.checked_add(offset) {
                     Some(new_pos) => new_pos,
-                    None => {
-                        return Err(if offset < 0 {
-                            Errno::EINVAL
-                        } else {
-                            Errno::EOVERFLOW
-                        })
-                    }
+                    None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
                 }
             }
         };

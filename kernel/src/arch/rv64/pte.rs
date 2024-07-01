@@ -1,5 +1,5 @@
-use super::address::PhysPageNum;
 use bitflags::*;
+use super::address::PhysPageNum;
 
 bitflags! {
     pub struct PTEFlags: u8 {

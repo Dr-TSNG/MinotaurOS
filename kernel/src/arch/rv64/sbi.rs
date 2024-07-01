@@ -7,13 +7,7 @@ use sbi_spec::srst::{EID_SRST, RESET_REASON_NO_REASON, RESET_TYPE_SHUTDOWN, SYST
 use sbi_spec::time::{EID_TIME, SET_TIMER};
 
 #[inline(always)]
-fn sbi_call(
-    eid: usize,
-    fid: usize,
-    arg0: usize,
-    arg1: usize,
-    arg2: usize,
-) -> Result<usize, SBIError> {
+fn sbi_call(eid: usize, fid: usize, arg0: usize, arg1: usize, arg2: usize) -> Result<usize, SBIError> {
     let (error, value);
     unsafe {
         asm! {
@@ -46,12 +40,6 @@ pub fn hart_status(hart_id: usize) -> Result<usize, SBIError> {
 }
 
 pub fn shutdown() -> Result<!, SBIError> {
-    sbi_call(
-        EID_SRST,
-        SYSTEM_RESET,
-        RESET_TYPE_SHUTDOWN as usize,
-        RESET_REASON_NO_REASON as usize,
-        0,
-    )?;
+    sbi_call(EID_SRST, SYSTEM_RESET, RESET_TYPE_SHUTDOWN as usize, RESET_REASON_NO_REASON as usize, 0)?;
     unreachable!()
 }

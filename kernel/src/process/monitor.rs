@@ -1,8 +1,8 @@
-use crate::process::thread::Thread;
-use crate::process::{Pid, Process, Tid};
-use crate::sync::mutex::IrqMutex;
 use alloc::collections::BTreeMap;
 use alloc::sync::Weak;
+use crate::process::{Pid, Process, Tid};
+use crate::process::thread::Thread;
+use crate::sync::mutex::IrqMutex;
 
 pub static PROCESS_MONITOR: ProcessMonitor = IrqMutex::new(ProcessMonitorInner(BTreeMap::new()));
 pub static THREAD_MONITOR: ThreadMonitor = IrqMutex::new(ThreadMonitorInner(BTreeMap::new()));
@@ -23,9 +23,9 @@ impl ProcessMonitorInner {
     }
 
     pub fn count(&self) -> usize {
-        self.0
-            .values()
-            .fold(0, |acc, p| if p.strong_count() > 0 { acc + 1 } else { acc })
+        self.0.values().fold(0, |acc, p| {
+            if p.strong_count() > 0 { acc + 1 } else { acc }
+        })
     }
 
     pub fn get(&self, pid: Pid) -> Weak<Process> {

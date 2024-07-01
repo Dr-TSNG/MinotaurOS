@@ -1,21 +1,20 @@
-use crate::arch::{kvaddr_to_paddr, paddr_to_kvaddr, PhysAddr, PhysPageNum, VirtAddr};
-use crate::driver::{BlockDevice, DeviceMeta};
-use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
-use crate::result::{Errno, SyscallResult};
-use crate::sync::mutex::IrqMutex;
-use crate::sync::once::LateInit;
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::ToString;
-use async_trait::async_trait;
 use core::ptr::NonNull;
+use async_trait::async_trait;
 use log::error;
+use crate::driver::{BlockDevice, DeviceMeta};
+use crate::sync::mutex::IrqMutex;
 use virtio_drivers::device::blk::VirtIOBlk;
-use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
 use virtio_drivers::{BufferDirection, Hal};
+use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
+use crate::arch::{kvaddr_to_paddr, paddr_to_kvaddr, PhysAddr, PhysPageNum, VirtAddr};
+use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
+use crate::result::{Errno, SyscallResult};
+use crate::sync::once::LateInit;
 
-static VIRTIO_FRAMES: IrqMutex<BTreeMap<PhysPageNum, HeapFrameTracker>> =
-    IrqMutex::new(BTreeMap::new());
+static VIRTIO_FRAMES: IrqMutex<BTreeMap<PhysPageNum, HeapFrameTracker>> = IrqMutex::new(BTreeMap::new());
 
 pub struct VirtioHal;
 
@@ -28,7 +27,9 @@ unsafe impl Hal for VirtioHal {
         let base_ppn = tracker.ppn;
         VIRTIO_FRAMES.lock().insert(base_ppn, tracker);
         let paddr = PhysAddr::from(base_ppn);
-        let vaddr = unsafe { NonNull::new_unchecked(paddr_to_kvaddr(paddr).as_ptr()) };
+        let vaddr = unsafe {
+            NonNull::new_unchecked(paddr_to_kvaddr(paddr).as_ptr())
+        };
         (paddr.0, vaddr)
     }
 
@@ -42,7 +43,10 @@ unsafe impl Hal for VirtioHal {
         0
     }
 
-    unsafe fn mmio_phys_to_virt(paddr: virtio_drivers::PhysAddr, _size: usize) -> NonNull<u8> {
+    unsafe fn mmio_phys_to_virt(
+        paddr: virtio_drivers::PhysAddr,
+        _size: usize,
+    ) -> NonNull<u8> {
         NonNull::new_unchecked(paddr_to_kvaddr(PhysAddr(paddr)).as_ptr())
     }
 
@@ -57,8 +61,7 @@ unsafe impl Hal for VirtioHal {
         _paddr: virtio_drivers::PhysAddr,
         _buffer: NonNull<[u8]>,
         _direction: BufferDirection,
-    ) {
-    }
+    ) {}
 }
 
 // TODO: Real async support
@@ -80,12 +83,7 @@ impl BlockDevice for VirtIODevice {
 
     fn init(&self) {
         unsafe {
-            let header = self
-                .base_addr
-                .as_ptr()
-                .cast::<VirtIOHeader>()
-                .as_mut()
-                .unwrap();
+            let header = self.base_addr.as_ptr().cast::<VirtIOHeader>().as_mut().unwrap();
             let transport = MmioTransport::new(header.into()).unwrap();
             let block = VirtIOBlk::<VirtioHal, MmioTransport>::new(transport).unwrap();
             self.block.init(IrqMutex::new(block));

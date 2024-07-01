@@ -1,6 +1,6 @@
-use crate::sched::time::current_time;
 use core::cmp::max;
 use core::time::Duration;
+use crate::sched::time::current_time;
 
 pub struct ResourceUsage {
     pub spawn_time: Duration,

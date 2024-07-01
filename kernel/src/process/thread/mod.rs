@@ -1,15 +1,15 @@
-use crate::arch::VirtAddr;
-use crate::process::monitor::THREAD_MONITOR;
-use crate::process::thread::event_bus::{Event, EventBus};
-use crate::process::thread::resource::ResourceUsage;
-use crate::process::thread::tid::TidTracker;
-use crate::process::Process;
-use crate::signal::ffi::Signal;
-use crate::signal::SignalController;
-use crate::trap::context::TrapContext;
 use alloc::sync::Arc;
 use core::cell::SyncUnsafeCell;
 use log::{debug, info};
+use crate::arch::VirtAddr;
+use crate::process::monitor::THREAD_MONITOR;
+use crate::process::Process;
+use crate::process::thread::event_bus::{Event, EventBus};
+use crate::process::thread::resource::ResourceUsage;
+use crate::process::thread::tid::TidTracker;
+use crate::signal::ffi::Signal;
+use crate::signal::SignalController;
+use crate::trap::context::TrapContext;
 
 pub mod event_bus;
 pub mod resource;
@@ -88,13 +88,7 @@ impl Thread {
 
     pub fn on_exit(self: Arc<Self>) {
         if let Some(tid_address) = self.inner().tid_address.clear {
-            if let Ok(buf) = self
-                .process
-                .inner
-                .lock()
-                .addr_space
-                .user_slice_w(tid_address, 4)
-            {
+            if let Ok(buf) = self.process.inner.lock().addr_space.user_slice_w(tid_address, 4) {
                 buf.copy_from_slice(&0u32.to_ne_bytes());
             }
             debug!("[futex] Wake up clear tid address {:?}", tid_address);

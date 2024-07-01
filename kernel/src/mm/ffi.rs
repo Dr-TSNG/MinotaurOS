@@ -1,5 +1,5 @@
-use crate::mm::addr_space::ASPerms;
 use bitflags::bitflags;
+use crate::mm::addr_space::ASPerms;
 
 bitflags! {
     pub struct MapFlags: u32 {
@@ -8,7 +8,7 @@ bitflags! {
         const MAP_FIXED   = 0x10;
         const MAP_ANONYMOUS = 0x20;
     }
-
+    
     pub struct MapProt: u32 {
         const PROT_READ  = 0x1;
         const PROT_WRITE = 0x2;
@@ -29,5 +29,5 @@ impl From<MapProt> for ASPerms {
             perms |= ASPerms::X;
         }
         perms
-    }
+    }    
 }

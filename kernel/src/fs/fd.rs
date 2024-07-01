@@ -50,8 +50,8 @@ impl FdTable {
         FdTable {
             table,
             rlimit: Rlimit {
-            rlim_cur: MAX_FD_NUM,
-            rlim_max: MAX_FD_NUM},
+                rlim_cur: MAX_FD_NUM,
+                rlim_max: MAX_FD_NUM},
         }
     }
 

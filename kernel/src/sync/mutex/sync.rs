@@ -1,4 +1,3 @@
-use crate::sync::mutex::MutexStrategy;
 use core::cell::UnsafeCell;
 use core::future::poll_fn;
 use core::marker::PhantomData;
@@ -6,6 +5,7 @@ use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll};
 use futures::task::AtomicWaker;
+use crate::sync::mutex::MutexStrategy;
 
 pub struct AsyncMutex<T: ?Sized, S: MutexStrategy> {
     _marker: PhantomData<S>,
@@ -47,11 +47,7 @@ impl<T, S: MutexStrategy> AsyncMutex<T, S> {
 
     fn poll_lock(&self, cx: &Context<'_>) -> Poll<AsyncMutexGuard<T, S>> {
         let guard = S::new_guard();
-        if self
-            .lock
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
-        {
+        if self.lock.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
             return Poll::Ready(AsyncMutexGuard {
                 mutex: self,
                 _guard: guard,
@@ -60,11 +56,7 @@ impl<T, S: MutexStrategy> AsyncMutex<T, S> {
 
         self.waker.register(cx.waker());
 
-        if self
-            .lock
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_ok()
-        {
+        if self.lock.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
             return Poll::Ready(AsyncMutexGuard {
                 mutex: self,
                 _guard: guard,
@@ -74,6 +66,7 @@ impl<T, S: MutexStrategy> AsyncMutex<T, S> {
         Poll::Pending
     }
 }
+
 
 impl<T: ?Sized + Default, S: MutexStrategy> Default for AsyncMutex<T, S> {
     fn default() -> Self {

@@ -1,10 +1,10 @@
-use crate::sched::ffi::TimeSpec;
-use crate::sched::time::current_time;
 use alloc::collections::VecDeque;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use bitflags::bitflags;
 use time::{Date, Month, Time};
+use crate::sched::ffi::TimeSpec;
+use crate::sched::time::current_time;
 
 /// 目录项偏移
 #[allow(unused)]
@@ -101,12 +101,9 @@ enum LongDirOffset {
 
 impl LongDirOffset {
     fn name(value: &[u8]) -> String {
-        let str1: [u16; 5] =
-            bytemuck::pod_read_unaligned(Self::split(value, Self::Name1, Self::Attr));
-        let str2: [u16; 6] =
-            bytemuck::pod_read_unaligned(Self::split(value, Self::Name2, Self::FstClusLO));
-        let str3: [u16; 2] =
-            bytemuck::pod_read_unaligned(Self::split(value, Self::Name3, Self::End));
+        let str1: [u16; 5] = bytemuck::pod_read_unaligned(Self::split(value, Self::Name1, Self::Attr));
+        let str2: [u16; 6] = bytemuck::pod_read_unaligned(Self::split(value, Self::Name2, Self::FstClusLO));
+        let str3: [u16; 2] = bytemuck::pod_read_unaligned(Self::split(value, Self::Name3, Self::End));
         let str1 = String::from_utf16_lossy(&str1);
         let str2 = String::from_utf16_lossy(&str2);
         let str3 = String::from_utf16_lossy(&str3);
@@ -211,10 +208,7 @@ impl FAT32Dirent {
     pub fn to_dirs(&self) -> VecDeque<[u8; 32]> {
         let short_name = self.short_name();
         let checksum = short_name.iter().fold(0u8, |sum, c| {
-            (sum & 1)
-                .wrapping_shl(7)
-                .wrapping_add(sum >> 1)
-                .wrapping_add(*c)
+            (sum & 1).wrapping_shl(7).wrapping_add(sum >> 1).wrapping_add(*c)
         });
         let mut dirs = VecDeque::new();
         let mut name: Vec<u16> = self.name.encode_utf16().collect();
@@ -241,7 +235,8 @@ impl FAT32Dirent {
         dirs[0][LongDirOffset::Ord as usize] |= LAST_LONG_ENTRY;
 
         let mut short_dir = [0; 32];
-        short_dir[DirOffset::Name as usize..DirOffset::Attr as usize].copy_from_slice(&short_name);
+        short_dir[DirOffset::Name as usize..DirOffset::Attr as usize]
+            .copy_from_slice(&short_name);
         short_dir[DirOffset::Attr as usize] = self.attr.bits();
         let hi = (self.cluster >> 16) as u16;
         let lo = self.cluster as u16;

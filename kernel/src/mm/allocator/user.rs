@@ -1,13 +1,13 @@
-use crate::arch::{kvaddr_to_paddr, PhysPageNum, PAGE_SIZE};
+use alloc::vec::Vec;
+use core::cmp::max;
+use bitvec_rs::BitVec;
+use log::warn;
+use crate::arch::{kvaddr_to_paddr, PAGE_SIZE, PhysPageNum};
 use crate::config::LINKAGE_EKERNEL;
 use crate::driver::GLOBAL_MAPPINGS;
 use crate::println;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::IrqMutex;
-use alloc::vec::Vec;
-use bitvec_rs::BitVec;
-use core::cmp::max;
-use log::warn;
 
 static USER_ALLOCATOR: IrqMutex<UserFrameAllocator> = IrqMutex::new(UserFrameAllocator::new());
 
@@ -50,10 +50,7 @@ impl UserFrameAllocator {
                 return;
             }
         }
-        panic!(
-            "Dealloc user frame {:?} for {} pages failed",
-            tracker.ppn, tracker.pages
-        );
+        panic!("Dealloc user frame {:?} for {} pages failed", tracker.ppn, tracker.pages);
     }
 }
 
@@ -67,12 +64,7 @@ struct Segment {
 impl Segment {
     fn new(start: PhysPageNum, end: PhysPageNum) -> Self {
         let bitmap = BitVec::from_elem(end.0 - start.0, false);
-        Self {
-            start,
-            end,
-            bitmap,
-            cur: end.0 - start.0,
-        }
+        Self { start, end, bitmap, cur: end.0 - start.0 }
     }
 
     fn alloc(&mut self, pages: usize) -> Option<UserFrameTracker> {
@@ -126,10 +118,7 @@ pub fn alloc_user_frames(pages: usize) -> SyscallResult<UserFrameTracker> {
 }
 
 pub fn free_user_memory() -> usize {
-    let pages = USER_ALLOCATOR
-        .lock()
-        .0
-        .iter()
+    let pages = USER_ALLOCATOR.lock().0.iter()
         .flat_map(|seg| seg.bitmap.as_bytes())
         .fold(0, |acc, byte| acc + byte.count_zeros());
     pages as usize * PAGE_SIZE

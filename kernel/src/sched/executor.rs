@@ -1,11 +1,11 @@
+use alloc::collections::VecDeque;
+use async_task::{Runnable, ScheduleInfo, Task, WithInfo};
+use core::future::Future;
 use crate::driver::BOARD_INFO;
 use crate::process::monitor::PROCESS_MONITOR;
 use crate::processor::hart::local_hart;
 use crate::sched::timer::query_timer;
 use crate::sync::mutex::IrqMutex;
-use alloc::collections::VecDeque;
-use async_task::{Runnable, ScheduleInfo, Task, WithInfo};
-use core::future::Future;
 
 struct TaskQueue {
     queue: IrqMutex<VecDeque<Runnable>>,
@@ -34,9 +34,9 @@ impl TaskQueue {
 static TASK_QUEUE: TaskQueue = TaskQueue::new();
 
 pub fn spawn<F>(future: F) -> (Runnable, Task<F::Output>)
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
 {
     let schedule = move |runnable: Runnable, info: ScheduleInfo| {
         if info.woken_while_running {

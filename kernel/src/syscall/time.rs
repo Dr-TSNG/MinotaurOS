@@ -8,30 +8,21 @@ use crate::arch::VirtAddr;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::{TimeSpec, CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID, TMS};
+use crate::sched::ffi::{CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID, TimeSpec, TMS};
 use crate::sched::sleep_for;
 use crate::sched::time::{current_time, GLOBAL_CLOCK};
 
 pub async fn sys_nanosleep(req: usize, _rem: usize) -> SyscallResult<usize> {
-    let user_buf = current_process()
-        .inner
-        .lock()
-        .addr_space
-        .user_slice_r(VirtAddr(req), size_of::<TimeSpec>())?;
+    let user_buf = current_process().inner.lock().addr_space.user_slice_r(VirtAddr(req), size_of::<TimeSpec>())?;
     let ts = TimeSpec::ref_from(user_buf).unwrap();
     let duration = Duration::from(*ts);
-    current_thread()
-        .event_bus
-        .suspend_with(Event::all(), pin!(sleep_for(duration)))
-        .await?;
+    current_thread().event_bus.suspend_with(Event::all(), pin!(sleep_for(duration))).await?;
     Ok(0)
 }
 
 pub fn sys_clock_gettime(clock_id: usize, buf: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let user_buf = proc_inner
-        .addr_space
-        .user_slice_w(VirtAddr(buf), size_of::<TimeSpec>())?;
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<TimeSpec>())?;
     match clock_id {
         CLOCK_PROCESS_CPUTIME_ID => {
             let mut time = Duration::ZERO;
@@ -61,11 +52,7 @@ pub fn sys_clock_gettime(clock_id: usize, buf: usize) -> SyscallResult<usize> {
 }
 
 pub fn sys_times(buf: usize) -> SyscallResult<usize> {
-    let user_buf = current_process()
-        .inner
-        .lock()
-        .addr_space
-        .user_slice_w(VirtAddr(buf), size_of::<TMS>())?;
+    let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(buf), size_of::<TMS>())?;
     let now = current_time();
     let rusage = &current_thread().inner().rusage;
     let tms = TMS {
@@ -82,9 +69,7 @@ pub fn sys_times(buf: usize) -> SyscallResult<usize> {
 pub fn sys_gettimeofday(tv: usize, _tz: usize) -> SyscallResult<usize> {
     let time = TimeSpec::from(current_time());
     let proc_inner = current_process().inner.lock();
-    let user_tv = proc_inner
-        .addr_space
-        .user_slice_w(VirtAddr(tv), size_of::<TimeSpec>())?;
+    let user_tv = proc_inner.addr_space.user_slice_w(VirtAddr(tv), size_of::<TimeSpec>())?;
     user_tv.copy_from_slice(time.as_bytes());
     Ok(0)
 }

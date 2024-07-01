@@ -1,7 +1,7 @@
-use crate::fs::fat32::bpb::BPBOffset;
-use crate::fs::fat32::BLOCK_SIZE;
-use crate::result::{Errno, SyscallResult};
 use log::error;
+use crate::fs::fat32::BLOCK_SIZE;
+use crate::fs::fat32::bpb::BPBOffset;
+use crate::result::{Errno, SyscallResult};
 
 #[derive(Debug)]
 pub struct FAT32Meta {
@@ -102,7 +102,7 @@ impl FAT32Meta {
     pub fn ent_offset_for_cluster(&self, cluster: usize) -> usize {
         cluster * 4 % self.bytes_per_sector
     }
-
+    
     /// 根据簇号获取数据的起始扇区号
     pub fn data_sector_for_cluster(&self, cluster: usize) -> usize {
         self.data_offset + (cluster - 2) * self.sectors_per_cluster

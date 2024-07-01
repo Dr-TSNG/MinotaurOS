@@ -1,9 +1,9 @@
-use crate::arch::VirtAddr;
-use crate::driver::IrqDevice;
-use crate::sync::mutex::IrqMutex;
 use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use log::warn;
+use crate::arch::VirtAddr;
+use crate::driver::IrqDevice;
+use crate::sync::mutex::IrqMutex;
 
 pub struct PLIC {
     base_addr: VirtAddr,
@@ -12,10 +12,7 @@ pub struct PLIC {
 
 impl PLIC {
     pub(super) fn new(base_addr: VirtAddr) -> Self {
-        Self {
-            base_addr,
-            devices: IrqMutex::default(),
-        }
+        Self { base_addr, devices: IrqMutex::default() }
     }
 
     pub(super) fn init(&self, harts: usize) {
@@ -50,9 +47,7 @@ impl PLIC {
     }
 
     fn set_priority(&self, intr_id: usize, priority: u32) {
-        unsafe {
-            self.priority_ptr(intr_id).write_volatile(priority & 7);
-        }
+        unsafe { self.priority_ptr(intr_id).write_volatile(priority & 7); }
     }
 
     fn is_pending(&self, intr_id: usize) -> bool {
@@ -60,9 +55,7 @@ impl PLIC {
     }
 
     fn is_intr_enabled(&self, context_id: usize, intr_id: usize) -> bool {
-        unsafe {
-            ((self.intr_enable_ptr(context_id, intr_id).read_volatile() >> (intr_id % 32)) & 1) == 1
-        }
+        unsafe { ((self.intr_enable_ptr(context_id, intr_id).read_volatile() >> (intr_id % 32)) & 1) == 1 }
     }
 
     fn enable_intr(&self, context_id: usize, intr_id: usize) {
@@ -86,9 +79,7 @@ impl PLIC {
     }
 
     fn set_threshold(&self, context_id: usize, threshold: u32) {
-        unsafe {
-            self.threshold_ptr(context_id).write_volatile(threshold & 7);
-        }
+        unsafe { self.threshold_ptr(context_id).write_volatile(threshold & 7); }
     }
 
     fn claim(&self, context_id: usize) -> usize {
@@ -96,10 +87,7 @@ impl PLIC {
     }
 
     fn complete(&self, context_id: usize, intr_id: usize) {
-        unsafe {
-            self.claim_complete_ptr(context_id)
-                .write_volatile(intr_id as u32);
-        }
+        unsafe { self.claim_complete_ptr(context_id).write_volatile(intr_id as u32); }
     }
 }
 
@@ -109,26 +97,18 @@ impl PLIC {
     }
 
     fn pending_ptr(&self, intr_id: usize) -> *mut u32 {
-        (self.base_addr + 0x1000 + 4 * (intr_id / 32))
-            .as_ptr()
-            .cast()
+        (self.base_addr + 0x1000 + 4 * (intr_id / 32)).as_ptr().cast()
     }
 
     fn intr_enable_ptr(&self, context_id: usize, intr_id: usize) -> *mut u32 {
-        (self.base_addr + 0x2000 + 0x80 * context_id + 4 * (intr_id / 32))
-            .as_ptr()
-            .cast()
+        (self.base_addr + 0x2000 + 0x80 * context_id + 4 * (intr_id / 32)).as_ptr().cast()
     }
 
     fn threshold_ptr(&self, context_id: usize) -> *mut u32 {
-        (self.base_addr + 0x200000 + 0x1000 * context_id)
-            .as_ptr()
-            .cast()
+        (self.base_addr + 0x200000 + 0x1000 * context_id).as_ptr().cast()
     }
 
     fn claim_complete_ptr(&self, context_id: usize) -> *mut u32 {
-        (self.base_addr + 0x200000 + 0x1000 * context_id + 4)
-            .as_ptr()
-            .cast()
+        (self.base_addr + 0x200000 + 0x1000 * context_id + 4).as_ptr().cast()
     }
 }

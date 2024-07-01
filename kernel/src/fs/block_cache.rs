@@ -1,9 +1,9 @@
+use alloc::sync::Arc;
+use lru::LruCache;
 use crate::driver::BlockDevice;
 use crate::result::SyscallResult;
 use crate::sync::block_on;
 use crate::sync::mutex::AsyncMutex;
-use alloc::sync::Arc;
-use lru::LruCache;
 
 /// 异步块缓存
 ///
@@ -35,7 +35,10 @@ impl<const B: usize> Drop for CacheValue<B> {
 
 impl<const B: usize> CacheValue<B> {
     fn new(dirty: bool, data: [u8; B]) -> Self {
-        Self { dirty, data }
+        Self {
+            dirty,
+            data,
+        }
     }
 }
 
@@ -47,16 +50,9 @@ impl<const B: usize> BlockCache<B> {
         }
     }
 
-    pub async fn read_block(
-        &self,
-        block_id: usize,
-        buf: &mut [u8],
-        offset: usize,
-    ) -> SyscallResult {
+    pub async fn read_block(&self, block_id: usize, buf: &mut [u8], offset: usize) -> SyscallResult {
         // 越界检查
-        let copy_end = buf
-            .len()
-            .checked_add(offset)
+        let copy_end = buf.len().checked_add(offset)
             .take_if(|v| *v <= B)
             .expect("Cross boundary");
 
@@ -85,9 +81,7 @@ impl<const B: usize> BlockCache<B> {
 
     pub async fn write_block(&self, block_id: usize, buf: &[u8], offset: usize) -> SyscallResult {
         // 越界检查
-        let copy_end = buf
-            .len()
-            .checked_add(offset)
+        let copy_end = buf.len().checked_add(offset)
             .take_if(|v| *v <= B)
             .expect("Cross boundary");
 
@@ -114,7 +108,7 @@ impl<const B: usize> BlockCache<B> {
         }
         Ok(())
     }
-
+    
     pub async fn sync_all(&self) -> SyscallResult {
         let mut cache = self.cache.lock().await;
         while let Some((block_id, cache)) = cache.pop_lru() {

@@ -1,5 +1,5 @@
 use riscv::register::sstatus;
-use riscv::register::sstatus::{Sstatus, SPP};
+use riscv::register::sstatus::{SPP, Sstatus};
 
 #[derive(Clone, Debug)]
 #[repr(C)]

@@ -1,15 +1,15 @@
 pub mod context;
-mod kernel;
 pub mod user;
+mod kernel;
 
-use crate::trap::context::TrapContext;
 use core::arch::global_asm;
 use riscv::register::stvec;
 use riscv::register::stvec::TrapMode;
+use crate::trap::context::TrapContext;
 
 global_asm!(include_str!("trap.asm"));
 
-extern "C" {
+extern {
     fn __trap_from_kernel();
     fn __trap_from_user();
     fn __restore_to_user(ctx: *mut TrapContext);
