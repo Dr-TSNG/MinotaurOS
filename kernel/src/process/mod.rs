@@ -408,10 +408,3 @@ impl Process {
         });
     }
 }
-
-impl Process {
-    /// We can get whatever we want in the inner by providing a handler
-    pub fn inner_handler<T>(&self, f: impl FnOnce(&mut ProcessInner) -> T) -> T {
-        f(&mut self.inner.lock())
-    }
-}

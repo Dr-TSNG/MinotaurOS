@@ -7,6 +7,7 @@ mod udp;
 mod unix;
 
 pub const MAX_BUFFER_SIZE: usize = 1 << 17;
+type Mutex<T> = crate::sync::mutex::Mutex<T>;
 
 pub use crate::net::socket::listen_endpoint;
 pub use crate::net::socket::Socket;
@@ -18,3 +19,4 @@ pub use crate::net::unix::make_unix_socket_pair;
 pub use iface::NET_INTERFACE;
 pub use socket::SocketTable;
 pub use crate::net::iface::init;
+use crate::sync::mutex::SpinNoIrqLock;

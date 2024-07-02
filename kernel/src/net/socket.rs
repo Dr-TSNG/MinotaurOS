@@ -17,6 +17,7 @@ use crate::processor::current_process;
 use crate::result::Errno::EINVAL;
 use crate::result::{Errno, SyscallResult};
 use bitflags::bitflags;
+use futures::future::ok;
 use log::__private_api::Value;
 use riscv::register::mepc::read;
 use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv6Address};
@@ -307,6 +308,7 @@ impl dyn Socket {
                 if socket_type.contains(SocketType::SOCK_DGRAM) {
                     let socket = UdpSocket::new();
                     let socket = Arc::new(socket);
+                    /*
                     let res: Result<FdNum, Errno> = current_process().inner_handler(|proc| {
                         let fd = proc.fd_table.alloc_fd()?;
                         let fd = fd as FdNum;
@@ -316,6 +318,15 @@ impl dyn Socket {
                         proc.socket_table.insert(fd, socket);
                         Ok(fd)
                     });
+                     */
+                    let mut proc_inner = current_process().inner.lock();
+                    let fd = proc_inner.fd_table.alloc_fd()?;
+                    let fd = fd as FdNum;
+                    proc_inner.fd_table.put(FileDescriptor::new(socket.clone(),flags),fd)
+                        .expect("TODO: panic message");
+                    proc_inner.socket_table.insert(fd,socket);
+                    drop(proc_inner);
+                    let res = Ok(fd);
                     if res.is_err() {
                         Err(res.err().unwrap())
                     } else {
@@ -324,6 +335,7 @@ impl dyn Socket {
                 } else if socket_type.contains(SocketType::SOCK_STREAM) {
                     let socket = TcpSocket::new();
                     let socket = Arc::new(socket);
+                    /*
                     let res: Result<FdNum, Errno> = current_process().inner_handler(|proc| {
                         let fd = proc.fd_table.alloc_fd()?;
                         let fd = fd as FdNum;
@@ -333,6 +345,16 @@ impl dyn Socket {
                         proc.socket_table.insert(fd, socket);
                         Ok(fd)
                     });
+                     */
+                    let mut proc_inner = current_process().inner.lock();
+                    let fd = proc_inner.fd_table.alloc_fd()?;
+                    let fd = fd as FdNum;
+                    proc_inner.fd_table.put(FileDescriptor::new(socket.clone(),flags),fd)
+                        .expect("TODO: panic message");
+                    proc_inner.socket_table.insert(fd,socket);
+                    drop(proc_inner);
+                    let res = Ok(fd);
+
                     if res.is_err() {
                         Err(res.err().unwrap())
                     } else {

@@ -32,7 +32,7 @@ use crate::processor::current_thread;
 use crate::result::Errno::{EAGAIN, EINVAL, ENOBUFS, ENOTCONN, EOPNOTSUPP};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::{sleep_for, yield_now};
-use crate::sync::mutex::Mutex;
+use super::Mutex;
 
 pub struct UdpSocket {
     inner: Mutex<UdpSocketInner>,

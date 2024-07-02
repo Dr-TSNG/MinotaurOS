@@ -38,7 +38,7 @@ use crate::result::{Errno, SyscallResult};
 use crate::sched::iomultiplex::IOMultiplexFuture;
 use crate::sched::time::current_time;
 use crate::sched::{sleep_for, yield_now};
-use crate::sync::mutex::Mutex;
+use super::Mutex;
 
 pub const TCP_MSS_DEFAULT: u32 = 1 << 15;
 pub const TCP_MSS: u32 = if TCP_MSS_DEFAULT > MAX_BUFFER_SIZE as u32 {
@@ -86,14 +86,42 @@ impl TcpSocket {
         }
     }
 
+    pub fn new_with(iple:IpListenEndpoint) -> Self{
+        let tcp_rx_buffer = tcp::SocketBuffer::new(vec![0u8; BUFFER_SIZE]);
+        let tcp_tx_buffer = tcp::SocketBuffer::new(vec![0u8; BUFFER_SIZE]);
+        let socket = tcp::Socket::new(tcp_rx_buffer, tcp_tx_buffer);
+        // 将socket加入interface，返回handler
+        let handler = NET_INTERFACE.add_socket(socket);
+        info!("[TcpSocket::new] new{}", handler);
+        NET_INTERFACE.poll();
+        let port = unsafe { Ports.positive_u32() as u16 };
+        info!("[TcpSocket handle{} : port is {}]", handler, port);
+        let mut file_data = FileMeta::new(None);
+        let net_inode = NetInode::new();
+        file_data.inode = Option::from(net_inode as Arc<dyn Inode>);
+        Self {
+            socket_handle: handler,
+            inner: Mutex::new(TcpInner {
+                local_endpoint: iple,
+                remote_endpoint: None,
+                last_state: tcp::State::Closed,
+                recv_buf_size: BUFFER_SIZE,
+                send_buf_size: BUFFER_SIZE,
+            }),
+            file_data,
+        }
+    }
+
     /// this tcp_socket to connect someone else tcp_socket
     fn tcp_connect(&self, remote_endpoint: IpEndpoint) -> SyscallResult<()> {
-        self.inner.lock().remote_endpoint = Some(remote_endpoint);
-        let local = self.inner.lock().local_endpoint;
+        let mut inner = self.inner.lock();
+        inner.remote_endpoint = Some(remote_endpoint);
+        let local = inner.local_endpoint;
         info!(
             "[Tcp::connect] local: {:?}, remote: {:?}",
             local, remote_endpoint
         );
+        drop(inner);
         NET_INTERFACE.inner_handler(|inner| {
             let socket = inner.sockets_set.get_mut::<tcp::Socket>(self.socket_handle);
             let ret = socket.connect(inner.i_face.context(), remote_endpoint, local);
@@ -204,7 +232,6 @@ impl File for TcpSocket {
             Ok(len) => {
                 if len>MAX_BUFFER_SIZE/2{
                     sleep_for(Duration::from_millis(2)).await;
-
                 }else{
                     yield_now().await;
                 }
@@ -219,15 +246,19 @@ impl File for TcpSocket {
 #[async_trait]
 impl Socket for TcpSocket {
     fn bind(&self, addr: IpListenEndpoint) -> SyscallResult<usize> {
-        info!("[tcp::bind] bind to: {:?}", addr);
+
+        info!("[locked?], {:?}",self.inner.is_locked());
+        info!("[tcp::bind] into tcp::bind");
         self.inner.lock().local_endpoint = addr;
+        info!("[locked?], {:?}",self.inner.is_locked());
+        // info!("[locked?], {}",self.inner.is_locked());
         Ok(0)
     }
 
     async fn connect(&self, addr: &[u8]) -> SyscallResult<usize> {
         let remote_endpoint = endpoint(addr)?;
         // 若不是多核心启动，需要在这里yield ,防止单核心Debug 没有Yeild，这里直接Yield
-        yield_now().await;
+        // yield_now().await;
         self.tcp_connect(remote_endpoint)?;
         loop {
             NET_INTERFACE.poll();
@@ -262,6 +293,7 @@ impl Socket for TcpSocket {
     }
 
     fn listen(&self) -> SyscallResult<usize> {
+        info!("[socket::listen]: enter");
         let local = self.inner.lock().local_endpoint;
         info!(
             "[Tcp::listen] {} listening: {:?}",
@@ -276,39 +308,38 @@ impl Socket for TcpSocket {
     }
 
     async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize> {
+        info!("[sys_accept]: in tcp::accept");
         let proc = current_process().inner.lock();
         let old_file = proc.fd_table.get(socketfd as FdNum).unwrap();
         let old_flags = old_file.flags;
+        drop(proc);
         let peer_addr = self.tcp_accept(old_flags).await?;
         log::info!("[Socket::accept] get peer_addr: {:?}", peer_addr);
         let local = self.local_endpoint().unwrap();
         log::info!("[Socket::accept] new socket try bind to : {:?}", local);
-        let new_socket = TcpSocket::new();
-        new_socket.bind(local.try_into().expect("cannot convert to ListenEndpoint"))?;
+
+        log::info!("[Socket::accept::new] new socket build");
+        let local_ep:IpListenEndpoint = local.try_into().expect("cannot convert to ListenEndpoint");
+        let new_socket = TcpSocket::new_with(local_ep);
+        info!("[locked?], {:?}",new_socket.inner.is_locked());
+        // new_socket.bind(local_ep)?;
         log::info!("[Socket::accept] new socket listen");
         new_socket.listen()?;
         fill_with_endpoint(peer_addr, addr, addrlen)?;
 
         let new_socket = Arc::new(new_socket);
-        current_process().inner_handler(|proc| {
-            let fd = proc.fd_table.alloc_fd()?;
-            let old_file = proc.fd_table.take(socketfd as FdNum).unwrap().unwrap();
-            let old_socket: Option<Arc<dyn Socket>> =
-                proc.socket_table.get_ref(socketfd as FdNum).cloned();
-            // replace old
-            log::debug!("[Socket::accept] replace old sock to new");
-            proc.fd_table.put(
-                FileDescriptor::new(new_socket.clone(), old_file.flags),
-                socketfd as FdNum,
-            );
-            proc.socket_table
-                .insert(socketfd as FdNum, new_socket.clone());
-            // insert old to newfd
-            log::info!("[Socket::accept] insert old sock to newfd: {}", fd);
-            proc.fd_table.put(old_file, fd as FdNum);
-            proc.socket_table.insert(fd as FdNum, old_socket.unwrap());
-            Ok(fd)
-        })
+        let mut proc_inner = current_process().inner.lock();
+        let fd = proc_inner.fd_table.alloc_fd()?;
+        let old_file = proc_inner.fd_table.take(socketfd as FdNum).unwrap().unwrap();
+        let old_socket: Option<Arc<dyn Socket>> =
+            proc_inner.socket_table.get_ref(socketfd as FdNum).cloned();
+        // replace old
+        log::debug!("[Socket::accept] replace old sock to new");
+        proc_inner.fd_table.put(FileDescriptor::new(new_socket.clone(), old_file.flags),
+                                socketfd as FdNum,);
+        proc_inner.socket_table.insert(fd as FdNum,old_socket.unwrap());
+        drop(proc_inner);
+        Ok(fd)
     }
 
     fn set_send_buf_size(&self, size: usize) -> SyscallResult {
@@ -344,7 +375,10 @@ impl Socket for TcpSocket {
     }
 
     fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint> {
-        Ok(self.inner.lock().local_endpoint)
+        let inner = self.inner.lock();
+        let res = inner.local_endpoint.clone();
+        drop(inner);
+        Ok(res)
     }
 
     fn remote_endpoint(&self) -> Option<IpEndpoint> {
