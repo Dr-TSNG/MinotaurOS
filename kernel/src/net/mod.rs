@@ -19,4 +19,3 @@ pub use crate::net::unix::make_unix_socket_pair;
 pub use iface::NET_INTERFACE;
 pub use socket::SocketTable;
 pub use crate::net::iface::init;
-use crate::sync::mutex::SpinNoIrqLock;

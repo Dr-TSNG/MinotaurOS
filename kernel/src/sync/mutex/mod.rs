@@ -53,3 +53,48 @@ impl MutexStrategy for IrqStrategy {
         IrqGuard::new()
     }
 }
+
+pub type SpinNoIrqLock<T> = spin::SpinMutex<T, SpinNoIrq>;
+
+/// SpinNoIrq MutexSupport
+pub struct SpinNoIrq;
+/// Low-level support for mutex(spinlock, sleeplock, etc)
+pub trait MutexSupport {
+    /// Guard data
+    type GuardData;
+    /// Called before lock() & try_lock()
+    fn before_lock() -> Self::GuardData;
+    /// Called when MutexGuard dropping
+    fn after_unlock(_: &mut Self::GuardData);
+}
+
+impl MutexStrategy for SpinNoIrq{
+    type GuardData = SieGuard;
+
+    fn new_guard() -> Self::GuardData {
+        SieGuard::new()
+    }
+}
+
+/// Sie Guard
+pub struct SieGuard(bool);
+
+impl SieGuard {
+    /// Construct a SieGuard
+    pub fn new() -> Self {
+        Self(unsafe {
+            let sie_before = sstatus::read().sie();
+            sstatus::clear_sie();
+            sie_before
+        })
+    }
+}
+impl Drop for SieGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            unsafe {
+                sstatus::set_sie();
+            }
+        }
+    }
+}
