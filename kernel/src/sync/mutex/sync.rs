@@ -7,6 +7,7 @@ use core::task::{Context, Poll};
 use futures::task::AtomicWaker;
 use crate::sync::mutex::MutexStrategy;
 
+#[repr(align(4))]
 pub struct AsyncMutex<T: ?Sized, S: MutexStrategy> {
     _marker: PhantomData<S>,
     lock: AtomicBool,
