@@ -6,6 +6,10 @@ use core::time::Duration;
 use crate::sched::time::current_time;
 use crate::sync::mutex::MutexStrategy;
 
+// Here exists a compiler bug. I don't know whether it's from rustc or llvm,
+// but in release build `compare_exchange` would always treat the first byte
+// of the word which `AtomicBool` is stored in as the value to compare against.
+// A temporary solution is to manually align `AtomicBool` to 4 bytes.
 #[repr(align(4))]
 pub struct SpinMutex<T: ?Sized, S: MutexStrategy> {
     _marker: PhantomData<S>,
