@@ -6,7 +6,6 @@ use core::time::Duration;
 use crate::sched::time::current_time;
 use crate::sync::mutex::MutexStrategy;
 
-#[repr(align(4))]
 pub struct SpinMutex<T: ?Sized, S: MutexStrategy> {
     _marker: PhantomData<S>,
     lock: AtomicBool,
