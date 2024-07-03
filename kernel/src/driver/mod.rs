@@ -109,6 +109,12 @@ pub trait BlockDevice: Send + Sync {
     /// 设备元数据
     fn metadata(&self) -> &DeviceMeta;
 
+    /// 块大小
+    fn sector_size(&self) -> usize;
+
+    /// 设备大小
+    fn dev_size(&self) -> usize;
+
     /// MMIO 映射完成后初始化
     fn init(&self);
 

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 riscv = { git = "https://github.com/Dr-TSNG/riscv" }
+lwext4_rust = { git = "https://github.com/Dr-TSNG/lwext4_rust" }
 aligned = "0.4.2"
 async-task = { version = "4.7", default-features = false }
 async-trait = "0.1"
@@ -22,6 +23,7 @@ num_enum = { version = "0.7.2", default-features = false }
 pin-project = "1.1.5"
 sbi-spec = "0.0.7"
 spin = "0.9"
+tap = "1.0"
 time = { version = "0.3", default-features = false }
 virtio-drivers = "0.7.1"
 xmas-elf = "0.7.0"

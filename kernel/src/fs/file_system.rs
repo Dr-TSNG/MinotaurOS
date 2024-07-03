@@ -15,6 +15,7 @@ pub enum FileSystemType {
     FAT32 = 0x4d44,
     TMPFS = 0x01021994,
     PROCFS = 0x9fa0,
+    EXT4 = 0xef53,
 }
 
 /// 文件系统元数据
@@ -81,7 +82,9 @@ impl MountNamespace {
     }
 
     pub async fn mount<F>(&self, absolute_path: &str, fs_fn: F) -> SyscallResult
-        where F: FnOnce(Arc<dyn Inode>) -> Arc<dyn FileSystem> {
+    where
+        F: FnOnce(Arc<dyn Inode>) -> Arc<dyn FileSystem>,
+    {
         assert!(is_absolute_path(absolute_path));
         let inode = self.lookup_absolute(absolute_path).await?;
         let inode = inode.metadata().parent.clone().unwrap().upgrade().unwrap();

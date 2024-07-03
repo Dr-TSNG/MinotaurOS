@@ -128,7 +128,7 @@ impl AddressSpace {
                     )?;
                     max_end_vpn = region.metadata().end();
                     addr_space.map_region(region);
-                    debug!("Map elf section: {:?} - {:?}", start_vpn, end_vpn);
+                    debug!("Map elf section: {:?} - {:?} for {:?}", start_vpn, end_vpn, perms);
                 }
                 xmas_elf::program::Type::Interp => {
                     linker_base = DYNAMIC_LINKER_BASE;
@@ -439,7 +439,7 @@ impl AddressSpace {
     }
 
     async fn load_linker(&mut self, mnt_ns: &MountNamespace, offset: usize) -> SyscallResult<usize> {
-        let inode = mnt_ns.lookup_absolute("/libc.so").await?;
+        let inode = mnt_ns.lookup_absolute("/lib/musl/libc.so").await?;
         let file = inode.open().unwrap();
         let elf_data = file.read_all().await.unwrap();
         let elf = ElfFile::new(&elf_data).map_err(|_| Errno::ENOEXEC)?;

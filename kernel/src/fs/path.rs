@@ -1,6 +1,6 @@
 use alloc::string::String;
 use alloc::sync::Arc;
-use alloc::vec;
+use alloc::{format, vec};
 use log::{debug, info};
 use crate::fs::fd::FdNum;
 use crate::fs::ffi::AT_FDCWD;
@@ -69,6 +69,14 @@ fn normalize_path(path: &str) -> String {
         normalized.push('.');
     }
     normalized
+}
+
+pub fn append_path(base: &str, path: &str) -> String {
+    if base.ends_with('/') {
+        format!("{}{}", base, path)
+    } else {
+        format!("{}/{}", base, path)
+    }
 }
 
 pub fn path_test() {
