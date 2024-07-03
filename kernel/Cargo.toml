@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 riscv = { git = "https://github.com/Dr-TSNG/riscv" }
+aligned = "0.4.2"
 async-task = { version = "4.7", default-features = false }
 async-trait = "0.1"
 bitflags = "1.3.2"
