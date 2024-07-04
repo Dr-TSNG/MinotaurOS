@@ -1,5 +1,6 @@
 use alloc::sync::Arc;
 use core::arch::asm;
+use aligned::{A16, Aligned};
 use riscv::register::mstatus::FS;
 use riscv::register::sstatus;
 use crate::config::{KERNEL_STACK_SIZE, MAX_HARTS};
@@ -54,7 +55,7 @@ const HART_EACH: Hart = Hart::new();
 static mut HARTS: [Hart; MAX_HARTS] = [HART_EACH; MAX_HARTS];
 
 #[link_section = ".bss.uninit"]
-pub static mut KERNEL_STACK: [u8; KERNEL_STACK_SIZE * MAX_HARTS] = [0; KERNEL_STACK_SIZE * MAX_HARTS];
+pub static mut KERNEL_STACK: Aligned<A16, [u8; KERNEL_STACK_SIZE * MAX_HARTS]> = Aligned([0; KERNEL_STACK_SIZE * MAX_HARTS]);
 
 pub fn local_hart() -> &'static mut Hart {
     unsafe {
