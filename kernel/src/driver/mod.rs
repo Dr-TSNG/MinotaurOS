@@ -26,6 +26,7 @@ use crate::sync::once::LateInit;
 pub mod ns16550a;
 pub mod plic;
 pub mod virtio;
+pub mod virtnet;
 
 pub static BOARD_INFO: LateInit<BoardInfo> = LateInit::new();
 pub static GLOBAL_MAPPINGS: LateInit<Vec<GlobalMapping>> = LateInit::new();
@@ -71,6 +72,7 @@ impl GlobalMapping {
 pub enum Device {
     Block(Arc<dyn BlockDevice>),
     Character(Arc<dyn CharacterDevice>),
+    Net(Arc<dyn NetDevice>),
 }
 
 impl Device {
@@ -78,6 +80,7 @@ impl Device {
         match self {
             Device::Block(dev) => dev.metadata(),
             Device::Character(dev) => dev.metadata(),
+            Device::Net(dev) => dev.metadata(),
         }
     }
 
@@ -85,6 +88,7 @@ impl Device {
         match self {
             Device::Block(dev) => dev.init(),
             Device::Character(dev) => dev.init(),
+            Device::Net(dev) => dev.init(),
         }
     }
 }
@@ -138,6 +142,13 @@ pub trait CharacterDevice: Send + Sync {
 
     /// 向字符设备写入数据
     async fn putchar(&self, ch: u8) -> SyscallResult;
+}
+
+#[async_trait]
+pub trait NetDevice: Send + Sync{
+    /// 设备元数据
+    fn metadata(&self) -> &DeviceMeta;
+    fn init(&self);
 }
 
 trait IrqDevice: Send + Sync {
