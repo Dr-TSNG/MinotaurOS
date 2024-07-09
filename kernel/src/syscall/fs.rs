@@ -14,7 +14,7 @@ use crate::fs::devfs::DevFileSystem;
 use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd, VfsFlags, FdSet, FD_SET_LEN, PollEvents, KernelStatfs, AT_SYMLINK_NOFOLLOW};
 use crate::fs::file::Seek;
-use crate::fs::path::resolve_path;
+use crate::fs::path::{resolve_path, split_last_path};
 use crate::fs::pipe::Pipe;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
@@ -112,12 +112,12 @@ pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<
     let mut proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
     debug!("[mkdirat] fd: {}, path: {:?}, mode: {:?}", dirfd, path, mode);
-    let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
-    let inode = resolve_path(&mut proc_inner, dirfd, parent, true).await?;
+    let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
+    let inode = resolve_path(&mut proc_inner, dirfd, &parent, true).await?;
     if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
     }
-    inode.create(InodeMode::IFDIR, name).await?;
+    inode.create(InodeMode::IFDIR, &name).await?;
     Ok(0)
 }
 
@@ -137,9 +137,9 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
         path = "/tmp/testshm";
     }
 
-    let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
-    let parent = resolve_path(&proc_inner, dirfd, parent, true).await?;
-    let inode = parent.clone().lookup_name(name).await?;
+    let (parent, name) = split_last_path(path).ok_or(Errno::EINVAL)?;
+    let parent = resolve_path(&proc_inner, dirfd, &parent, true).await?;
+    let inode = parent.clone().lookup_name(&name).await?;
     if inode.metadata().mode == InodeMode::IFDIR {
         if flags & AT_REMOVEDIR == 0 {
             return Err(Errno::EISDIR);
@@ -152,7 +152,7 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
             return Err(Errno::ENOTDIR);
         }
     }
-    parent.unlink(name).await?;
+    parent.unlink(&name).await?;
     Ok(0)
 }
 
@@ -282,9 +282,9 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
     let inode = match resolve_path(&mut proc_inner, dirfd, path, true).await {
         Ok(inode) => inode,
         Err(Errno::ENOENT) if flags.contains(OpenFlags::O_CREAT) => {
-            let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
-            let parent_inode = resolve_path(&mut proc_inner, dirfd, parent, true).await?;
-            parent_inode.create(InodeMode::IFREG, name).await?
+            let (parent, name) = split_last_path(path).ok_or(Errno::EISDIR)?;
+            let parent_inode = resolve_path(&mut proc_inner, dirfd, &parent, true).await?;
+            parent_inode.create(InodeMode::IFREG, &name).await?
         }
         Err(e) => return Err(e),
     };
@@ -794,33 +794,33 @@ pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, 
         "[renameat] old_dirfd: {}, old_path: {:?}, new_dirfd: {}, new_path: {:?}, flags: {:?}",
         old_dirfd, old_path, new_dirfd, new_path, flags,
     );
-    let (old_parent, old_name) = old_path.rsplit_once('/').unwrap_or((".", old_path));
-    let (new_parent, new_name) = new_path.rsplit_once('/').unwrap_or((".", new_path));
-    let old_parent = resolve_path(&proc_inner, old_dirfd, old_parent, true).await?;
-    let new_parent = resolve_path(&proc_inner, new_dirfd, new_parent, true).await?;
-    let old_inode = old_parent.clone().lookup_name(old_name).await?;
-    let new_inode = new_parent.clone().lookup_name(new_name).await;
+    let (old_parent, old_name) = split_last_path(old_path).ok_or(Errno::EINVAL)?;
+    let (new_parent, new_name) = split_last_path(new_path).ok_or(Errno::EINVAL)?;
+    let old_parent = resolve_path(&proc_inner, old_dirfd, &old_parent, true).await?;
+    let new_parent = resolve_path(&proc_inner, new_dirfd, &new_parent, true).await?;
+    let old_inode = old_parent.clone().lookup_name(&old_name).await?;
+    let new_inode = new_parent.clone().lookup_name(&new_name).await;
     match flags {
         RenameFlags::RENAME_DEFAULT => {
             if new_inode.is_ok() {
-                new_parent.clone().unlink(new_name).await?;
+                new_parent.clone().unlink(&new_name).await?;
             }
-            old_parent.unlink(old_name).await?;
-            new_parent.movein(new_name, old_inode).await?;
+            old_parent.unlink(&old_name).await?;
+            new_parent.movein(&new_name, old_inode).await?;
         }
         RenameFlags::RENAME_NOREPLACE => {
             if new_inode.is_ok() {
                 return Err(Errno::EEXIST);
             }
-            old_parent.unlink(old_name).await?;
-            new_parent.movein(new_name, old_inode).await?;
+            old_parent.unlink(&old_name).await?;
+            new_parent.movein(&new_name, old_inode).await?;
         }
         RenameFlags::RENAME_EXCHANGE => {
             let new_inode = new_inode?;
-            old_parent.clone().unlink(old_name).await?;
-            new_parent.clone().unlink(new_name).await?;
-            old_parent.movein(new_name, new_inode).await?;
-            new_parent.movein(old_name, old_inode).await?;
+            old_parent.clone().unlink(&old_name).await?;
+            new_parent.clone().unlink(&new_name).await?;
+            old_parent.movein(&new_name, new_inode).await?;
+            new_parent.movein(&old_name, old_inode).await?;
         }
         _ => {
             warn!("[renameat] Invalid flags: {:?}", flags);

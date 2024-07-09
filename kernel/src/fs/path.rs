@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::{format, vec};
 use log::{debug, info};
@@ -38,6 +38,20 @@ pub async fn resolve_path(
 
 pub fn is_absolute_path(path: &str) -> bool {
     path.starts_with('/')
+}
+
+pub fn split_last_path(path: &str) -> Option<(String, String)> {
+    let mut path = normalize_path(path);
+    if path == "/" {
+        return None;
+    }
+    match path.rfind('/') {
+        Some(pos) => {
+            let name = path.split_off(pos + 1);
+            Some((path, name))
+        }
+        None => Some((".".to_string(), path)),
+    }
 }
 
 fn normalize_path(path: &str) -> String {
