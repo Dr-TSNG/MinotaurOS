@@ -26,6 +26,7 @@ use crate::process::thread::tid::TidTracker;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::processor::hart::local_hart;
 use crate::result::SyscallResult;
+use crate::sched::ffi::ITimerVal;
 use crate::sched::spawn_user_thread;
 use crate::signal::ffi::Signal;
 use crate::signal::SignalController;
@@ -61,6 +62,8 @@ pub struct ProcessInner {
     pub fd_table: FdTable,
     /// 互斥锁队列
     pub futex_queue: FutexQueue,
+    /// 定时器
+    pub timers: [ITimerVal; 3],
     /// 工作目录
     pub cwd: String,
     /// 退出状态
@@ -83,7 +86,8 @@ impl Process {
                 addr_space,
                 mnt_ns,
                 fd_table: FdTable::new(),
-                futex_queue: FutexQueue::default(),
+                futex_queue: Default::default(),
+                timers: Default::default(),
                 cwd: String::from("/"),
                 exit_code: None,
             }),
@@ -223,7 +227,8 @@ impl Process {
                     addr_space: proc_inner.addr_space.fork(),
                     mnt_ns: proc_inner.mnt_ns.clone(),
                     fd_table: proc_inner.fd_table.clone(),
-                    futex_queue: FutexQueue::default(),
+                    futex_queue: Default::default(),
+                    timers: Default::default(),
                     cwd: proc_inner.cwd.clone(),
                     exit_code: None,
                 }),

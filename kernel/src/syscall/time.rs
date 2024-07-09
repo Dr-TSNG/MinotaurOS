@@ -1,22 +1,79 @@
 use core::mem::size_of;
 use core::pin::pin;
 use core::time::Duration;
-
+use log::{debug, warn};
 use zerocopy::{AsBytes, FromBytes};
 
 use crate::arch::VirtAddr;
+use crate::process::monitor::PROCESS_MONITOR;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::{CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID, TimeSpec, TMS};
-use crate::sched::sleep_for;
+use crate::sched::ffi::{CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID, ITimerType, ITimerVal, TimeSpec, TimeVal, TMS};
+use crate::sched::{sleep_for, spawn_kernel_thread};
 use crate::sched::time::{cpu_time, GLOBAL_CLOCK, real_time};
+use crate::sched::timer::TimerFuture;
+use crate::signal::ffi::Signal;
 
 pub async fn sys_nanosleep(req: usize, _rem: usize) -> SyscallResult<usize> {
     let user_buf = current_process().inner.lock().addr_space.user_slice_r(VirtAddr(req), size_of::<TimeSpec>())?;
     let ts = TimeSpec::ref_from(user_buf).unwrap();
     let duration = Duration::from(*ts);
     current_thread().event_bus.suspend_with(Event::all(), pin!(sleep_for(duration))).await?;
+    Ok(0)
+}
+
+pub fn sys_setitimer(which: i32, new_value: usize, old_value: usize) -> SyscallResult<usize> {
+    let which = ITimerType::try_from(which).map_err(|_| Errno::EINVAL)?;
+    let mut proc_inner = current_process().inner.lock();
+    let new_value = proc_inner.addr_space.user_slice_r(VirtAddr(new_value), size_of::<ITimerVal>())?;
+    let new_value = ITimerVal::ref_from(new_value).unwrap();
+    let interval = Duration::from(new_value.interval);
+    let next_exp = Duration::from(new_value.value);
+    debug!("[setitimer] which: {:?}, interval: {:?}, next expiration: {:?}", which, interval, next_exp);
+
+    if old_value != 0 {
+        let old_value = proc_inner.addr_space.user_slice_w(VirtAddr(old_value), size_of::<TimeVal>())?;
+        let rest_time = Duration::from(proc_inner.timers[which as usize].value)
+            .checked_sub(cpu_time()).unwrap_or_default();
+        old_value.copy_from_slice(TimeVal::from(rest_time).as_bytes());
+    }
+
+    match which {
+        ITimerType::Real => {
+            let pid = current_process().pid.0;
+            let callback = move || {
+                if let Some(proc) = PROCESS_MONITOR.lock().get(pid).upgrade() {
+                    let proc_inner = &mut *proc.inner.lock();
+                    let timer = &mut proc_inner.timers[which as usize];
+                    let single_shot = Duration::from(timer.interval).is_zero();
+                    let disarmed = Duration::from(timer.value).is_zero();
+                    if !disarmed {
+                        for thread in proc_inner.threads.values() {
+                            if let Some(thread) = thread.upgrade() {
+                                thread.recv_signal(Signal::SIGALRM);
+                                break;
+                            }
+                        }
+                        if !single_shot {
+                            let next_exp = Duration::from(timer.interval) + cpu_time();
+                            timer.value = next_exp.into();
+                            return next_exp;
+                        }
+                    }
+                }
+                Duration::ZERO
+            };
+            proc_inner.timers[which as usize] = new_value.clone();
+            if !next_exp.is_zero() {
+                spawn_kernel_thread(TimerFuture::new(interval, next_exp, callback));
+            }
+        }
+        _ => {
+            warn!("[setitimer] unsupported timer type: {:?}", which);
+            return Err(Errno::EINVAL);
+        }
+    }
     Ok(0)
 }
 

@@ -1,8 +1,11 @@
 use alloc::collections::BinaryHeap;
 use core::cmp::Reverse;
-use core::task::Waker;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
 use core::time::Duration;
 use lazy_static::lazy_static;
+use pin_project::pin_project;
 use crate::sched::time::cpu_time;
 use crate::sync::mutex::IrqMutex;
 
@@ -68,4 +71,36 @@ pub fn query_timer() -> bool {
         }
     }
     true
+}
+
+#[pin_project]
+pub struct TimerFuture<F: Fn() -> Duration> {
+    interval: Duration,
+    next_expire: Duration,
+    callback: F,
+}
+
+impl<F: Fn() -> Duration> TimerFuture<F> {
+    pub fn new(interval: Duration, next_expire: Duration, callback: F) -> Self {
+        Self {
+            interval,
+            next_expire,
+            callback,
+        }
+    }
+}
+
+impl<F: Fn() -> Duration> Future for TimerFuture<F> {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if cpu_time() >= self.next_expire {
+            self.next_expire = (self.callback)();
+            if self.next_expire.is_zero() {
+                return Poll::Ready(());
+            }
+        }
+        sched_timer(self.next_expire, cx.waker().clone());
+        Poll::Pending
+    }
 }

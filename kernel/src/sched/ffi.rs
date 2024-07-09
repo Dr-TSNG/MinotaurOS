@@ -1,4 +1,5 @@
 use core::time::Duration;
+use num_enum::TryFromPrimitive;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
 pub const UTIME_NOW: i64 = 1073741823;
@@ -8,6 +9,14 @@ pub const CLOCK_REALTIME: usize = 0;
 pub const CLOCK_MONOTONIC: usize = 1;
 pub const CLOCK_PROCESS_CPUTIME_ID: usize = 2;
 pub const CLOCK_THREAD_CPUTIME_ID: usize = 3;
+
+#[derive(Copy, Clone, Debug, TryFromPrimitive)]
+#[repr(i32)]
+pub enum ITimerType {
+    Real = 0,
+    Virtual = 1,
+    Prof = 2,
+}
 
 #[derive(Copy, Clone, Debug, Default, AsBytes, FromZeroes, FromBytes)]
 #[repr(C)]
@@ -21,6 +30,13 @@ pub struct TimeSpec {
 pub struct TimeVal {
     pub sec: i64,
     pub usec: i64,
+}
+
+#[derive(Clone, Debug, Default, AsBytes, FromZeroes, FromBytes)]
+#[repr(C)]
+pub struct ITimerVal {
+    pub interval: TimeVal,
+    pub value: TimeVal,
 }
 
 impl TimeSpec {
