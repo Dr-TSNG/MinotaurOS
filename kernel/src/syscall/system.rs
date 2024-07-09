@@ -1,6 +1,7 @@
 use alloc::vec;
 use core::mem::size_of;
 use log::{debug, info};
+use tap::Tap;
 use zerocopy::AsBytes;
 use crate::arch::{shutdown, VirtAddr};
 use crate::debug::console::DMESG;
@@ -79,7 +80,7 @@ pub fn sys_syslog(cmd: i32, buf: usize, len: usize) -> SyscallResult<usize> {
     match cmd {
         SyslogCmd::SYSLOG_ACTION_READ_ALL => {
             let mut lines = vec![];
-            DMESG.lock().apply(|dmesg| {
+            DMESG.lock().tap(|dmesg| {
                 let mut size = 0;
                 for line in dmesg.buf.iter().rev() {
                     if size + line.len() > len {

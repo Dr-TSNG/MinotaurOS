@@ -78,16 +78,6 @@ impl<T: ?Sized + Default, S: MutexStrategy> Default for ReMutex<T, S> {
     }
 }
 
-impl<T: ?Sized, S: MutexStrategy> ReMutexGuard<'_, T, S> {
-    pub fn apply<F: FnOnce(&T) -> R, R>(self, f: F) -> R {
-        f(self.deref())
-    }
-
-    pub fn apply_mut<F: FnOnce(&mut T) -> R, R>(mut self, f: F) -> R {
-        f(self.deref_mut())
-    }
-}
-
 impl<T: ?Sized, S: MutexStrategy> Deref for ReMutexGuard<'_, T, S> {
     type Target = T;
 

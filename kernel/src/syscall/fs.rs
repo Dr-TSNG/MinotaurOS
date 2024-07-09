@@ -7,6 +7,7 @@ use core::ffi::CStr;
 use core::mem::size_of;
 use core::time::Duration;
 use log::{debug, info, warn};
+use tap::Tap;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::devfs::DevFileSystem;
@@ -766,7 +767,7 @@ pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) 
             (atime, mtime)
         }
     };
-    inode.metadata().inner.lock().apply_mut(|inner| {
+    inode.metadata().inner.lock().tap_mut(|inner| {
         if let Some(atime) = atime {
             inner.atime = atime;
         }

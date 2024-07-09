@@ -344,7 +344,7 @@ impl AddressSpace {
     }
 
     pub fn munmap(&mut self, start: VirtPageNum, pages: usize) -> SyscallResult {
-        self.modify_region(start, pages, |region| false)
+        self.modify_region(start, pages, |_| false)
     }
 
     pub fn mprotect(&mut self, start: VirtPageNum, pages: usize, perms: ASPerms) -> SyscallResult {

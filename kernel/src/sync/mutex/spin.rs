@@ -69,16 +69,6 @@ impl<T: ?Sized + Default, S: MutexStrategy> Default for SpinMutex<T, S> {
     }
 }
 
-impl<'a, T: ?Sized, S: MutexStrategy> SpinMutexGuard<'a, T, S> {
-    pub fn apply<F: FnOnce(&T) -> R, R>(self, f: F) -> R {
-        f(self.deref())
-    }
-
-    pub fn apply_mut<F: FnOnce(&mut T) -> R, R>(mut self, f: F) -> R {
-        f(self.deref_mut())
-    }
-}
-
 impl<'a, T: ?Sized, S: MutexStrategy> Deref for SpinMutexGuard<'a, T, S> {
     type Target = T;
 

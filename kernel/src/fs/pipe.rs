@@ -163,7 +163,7 @@ impl Future for PipeReadFuture<'_> {
 impl Future for PipeWriteFuture<'_> {
     type Output = SyscallResult<isize>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
         let mut inner = self.pipe.inner.lock();
         debug!(
             "[pipe] write poll len: {}, buf.len: {}",
