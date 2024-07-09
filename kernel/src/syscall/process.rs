@@ -1,13 +1,14 @@
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use log::{debug, info};
+use core::time::Duration;
+use log::{debug, info, warn};
 use zerocopy::AsBytes;
 use crate::arch::VirtAddr;
 use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
-use crate::process::ffi::{CloneFlags, Rlimit, RlimitCmd, WaitOptions};
+use crate::process::ffi::{CloneFlags, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
 use crate::process::{Pid, Tid};
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
@@ -71,6 +72,42 @@ pub fn sys_getrlimit(resource: u32, rlim: usize) -> SyscallResult<usize> {
 
 pub fn sys_setrlimit(resource: u32, rlim: usize) -> SyscallResult<usize> {
     sys_prlimit(current_process().pid.0, resource, rlim, 0)
+}
+
+pub fn sys_getrusage(who: i32, buf: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<RUsage>())?;
+    let rusage = match who {
+        RUSAGE_SELF => {
+            let mut utime = Duration::ZERO;
+            let mut stime = Duration::ZERO;
+            for thread in proc_inner.threads.values() {
+                if let Some(thread) = thread.upgrade() {
+                    utime += thread.inner().rusage.user_time;
+                    stime += thread.inner().rusage.sys_time;
+                }
+            }
+            RUsage {
+                ru_utime: utime.into(),
+                ru_stime: stime.into(),
+                ..Default::default()
+            }
+        }
+        RUSAGE_THREAD => {
+            let self_r = &current_thread().inner().rusage;
+            RUsage {
+                ru_utime: self_r.user_time.into(),
+                ru_stime: self_r.sys_time.into(),
+                ..Default::default()
+            }
+        }
+        _ => {
+            warn!("[getrusage] Invalid who: {}", who);
+            return Err(Errno::EINVAL);
+        }
+    };
+    user_buf.copy_from_slice(rusage.as_bytes());
+    Ok(0)
 }
 
 pub fn sys_getpid() -> SyscallResult<usize> {
@@ -196,7 +233,7 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
             return Err(Errno::EINVAL);
         }
         let limit = Rlimit { rlim_cur: cur, rlim_max: max };
-        proc_inner.fd_table.set_rlimit(limit);
+        proc_inner.fd_table.rlimit = limit;
     }
     Ok(0)
 }

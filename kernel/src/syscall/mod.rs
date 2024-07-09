@@ -200,7 +200,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Uname => syscall!(sys_uname, args[0]),
         SyscallCode::Getrlimit => syscall!(sys_getrlimit, args[0] as u32, args[1]),
         SyscallCode::Setrlimit => syscall!(sys_setrlimit, args[0] as u32, args[1]),
-        // SyscallCode::Getrusage
+        SyscallCode::Getrusage => syscall!(sys_getrusage, args[0] as i32, args[1]),
         // SyscallCode::Umask
         SyscallCode::GetTimeOfDay => syscall!(sys_gettimeofday, args[0], args[1]),
         SyscallCode::Getpid => syscall!(sys_getpid),
