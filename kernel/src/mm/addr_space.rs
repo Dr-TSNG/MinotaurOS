@@ -289,7 +289,7 @@ impl AddressSpace {
         }
         if let Some((upper_vpn, _)) = self.regions.range(heap_start..).skip(1).next() {
             if addr.floor() >= *upper_vpn {
-                return Ok(self.brk.0);
+                return Err(Errno::ENOMEM);
             }
         }
         let mut brk = self.unmap_region(heap_start).unwrap();
@@ -300,9 +300,10 @@ impl AddressSpace {
         } else if addr.ceil() > heap_end {
             brk.extend(addr.ceil() - heap_end);
         }
+        self.brk = addr.ceil().into();
         self.map_region(brk);
         unsafe { self.activate(); }
-        Ok(core::mem::replace(&mut self.brk, addr).0)
+        Ok(self.brk.0)
     }
 
     pub fn mmap(
