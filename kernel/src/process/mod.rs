@@ -21,6 +21,7 @@ use crate::mm::addr_space::AddressSpace;
 use crate::process::aux::Aux;
 use crate::process::ffi::CloneFlags;
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
+use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::Thread;
 use crate::process::thread::tid::TidTracker;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
@@ -196,6 +197,15 @@ impl Process {
             let ptr = user_sp as *mut usize;
             *ptr = args.len();
         }
+
+        // 重置线程状态
+        let thread = current_thread();
+        thread.signals.reset();
+        thread.event_bus.reset();
+        thread.inner().tap_mut(|it| {
+            it.tid_address = Default::default();
+            it.rusage = ResourceUsage::new();
+        });
 
         // a0 -> argc, a1 -> argv, a2 -> envp, a3 -> auxv
         let trap_ctx = current_trap_ctx();

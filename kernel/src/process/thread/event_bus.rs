@@ -1,6 +1,7 @@
 use alloc::vec::Vec;
 use core::future::Future;
 use core::mem::size_of;
+use core::ops::DerefMut;
 use core::pin::{Pin, pin};
 use core::task::{Context, Poll, Waker};
 use bitflags::bitflags;
@@ -32,12 +33,18 @@ struct EventBusInner {
 }
 
 impl EventBus {
+    pub fn reset(&self) {
+        let _ = core::mem::replace(self.0.lock().deref_mut(), EventBusInner::default());
+    }
+
     pub async fn wait(&self, event: Event) -> Event {
         WaitForEventFuture::new(self, event).await
     }
 
     pub async fn suspend_with<T, F>(&self, event: Event, fut: F) -> SyscallResult<T>
-        where F: Future<Output=SyscallResult<T>> + Unpin {
+    where
+        F: Future<Output=SyscallResult<T>> + Unpin,
+    {
         match select(pin!(self.wait(event)), fut).await {
             Either::Left(_) => Err(Errno::EINTR),
             Either::Right((ret, _)) => ret,
