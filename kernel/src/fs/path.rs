@@ -15,19 +15,24 @@ macro_rules! split_path {
     };
 }
 
-pub async fn resolve_path(proc_inner: &ProcessInner, dirfd: FdNum, path: &str) -> SyscallResult<Arc<dyn Inode>> {
+pub async fn resolve_path(
+    proc_inner: &ProcessInner,
+    dirfd: FdNum,
+    path: &str,
+    follow_link: bool,
+) -> SyscallResult<Arc<dyn Inode>> {
     let path = normalize_path(path);
     let path = path.as_ref();
     debug!("[resolve_path] dirfd: {}, path: {:?}", dirfd, path);
     if is_absolute_path(path) {
-        proc_inner.mnt_ns.lookup_absolute(path).await
+        proc_inner.mnt_ns.lookup_absolute(path, follow_link).await
     } else if dirfd == AT_FDCWD {
-        let inode = proc_inner.mnt_ns.lookup_absolute(&proc_inner.cwd).await?;
-        inode.lookup_relative(path).await
+        let inode = proc_inner.mnt_ns.lookup_absolute(&proc_inner.cwd, follow_link).await?;
+        proc_inner.mnt_ns.lookup_relative(inode, path, follow_link).await
     } else {
         let fd_impl = proc_inner.fd_table.get(dirfd)?;
         let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
-        inode.lookup_relative(path).await
+        proc_inner.mnt_ns.lookup_relative(inode, path, follow_link).await
     }
 }
 

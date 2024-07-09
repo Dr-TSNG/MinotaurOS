@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use core::time::Duration;
@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use log::{debug, trace};
 use lwext4_rust::Ext4File;
 use lwext4_rust::bindings::{EXT4_INODE_ROOT_INDEX, O_CREAT, O_RDWR, SEEK_SET};
-use lwext4_rust::dir::{ext4_mkdir, ext4_movedir, ext4_movefile, ext4_rmdir, ext4_rmfile, Ext4Dir};
+use lwext4_rust::dir::Ext4Dir;
 use lwext4_rust::inode::Ext4InodeRef;
 use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::ffi::InodeMode;
@@ -16,7 +16,6 @@ use crate::fs::inode::{Inode, InodeChild, InodeInternal, InodeMeta, InodeMetaInn
 use crate::fs::page_cache::PageCache;
 use crate::fs::path::append_path;
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
 
 pub struct Ext4Inode {
@@ -113,9 +112,9 @@ impl InodeInternal for Ext4Inode {
                     path,
                     Some(self.clone()),
                     page_cache,
-                    TimeSpec::default(),
-                    TimeSpec::default(),
-                    TimeSpec::default(),
+                    Duration::from_secs(inode_ref.access_time as u64).into(),
+                    Duration::from_secs(inode_ref.modification_time as u64).into(),
+                    Duration::from_secs(inode_ref.change_inode_time as u64).into(),
                     fs.ext4.ext4_get_inode_size(&inode_ref) as isize,
                 ),
                 fs: self.fs.clone(),
@@ -133,7 +132,7 @@ impl InodeInternal for Ext4Inode {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let path = append_path(&self.metadata.path, &name);
         let inode = if mode == InodeMode::IFDIR {
-            ext4_mkdir(&path).map_err(|e| e.try_into().unwrap())?;
+            Ext4Dir::mkdir(&path).map_err(|e| e.try_into().unwrap())?;
             Ext4Dir::open(&path).map_err(|e| e.try_into().unwrap())?.inode()
         } else {
             Ext4File::open(&path, O_RDWR | O_CREAT).map_err(|e| e.try_into().unwrap())?.inode()
@@ -152,9 +151,9 @@ impl InodeInternal for Ext4Inode {
                 append_path(&self.metadata.path, &name),
                 Some(self.clone()),
                 page_cache,
-                TimeSpec::default(),
-                TimeSpec::default(),
-                TimeSpec::default(),
+                Duration::from_secs(inode_ref.access_time as u64).into(),
+                Duration::from_secs(inode_ref.modification_time as u64).into(),
+                Duration::from_secs(inode_ref.change_inode_time as u64).into(),
                 0,
             ),
             fs: self.fs.clone(),
@@ -168,9 +167,9 @@ impl InodeInternal for Ext4Inode {
             let old_path = append_path(&inode.metadata().path, &name);
             let new_path = append_path(&self.metadata.path, &name);
             if self.metadata.mode == InodeMode::IFDIR {
-                ext4_movedir(&old_path, &new_path).map_err(|e| e.try_into().unwrap())?;
+                Ext4Dir::movedir(&old_path, &new_path).map_err(|e| e.try_into().unwrap())?;
             } else {
-                ext4_movefile(&old_path, &new_path).map_err(|e| e.try_into().unwrap())?;
+                Ext4Dir::movefile(&old_path, &new_path).map_err(|e| e.try_into().unwrap())?;
             }
             let inode = Arc::new(Self {
                 metadata: InodeMeta::movein(
@@ -190,10 +189,14 @@ impl InodeInternal for Ext4Inode {
 
     async fn do_unlink(self: Arc<Self>, target: &InodeChild) -> SyscallResult {
         if target.inode.metadata().mode == InodeMode::IFDIR {
-            ext4_rmdir(&target.inode.metadata().path).map_err(|e| e.try_into().unwrap())?;
+            Ext4Dir::rmdir(&target.inode.metadata().path).map_err(|e| e.try_into().unwrap())?;
         } else {
-            ext4_rmfile(&target.inode.metadata().path).map_err(|e| e.try_into().unwrap())?;
+            Ext4Dir::rmfile(&target.inode.metadata().path).map_err(|e| e.try_into().unwrap())?;
         }
         Ok(())
+    }
+
+    async fn do_readlink(self: Arc<Self>) -> SyscallResult<String> {
+        Ext4Dir::readlink(&self.metadata.path).map_err(|e| e.try_into().unwrap())
     }
 }

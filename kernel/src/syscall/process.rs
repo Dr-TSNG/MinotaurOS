@@ -146,7 +146,7 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
         envs_vec.push(CString::new("LD_LIBRARY_PATH=/").unwrap());
     }
 
-    let inode = resolve_path(&proc_inner, AT_FDCWD, path).await?;
+    let inode = resolve_path(&proc_inner, AT_FDCWD, path, true).await?;
     if inode.metadata().mode == InodeMode::IFDIR {
         return Err(Errno::EISDIR);
     }

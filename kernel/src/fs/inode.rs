@@ -5,15 +5,12 @@ use alloc::sync::{Arc, Weak};
 use core::any::Any;
 use async_trait::async_trait;
 use downcast_rs::{DowncastSync, impl_downcast};
-use log::warn;
 use crate::fs::ffi::InodeMode;
 use crate::fs::file::{CharacterFile, DirFile, File, FileMeta, RegularFile};
 use crate::fs::file_system::FileSystem;
 use crate::fs::page_cache::PageCache;
-use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
-use crate::split_path;
 use crate::sync::mutex::{Mutex, MutexGuard};
 
 pub struct InodeMeta {
@@ -172,6 +169,11 @@ pub(super) trait InodeInternal {
     ) -> SyscallResult {
         Err(Errno::EPERM)
     }
+
+    /// 读取符号链接
+    async fn do_readlink(self: Arc<Self>) -> SyscallResult<String> {
+        Err(Errno::EPERM)
+    }
 }
 
 #[allow(private_bounds)]
@@ -258,30 +260,6 @@ impl dyn Inode {
         inner.children.values().nth(idx).map(|child| child.inode.clone()).ok_or(Errno::ENOENT)
     }
 
-    pub async fn lookup_relative(self: Arc<Self>, relative_path: &str) -> SyscallResult<Arc<dyn Inode>> {
-        assert!(!is_absolute_path(relative_path));
-        let mut inode = self;
-        for name in split_path!(relative_path) {
-            if name == ".." {
-                if let Some(parent) = inode.metadata().parent.clone() {
-                    inode = match parent.upgrade() {
-                        Some(parent) => parent,
-                        None => {
-                            warn!(
-                                "[lookup_relative] Cannot upgrade parent inode for {}",
-                                inode.metadata().path,
-                            );
-                            return Err(Errno::ENOENT);
-                        }
-                    }
-                }
-            } else {
-                inode = inode.lookup_name(name).await?;
-            }
-        }
-        Ok(inode)
-    }
-
     pub async fn create(self: Arc<Self>, mode: InodeMode, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         let mut inner = self.metadata().inner.lock();
         if !inner.children_loaded {
@@ -321,6 +299,13 @@ impl dyn Inode {
         self.clone().do_unlink(child).await?;
         inner.children.remove(name);
         Ok(())
+    }
+
+    pub async fn readlink(self: Arc<Self>) -> SyscallResult<String> {
+        if self.metadata().mode != InodeMode::IFLNK {
+            return Err(Errno::EINVAL);
+        }
+        self.do_readlink().await
     }
 }
 

@@ -14,7 +14,7 @@ fn main() {
         sys_execve(
             "/busybox",
             &["busybox", "sh"],
-            &["PATH=/:/bin:", "LD_LIBRARY_PATH=/:", "TERM=screen"],
+            &["PATH=/:/bin:", "LD_LIBRARY_PATH=/lib:", "TERM=screen"],
         );
     } else {
         let mut result: i32 = 0;

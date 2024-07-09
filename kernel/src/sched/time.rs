@@ -3,9 +3,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use core::time::Duration;
-
 use pin_project::pin_project;
-
 use crate::arch;
 use crate::driver::BOARD_INFO;
 use crate::sched::timer::sched_timer;
@@ -14,17 +12,13 @@ use crate::sync::mutex::IrqMutex;
 const MSEC_PER_SEC: usize = 1000;
 const TICKS_PER_SEC: usize = 100;
 
-// Trick libc-test stat
-// 2024-09-01 00:00:00 Asia/Shanghai
-const TODAY: Duration = Duration::from_secs(1725120000);
-
 /// 获取当前时间
 pub fn current_time() -> Duration {
     if !BOARD_INFO.is_initialized() {
-        return TODAY;
+        return Duration::from_millis(0);
     }
     let ms = arch::hardware_ts() / (BOARD_INFO.freq / MSEC_PER_SEC);
-    TODAY + Duration::from_millis(ms as u64)
+    Duration::from_millis(ms as u64)
 }
 
 pub fn set_next_trigger() {

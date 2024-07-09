@@ -118,6 +118,7 @@ pub enum InodeMode {
 }
 
 pub const AT_FDCWD: i32 = -100;
+pub const AT_SYMLINK_NOFOLLOW: u32 = 0x100;
 pub const AT_REMOVEDIR: u32 = 0x200;
 
 pub const PATH_MAX: usize = 260;
