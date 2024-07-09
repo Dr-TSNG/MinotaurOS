@@ -150,7 +150,6 @@ pub(super) trait InodeInternal {
     /// 在当前目录下创建文件/目录
     async fn do_create(
         self: Arc<Self>,
-        inner: &mut InodeMetaInner,
         mode: InodeMode,
         name: &str,
     ) -> SyscallResult<InodeChild> {
@@ -160,7 +159,6 @@ pub(super) trait InodeInternal {
     /// 将文件移动到当前目录下
     async fn do_movein(
         self: Arc<Self>,
-        inner: &mut InodeMetaInner,
         name: &str,
         inode: Arc<dyn Inode>,
     ) -> SyscallResult<InodeChild> {
@@ -170,8 +168,7 @@ pub(super) trait InodeInternal {
     /// 在当前目录下删除文件
     async fn do_unlink(
         self: Arc<Self>,
-        inner: &mut InodeMetaInner,
-        name: &str,
+        target: &InodeChild,
     ) -> SyscallResult {
         Err(Errno::EPERM)
     }
@@ -287,7 +284,13 @@ impl dyn Inode {
 
     pub async fn create(self: Arc<Self>, mode: InodeMode, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         let mut inner = self.metadata().inner.lock();
-        let child = self.clone().do_create(&mut inner, mode, name).await?;
+        if !inner.children_loaded {
+            self.clone().load_children(&mut inner).await?;
+        }
+        if inner.children.contains_key(name) {
+            return Err(Errno::EEXIST);
+        }
+        let child = self.clone().do_create(mode, name).await?;
         let inode = child.inode.clone();
         inner.children.insert(name.to_string(), child);
         Ok(inode)
@@ -295,14 +298,27 @@ impl dyn Inode {
 
     pub async fn movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>) -> SyscallResult {
         let mut inner = self.metadata().inner.lock();
-        let child = self.clone().do_movein(&mut inner, name, inode).await?;
+        if !inner.children_loaded {
+            self.clone().load_children(&mut inner).await?;
+        }
+        if inner.children.contains_key(name) {
+            return Err(Errno::EEXIST);
+        }
+        let child = self.clone().do_movein(name, inode).await?;
         inner.children.insert(child.inode.metadata().name.clone(), child);
         Ok(())
     }
 
     pub async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult<()> {
         let mut inner = self.metadata().inner.lock();
-        self.clone().do_unlink(&mut inner, name).await?;
+        if !inner.children_loaded {
+            self.clone().load_children(&mut inner).await?;
+        }
+        let child = inner.children.get(name).ok_or(Errno::ENOENT)?;
+        if let Some(page_cache) = &child.inode.metadata().page_cache {
+            page_cache.set_deleted();
+        }
+        self.clone().do_unlink(child).await?;
         inner.children.remove(name);
         Ok(())
     }

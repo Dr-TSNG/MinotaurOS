@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use log::error;
 use crate::driver::{BlockDevice, DeviceMeta};
 use crate::sync::mutex::IrqMutex;
-use virtio_drivers::device::blk::VirtIOBlk;
+use virtio_drivers::device::blk::{SECTOR_SIZE, VirtIOBlk};
 use virtio_drivers::{BufferDirection, Hal};
 use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
 use crate::arch::{kvaddr_to_paddr, paddr_to_kvaddr, PhysAddr, PhysPageNum, VirtAddr};
@@ -79,6 +79,14 @@ unsafe impl Sync for VirtIODevice {}
 impl BlockDevice for VirtIODevice {
     fn metadata(&self) -> &DeviceMeta {
         &self.metadata
+    }
+
+    fn sector_size(&self) -> usize {
+        SECTOR_SIZE
+    }
+
+    fn dev_size(&self) -> usize {
+        SECTOR_SIZE * self.block.lock().capacity() as usize
     }
 
     fn init(&self) {

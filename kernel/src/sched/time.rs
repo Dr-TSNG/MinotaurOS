@@ -14,13 +14,17 @@ use crate::sync::mutex::IrqMutex;
 const MSEC_PER_SEC: usize = 1000;
 const TICKS_PER_SEC: usize = 100;
 
+// Trick libc-test stat
+// 2024-09-01 00:00:00 Asia/Shanghai
+const TODAY: Duration = Duration::from_secs(1725120000);
+
 /// 获取当前时间
 pub fn current_time() -> Duration {
     if !BOARD_INFO.is_initialized() {
-        return Duration::from_millis(0);
+        return TODAY;
     }
     let ms = arch::hardware_ts() / (BOARD_INFO.freq / MSEC_PER_SEC);
-    Duration::from_millis(ms as u64)
+    TODAY + Duration::from_millis(ms as u64)
 }
 
 pub fn set_next_trigger() {

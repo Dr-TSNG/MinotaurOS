@@ -184,7 +184,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
     match fstype {
         "devfs" => {
             proc_inner.mnt_ns.mount(target, |p| {
-                DevFileSystem::new(flags, source.to_string(), Some(p))
+                DevFileSystem::new(flags, Some(p))
             }).await?;
         }
         _ => return Err(Errno::ENODEV),
