@@ -26,16 +26,18 @@ pub async fn sys_nanosleep(req: usize, _rem: usize) -> SyscallResult<usize> {
 pub fn sys_setitimer(which: i32, new_value: usize, old_value: usize) -> SyscallResult<usize> {
     let which = ITimerType::try_from(which).map_err(|_| Errno::EINVAL)?;
     let mut proc_inner = current_process().inner.lock();
+    let now = cpu_time();
     let new_value = proc_inner.addr_space.user_slice_r(VirtAddr(new_value), size_of::<ITimerVal>())?;
     let new_value = ITimerVal::ref_from(new_value).unwrap();
     let interval = Duration::from(new_value.interval);
-    let next_exp = Duration::from(new_value.value);
-    debug!("[setitimer] which: {:?}, interval: {:?}, next expiration: {:?}", which, interval, next_exp);
+    let next_int = Duration::from(new_value.value);
+    let next_exp = next_int + now;
+    debug!("[setitimer] which: {:?}, interval: {:?}, next: {:?}", which, interval, next_int);
 
     if old_value != 0 {
         let old_value = proc_inner.addr_space.user_slice_w(VirtAddr(old_value), size_of::<TimeVal>())?;
         let rest_time = Duration::from(proc_inner.timers[which as usize].value)
-            .checked_sub(cpu_time()).unwrap_or_default();
+            .checked_sub(now).unwrap_or_default();
         old_value.copy_from_slice(TimeVal::from(rest_time).as_bytes());
     }
 
@@ -64,9 +66,12 @@ pub fn sys_setitimer(which: i32, new_value: usize, old_value: usize) -> SyscallR
                 }
                 Duration::ZERO
             };
-            proc_inner.timers[which as usize] = new_value.clone();
-            if !next_exp.is_zero() {
-                spawn_kernel_thread(TimerFuture::new(interval, next_exp, callback));
+            proc_inner.timers[which as usize] = ITimerVal {
+                interval: new_value.interval,
+                value: next_exp.into(),
+            };
+            if next_int != now {
+                spawn_kernel_thread(TimerFuture::new(current_process(), interval, next_exp, callback));
             }
         }
         _ => {

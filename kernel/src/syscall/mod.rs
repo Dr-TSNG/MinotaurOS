@@ -175,7 +175,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Readlinkat => async_syscall!(sys_readlinkat, args[0] as FdNum, args[1], args[2], args[3]),
         SyscallCode::Newfstatat => async_syscall!(sys_newfstatat, args[0] as FdNum, args[1], args[2], args[3] as u32),
         SyscallCode::Fstat => syscall!(sys_fstat, args[0] as FdNum, args[1]),
-        // SyscallCode::Sync
+        SyscallCode::Sync => async_syscall!(sys_sync),
         SyscallCode::Fsync => async_syscall!(sys_fsync, args[0] as FdNum),
         SyscallCode::Utimensat => async_syscall!(sys_utimensat, args[0] as FdNum, args[1], args[2], args[3] as u32),
         SyscallCode::Exit => syscall!(sys_exit, args[0] as i8),
