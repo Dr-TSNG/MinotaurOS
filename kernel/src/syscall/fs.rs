@@ -20,7 +20,7 @@ use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::{TimeSpec, UTIME_NOW, UTIME_OMIT};
 use crate::sched::iomultiplex::{FdSetRWE, IOFormat, IOMultiplexFuture};
-use crate::sched::time::{current_time, TimeoutFuture, TimeoutResult};
+use crate::sched::time::{real_time, TimeoutFuture, TimeoutResult};
 use crate::signal::ffi::SigSet;
 
 pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
@@ -746,7 +746,7 @@ pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) 
     };
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
     let inode = resolve_path(&proc_inner, dirfd, path, follow_link).await?;
-    let now = TimeSpec::from(current_time());
+    let now = TimeSpec::from(real_time());
     let (atime, mtime) = match times {
         0 => (Some(now), Some(now)),
         _ => {

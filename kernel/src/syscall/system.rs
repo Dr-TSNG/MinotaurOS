@@ -10,7 +10,7 @@ use crate::mm::allocator::free_user_memory;
 use crate::process::monitor::PROCESS_MONITOR;
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
-use crate::sched::time::current_time;
+use crate::sched::time::cpu_time;
 use crate::syscall::system::ffi::{SysInfo, SyslogCmd};
 
 mod ffi {
@@ -114,7 +114,7 @@ pub fn sys_sysinfo(buf: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<SysInfo>())?;
     let mut sys_info = SysInfo::default();
-    sys_info.uptime = current_time().as_secs() as isize;
+    sys_info.uptime = cpu_time().as_secs() as isize;
     sys_info.totalram = total_memory();
     sys_info.freeram = free_user_memory();
     sys_info.procs = PROCESS_MONITOR.lock().count() as u16;

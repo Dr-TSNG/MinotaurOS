@@ -119,5 +119,5 @@ pub fn init() {
     // 2024-09-01 00:00:00 Asia/Shanghai
     const TODAY: Duration = Duration::from_secs(1725120000);
     GLOBAL_CLOCK.set(CLOCK_REALTIME, TODAY);
-    GLOBAL_CLOCK.set(CLOCK_MONOTONIC, TODAY);
+    GLOBAL_CLOCK.set(CLOCK_MONOTONIC, Duration::ZERO);
 }

@@ -3,7 +3,7 @@ use core::cmp::Reverse;
 use core::task::Waker;
 use core::time::Duration;
 use lazy_static::lazy_static;
-use crate::sched::time::current_time;
+use crate::sched::time::cpu_time;
 use crate::sync::mutex::IrqMutex;
 
 struct Timer {
@@ -54,7 +54,7 @@ pub fn sched_timer(expire: Duration, waker: Waker) {
 }
 
 pub fn query_timer() -> bool {
-    let now = current_time();
+    let now = cpu_time();
     let mut queue = TIMER_QUEUE.0.lock();
     if queue.is_empty() {
         return false;

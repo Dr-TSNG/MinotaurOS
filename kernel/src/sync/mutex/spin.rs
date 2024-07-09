@@ -3,7 +3,7 @@ use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
-use crate::sched::time::current_time;
+use crate::sched::time::cpu_time;
 use crate::sync::mutex::MutexStrategy;
 
 pub struct SpinMutex<T: ?Sized, S: MutexStrategy> {
@@ -50,13 +50,13 @@ impl<T, S: MutexStrategy> SpinMutex<T, S> {
     }
 
     pub fn lock(&self) -> SpinMutexGuard<T, S> {
-        let start_time = current_time();
+        let start_time = cpu_time();
         loop {
             if let Some(guard) = self.try_lock() {
                 return guard;
             }
             core::hint::spin_loop();
-            if current_time() - start_time > Duration::from_secs(5) {
+            if cpu_time() - start_time > Duration::from_secs(5) {
                 panic!("SpinMutex deadlock");
             }
         }

@@ -18,7 +18,7 @@ use crate::fs::page_cache::PageCache;
 use crate::fs::path::append_path;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
-use crate::sched::time::current_time;
+use crate::sched::time::real_time;
 use crate::sync::block_on;
 use crate::sync::mutex::AsyncMutex;
 
@@ -237,7 +237,7 @@ impl InodeInternal for FAT32Inode {
         let attr = if mode == InodeMode::IFDIR { FileAttr::ATTR_DIRECTORY } else { FileAttr::empty() };
         let dirent = FAT32Dirent::new(name.to_string(), attr, cluster as u32, 0);
         let (dir_pos, dir_len) = fs.append_dir(&mut ext.clusters, &mut ext.dir_occupy, &dirent).await?;
-        let now = current_time();
+        let now = real_time();
         let inode = Arc::new(Self {
             metadata: InodeMeta::new(
                 INO_POOL.fetch_add(1, Ordering::Acquire),

@@ -10,7 +10,7 @@ use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::{CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID, TimeSpec, TMS};
 use crate::sched::sleep_for;
-use crate::sched::time::{current_time, GLOBAL_CLOCK};
+use crate::sched::time::{cpu_time, GLOBAL_CLOCK, real_time};
 
 pub async fn sys_nanosleep(req: usize, _rem: usize) -> SyscallResult<usize> {
     let user_buf = current_process().inner.lock().addr_space.user_slice_r(VirtAddr(req), size_of::<TimeSpec>())?;
@@ -41,7 +41,7 @@ pub fn sys_clock_gettime(clock_id: usize, buf: usize) -> SyscallResult<usize> {
         }
         _ => {
             if let Some(clock_time) = GLOBAL_CLOCK.get(clock_id) {
-                let time = TimeSpec::from(clock_time + current_time());
+                let time = TimeSpec::from(clock_time + cpu_time());
                 user_buf.copy_from_slice(time.as_bytes());
             } else {
                 return Err(Errno::EINVAL);
@@ -53,7 +53,7 @@ pub fn sys_clock_gettime(clock_id: usize, buf: usize) -> SyscallResult<usize> {
 
 pub fn sys_times(buf: usize) -> SyscallResult<usize> {
     let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(buf), size_of::<TMS>())?;
-    let now = current_time();
+    let now = real_time();
     let rusage = &current_thread().inner().rusage;
     let tms = TMS {
         tms_utime: rusage.user_time.as_secs(),
@@ -67,7 +67,7 @@ pub fn sys_times(buf: usize) -> SyscallResult<usize> {
 }
 
 pub fn sys_gettimeofday(tv: usize, _tz: usize) -> SyscallResult<usize> {
-    let time = TimeSpec::from(current_time());
+    let time = TimeSpec::from(real_time());
     let proc_inner = current_process().inner.lock();
     let user_tv = proc_inner.addr_space.user_slice_w(VirtAddr(tv), size_of::<TimeSpec>())?;
     user_tv.copy_from_slice(time.as_bytes());

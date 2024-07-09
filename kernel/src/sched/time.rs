@@ -6,19 +6,25 @@ use core::time::Duration;
 use pin_project::pin_project;
 use crate::arch;
 use crate::driver::BOARD_INFO;
+use crate::sched::ffi::CLOCK_REALTIME;
 use crate::sched::timer::sched_timer;
 use crate::sync::mutex::IrqMutex;
 
 const MSEC_PER_SEC: usize = 1000;
 const TICKS_PER_SEC: usize = 100;
 
-/// 获取当前时间
-pub fn current_time() -> Duration {
+/// 获取从系统启动到现在的时间
+pub fn cpu_time() -> Duration {
     if !BOARD_INFO.is_initialized() {
-        return Duration::from_millis(0);
+        return Duration::ZERO;
     }
     let ms = arch::hardware_ts() / (BOARD_INFO.freq / MSEC_PER_SEC);
     Duration::from_millis(ms as u64)
+}
+
+/// 获取实时时间
+pub fn real_time() -> Duration {
+    GLOBAL_CLOCK.get(CLOCK_REALTIME).unwrap() + cpu_time()
 }
 
 pub fn set_next_trigger() {
@@ -61,7 +67,7 @@ pub enum TimeoutResult<T> {
 
 impl<F: Future> TimeoutFuture<F> {
     pub fn new(wait: Duration, fut: F) -> Self {
-        Self { expire: current_time() + wait, sched: false, fut }
+        Self { expire: cpu_time() + wait, sched: false, fut }
     }
 }
 
@@ -70,7 +76,7 @@ impl<F: Future> Future for TimeoutFuture<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        if current_time() >= *this.expire {
+        if cpu_time() >= *this.expire {
             return Poll::Ready(TimeoutResult::Timeout);
         }
 
