@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::{format, vec};
 use log::{debug, info};
@@ -15,24 +15,43 @@ macro_rules! split_path {
     };
 }
 
-pub async fn resolve_path(proc_inner: &ProcessInner, dirfd: FdNum, path: &str) -> SyscallResult<Arc<dyn Inode>> {
+pub async fn resolve_path(
+    proc_inner: &ProcessInner,
+    dirfd: FdNum,
+    path: &str,
+    follow_link: bool,
+) -> SyscallResult<Arc<dyn Inode>> {
     let path = normalize_path(path);
     let path = path.as_ref();
     debug!("[resolve_path] dirfd: {}, path: {:?}", dirfd, path);
     if is_absolute_path(path) {
-        proc_inner.mnt_ns.lookup_absolute(path).await
+        proc_inner.mnt_ns.lookup_absolute(path, follow_link).await
     } else if dirfd == AT_FDCWD {
-        let inode = proc_inner.mnt_ns.lookup_absolute(&proc_inner.cwd).await?;
-        inode.lookup_relative(path).await
+        let inode = proc_inner.mnt_ns.lookup_absolute(&proc_inner.cwd, follow_link).await?;
+        proc_inner.mnt_ns.lookup_relative(inode, path, follow_link).await
     } else {
         let fd_impl = proc_inner.fd_table.get(dirfd)?;
         let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
-        inode.lookup_relative(path).await
+        proc_inner.mnt_ns.lookup_relative(inode, path, follow_link).await
     }
 }
 
 pub fn is_absolute_path(path: &str) -> bool {
     path.starts_with('/')
+}
+
+pub fn split_last_path(path: &str) -> Option<(String, String)> {
+    let mut path = normalize_path(path);
+    if path == "/" {
+        return None;
+    }
+    match path.rfind('/') {
+        Some(pos) => {
+            let name = path.split_off(pos + 1);
+            Some((path, name))
+        }
+        None => Some((".".to_string(), path)),
+    }
 }
 
 fn normalize_path(path: &str) -> String {

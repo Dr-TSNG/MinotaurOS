@@ -12,6 +12,7 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
 use log::{info, warn};
+use tap::{Pipe, Tap};
 use crate::arch::VirtAddr;
 use crate::config::USER_STACK_TOP;
 use crate::fs::fd::FdTable;
@@ -25,6 +26,7 @@ use crate::process::thread::tid::TidTracker;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::processor::hart::local_hart;
 use crate::result::SyscallResult;
+use crate::sched::ffi::ITimerVal;
 use crate::sched::spawn_user_thread;
 use crate::signal::ffi::Signal;
 use crate::signal::SignalController;
@@ -60,6 +62,8 @@ pub struct ProcessInner {
     pub fd_table: FdTable,
     /// 互斥锁队列
     pub futex_queue: FutexQueue,
+    /// 定时器
+    pub timers: [ITimerVal; 3],
     /// 工作目录
     pub cwd: String,
     /// 退出状态
@@ -82,7 +86,8 @@ impl Process {
                 addr_space,
                 mnt_ns,
                 fd_table: FdTable::new(),
-                futex_queue: FutexQueue::default(),
+                futex_queue: Default::default(),
+                timers: Default::default(),
                 cwd: String::from("/"),
                 exit_code: None,
             }),
@@ -108,7 +113,7 @@ impl Process {
         let (addr_space, entry, mut auxv) =
             AddressSpace::from_elf(&mnt_ns, elf_data).await?;
 
-        current_process().inner.lock().apply_mut(|proc_inner| {
+        current_process().inner.lock().tap_mut(|proc_inner| {
             if proc_inner.threads.len() > 1 {
                 warn!("[execve] More than one thread in process when execve");
             }
@@ -211,7 +216,7 @@ impl Process {
         let mut monitor = PROCESS_MONITOR.lock();
 
         let new_pid = Arc::new(TidTracker::new());
-        let new_thread = self.inner.lock().apply_mut(|proc_inner| {
+        let new_thread = self.inner.lock().pipe_ref_mut(|proc_inner| {
             let new_process = Arc::new(Process {
                 pid: new_pid.clone(),
                 inner: IrqReMutex::new(ProcessInner {
@@ -222,7 +227,8 @@ impl Process {
                     addr_space: proc_inner.addr_space.fork(),
                     mnt_ns: proc_inner.mnt_ns.clone(),
                     fd_table: proc_inner.fd_table.clone(),
-                    futex_queue: FutexQueue::default(),
+                    futex_queue: Default::default(),
+                    timers: Default::default(),
                     cwd: proc_inner.cwd.clone(),
                     exit_code: None,
                 }),
@@ -265,7 +271,7 @@ impl Process {
         ptid: usize,
         ctid: usize,
     ) -> SyscallResult<Tid> {
-        let new_thread = self.inner.lock().apply_mut(|proc_inner| {
+        let new_thread = self.inner.lock().pipe_ref_mut(|proc_inner| {
             proc_inner.addr_space.user_slice_r(VirtAddr(stack), size_of::<usize>() * 2)?;
             let entry = unsafe {
                 *(stack as *const usize)
@@ -330,7 +336,7 @@ impl Process {
     pub fn on_thread_exit(&self, tid: Tid, exit_code: i8) {
         info!("Thread {} exited with code {}", tid, exit_code);
         let monitor = PROCESS_MONITOR.lock();
-        self.inner.lock().apply_mut(|inner| {
+        self.inner.lock().tap_mut(|inner| {
             inner.threads.remove(&tid);
             // 如果没有线程了，通知父进程
             if inner.threads.is_empty() {
@@ -348,7 +354,7 @@ impl Process {
 
     pub fn on_child_exit(&self, pid: Pid, exit_code: i8) {
         info!("Child {} exited with code {}", pid, exit_code);
-        self.inner.lock().apply_mut(|inner| {
+        self.inner.lock().tap_mut(|inner| {
             for thread in inner.threads.values() {
                 if let Some(thread) = thread.upgrade() {
                     thread.recv_signal(Signal::SIGCHLD);

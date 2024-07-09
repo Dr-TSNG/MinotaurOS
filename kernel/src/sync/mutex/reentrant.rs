@@ -5,7 +5,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 
 use crate::processor::hart::local_hart;
-use crate::sched::time::current_time;
+use crate::sched::time::cpu_time;
 use crate::sync::mutex::MutexStrategy;
 
 pub struct ReMutex<T: ?Sized, S: MutexStrategy> {
@@ -59,13 +59,13 @@ impl<T, S: MutexStrategy> ReMutex<T, S> {
     }
 
     pub fn lock(&self) -> ReMutexGuard<T, S> {
-        let start_time = current_time();
+        let start_time = cpu_time();
         loop {
             if let Some(guard) = self.try_lock() {
                 return guard;
             }
             core::hint::spin_loop();
-            if current_time() - start_time > Duration::from_secs(5) {
+            if cpu_time() - start_time > Duration::from_secs(5) {
                 panic!("ReMutex deadlock");
             }
         }
@@ -75,16 +75,6 @@ impl<T, S: MutexStrategy> ReMutex<T, S> {
 impl<T: ?Sized + Default, S: MutexStrategy> Default for ReMutex<T, S> {
     fn default() -> Self {
         Self::new(Default::default())
-    }
-}
-
-impl<T: ?Sized, S: MutexStrategy> ReMutexGuard<'_, T, S> {
-    pub fn apply<F: FnOnce(&T) -> R, R>(self, f: F) -> R {
-        f(self.deref())
-    }
-
-    pub fn apply_mut<F: FnOnce(&mut T) -> R, R>(mut self, f: F) -> R {
-        f(self.deref_mut())
     }
 }
 

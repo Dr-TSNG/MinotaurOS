@@ -1,6 +1,7 @@
 use alloc::vec;
 use core::mem::size_of;
 use log::{debug, info};
+use tap::Tap;
 use zerocopy::AsBytes;
 use crate::arch::{shutdown, VirtAddr};
 use crate::debug::console::DMESG;
@@ -10,7 +11,7 @@ use crate::mm::allocator::free_user_memory;
 use crate::process::monitor::PROCESS_MONITOR;
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
-use crate::sched::time::current_time;
+use crate::sched::time::cpu_time;
 use crate::syscall::system::ffi::{SysInfo, SyslogCmd};
 
 mod ffi {
@@ -79,7 +80,7 @@ pub fn sys_syslog(cmd: i32, buf: usize, len: usize) -> SyscallResult<usize> {
     match cmd {
         SyslogCmd::SYSLOG_ACTION_READ_ALL => {
             let mut lines = vec![];
-            DMESG.lock().apply(|dmesg| {
+            DMESG.lock().tap(|dmesg| {
                 let mut size = 0;
                 for line in dmesg.buf.iter().rev() {
                     if size + line.len() > len {
@@ -114,7 +115,7 @@ pub fn sys_sysinfo(buf: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<SysInfo>())?;
     let mut sys_info = SysInfo::default();
-    sys_info.uptime = current_time().as_secs() as isize;
+    sys_info.uptime = cpu_time().as_secs() as isize;
     sys_info.totalram = total_memory();
     sys_info.freeram = free_user_memory();
     sys_info.procs = PROCESS_MONITOR.lock().count() as u16;

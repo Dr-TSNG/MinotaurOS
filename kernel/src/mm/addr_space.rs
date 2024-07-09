@@ -132,7 +132,10 @@ impl AddressSpace {
                 }
                 xmas_elf::program::Type::Interp => {
                     linker_base = DYNAMIC_LINKER_BASE;
-                    entry = addr_space.load_linker(mnt_ns, linker_base).await?;
+                    let linker = CStr::from_bytes_until_nul(&elf.input[phdr.offset() as usize..])
+                        .unwrap().to_str().unwrap();
+                    debug!("Load linker: {} at {:#x}", linker, linker_base);
+                    entry = addr_space.load_linker(mnt_ns, linker, linker_base).await?;
                 }
                 _ => {}
             }
@@ -286,7 +289,7 @@ impl AddressSpace {
         }
         if let Some((upper_vpn, _)) = self.regions.range(heap_start..).skip(1).next() {
             if addr.floor() >= *upper_vpn {
-                return Ok(self.brk.0);
+                return Err(Errno::ENOMEM);
             }
         }
         let mut brk = self.unmap_region(heap_start).unwrap();
@@ -297,9 +300,10 @@ impl AddressSpace {
         } else if addr.ceil() > heap_end {
             brk.extend(addr.ceil() - heap_end);
         }
+        self.brk = addr.ceil().into();
         self.map_region(brk);
         unsafe { self.activate(); }
-        Ok(core::mem::replace(&mut self.brk, addr).0)
+        Ok(self.brk.0)
     }
 
     pub fn mmap(
@@ -341,7 +345,7 @@ impl AddressSpace {
     }
 
     pub fn munmap(&mut self, start: VirtPageNum, pages: usize) -> SyscallResult {
-        self.modify_region(start, pages, |region| false)
+        self.modify_region(start, pages, |_| false)
     }
 
     pub fn mprotect(&mut self, start: VirtPageNum, pages: usize, perms: ASPerms) -> SyscallResult {
@@ -438,8 +442,13 @@ impl AddressSpace {
         Ok(())
     }
 
-    async fn load_linker(&mut self, mnt_ns: &MountNamespace, offset: usize) -> SyscallResult<usize> {
-        let inode = mnt_ns.lookup_absolute("/lib/musl/libc.so").await?;
+    async fn load_linker(
+        &mut self,
+        mnt_ns: &MountNamespace,
+        linker: &str,
+        offset: usize,
+    ) -> SyscallResult<usize> {
+        let inode = mnt_ns.lookup_absolute(linker, true).await?;
         let file = inode.open().unwrap();
         let elf_data = file.read_all().await.unwrap();
         let elf = ElfFile::new(&elf_data).map_err(|_| Errno::ENOEXEC)?;

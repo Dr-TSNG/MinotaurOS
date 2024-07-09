@@ -8,8 +8,6 @@ use crate::config::KERNEL_ADDR_OFFSET;
 
 pub const SV39_PAGE_BITS: usize = 12;
 pub const SV39_PAGE_SIZE: usize = 4096;
-pub const SV39_PA_WIDTH: usize = 56;
-pub const SV39_PPN_WIDTH: usize = SV39_PA_WIDTH - SV39_PAGE_BITS;
 pub const SV39_VPN_BITS: usize = 9;
 pub const SV39_VPN_MASK: usize = 0x1FF;
 

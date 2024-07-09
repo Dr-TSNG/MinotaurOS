@@ -172,7 +172,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Sendfile => async_syscall!(sys_sendfile, args[0] as FdNum, args[1] as FdNum, args[2], args[3]),
         SyscallCode::Pselect6 => async_syscall!(sys_pselect6, args[0] as FdNum , args[1],args[2],args[3], args[4], args[5]),
         SyscallCode::Ppoll => async_syscall!(sys_ppoll, args[0], args[1], args[2], args[3]),
-        // SyscallCode::Readlinkat
+        SyscallCode::Readlinkat => async_syscall!(sys_readlinkat, args[0] as FdNum, args[1], args[2], args[3]),
         SyscallCode::Newfstatat => async_syscall!(sys_newfstatat, args[0] as FdNum, args[1], args[2], args[3] as u32),
         SyscallCode::Fstat => syscall!(sys_fstat, args[0] as FdNum, args[1]),
         // SyscallCode::Sync
@@ -185,7 +185,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::GetRobustList => syscall!(sys_get_robust_list, args[0], args[1], args[2]),
         SyscallCode::SetRobustList => syscall!(sys_set_robust_list, args[0], args[1]),
         SyscallCode::Nanosleep => async_syscall!(sys_nanosleep, args[0], args[1]),
-        // SyscallCode::Setitimer
+        SyscallCode::Setitimer => syscall!(sys_setitimer, args[0] as i32, args[1], args[2]),
         SyscallCode::ClockGettime => syscall!(sys_clock_gettime, args[0], args[1]),
         SyscallCode::Syslog => syscall!(sys_syslog, args[0] as i32, args[1], args[2]),
         SyscallCode::SchedYield => async_syscall!(sys_yield),
@@ -200,7 +200,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Uname => syscall!(sys_uname, args[0]),
         SyscallCode::Getrlimit => syscall!(sys_getrlimit, args[0] as u32, args[1]),
         SyscallCode::Setrlimit => syscall!(sys_setrlimit, args[0] as u32, args[1]),
-        // SyscallCode::Getrusage
+        SyscallCode::Getrusage => syscall!(sys_getrusage, args[0] as i32, args[1]),
         // SyscallCode::Umask
         SyscallCode::GetTimeOfDay => syscall!(sys_gettimeofday, args[0], args[1]),
         SyscallCode::Getpid => syscall!(sys_getpid),

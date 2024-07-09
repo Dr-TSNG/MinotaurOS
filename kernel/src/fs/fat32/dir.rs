@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 use bitflags::bitflags;
 use time::{Date, Month, Time};
 use crate::sched::ffi::TimeSpec;
-use crate::sched::time::current_time;
+use crate::sched::time::real_time;
 
 /// 目录项偏移
 #[allow(unused)]
@@ -168,7 +168,7 @@ impl FAT32Dirent {
     }
 
     pub fn new(name: String, attr: FileAttr, cluster: u32, size: u32) -> Self {
-        let now = current_time();
+        let now = real_time();
         Self {
             name,
             attr,

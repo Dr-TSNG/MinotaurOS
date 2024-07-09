@@ -2,6 +2,7 @@ use alloc::boxed::Box;
 use alloc::string::ToString;
 use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicUsize, Ordering};
+use tap::Tap;
 use crate::fs::devfs::null::NullInode;
 use crate::fs::devfs::zero::ZeroInode;
 use crate::fs::ffi::{InodeMode, VfsFlags};
@@ -65,7 +66,7 @@ impl RootInode {
             ),
             fs: Arc::downgrade(fs),
         });
-        root.metadata.inner.lock().apply_mut(|inner| {
+        root.metadata.inner.lock().tap_mut(|inner| {
             let inode = NullInode::new(fs.clone(), root.clone());
             inner.children.insert("null".to_string(), InodeChild::new(inode, Box::new(())));
 
