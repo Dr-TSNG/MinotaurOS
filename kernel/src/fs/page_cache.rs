@@ -1,11 +1,16 @@
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
+use alloc::vec;
 use core::cmp::min;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::arch::{PAGE_SIZE, PhysPageNum};
 use crate::fs::inode::Inode;
 use crate::mm::allocator::{alloc_user_frames, UserFrameTracker};
 use crate::result::SyscallResult;
 use crate::sync::mutex::ReMutex;
+
+static HOLDERS: AtomicUsize = AtomicUsize::new(0);
+static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
 pub struct PageCache(ReMutex<PageCacheInner>);
 
@@ -17,16 +22,27 @@ struct PageCacheInner {
 struct Page {
     frame: UserFrameTracker,
     dirty: bool,
+    refs: usize,
 }
 
 impl Page {
     fn new(frame: UserFrameTracker) -> Self {
-        Self { frame, dirty: false }
+        ALLOCATED.fetch_add(1, Ordering::Relaxed);
+        Self { frame, dirty: false, refs: 0 }
     }
 }
 
 impl PageCache {
+    pub fn holders() -> usize {
+        HOLDERS.load(Ordering::Relaxed)
+    }
+
+    pub fn allocated() -> usize {
+        ALLOCATED.load(Ordering::Relaxed)
+    }
+
     pub fn new() -> Arc<Self> {
+        HOLDERS.fetch_add(1, Ordering::Relaxed);
         Arc::new(Self(ReMutex::new(PageCacheInner {
             deleted: false,
             pages: BTreeMap::new(),
@@ -51,6 +67,7 @@ impl PageCache {
             }
             inner.pages.insert(page_num, Page::new(frame));
         }
+        inner.pages.get_mut(&page_num).unwrap().refs += 1;
         Ok(())
     }
 
@@ -140,7 +157,7 @@ impl PageCache {
         Ok(())
     }
 
-    pub async fn sync(&self, inode: &dyn Inode, offset: usize, len: usize) -> SyscallResult<()> {
+    pub async fn sync(&self, inode: &dyn Inode, offset: usize, len: usize, dec_ref: bool) -> SyscallResult<()> {
         let mut inner = self.0.lock();
         if inner.deleted {
             return Ok(());
@@ -149,6 +166,7 @@ impl PageCache {
         let file_size = inode.metadata().inner.lock().size as usize;
         let page_start = offset / PAGE_SIZE;
         let page_end = min(file_size, offset + len).div_ceil(PAGE_SIZE);
+        let mut removable = vec![];
         for (page_num, page) in inner.pages.range_mut(page_start..page_end) {
             if page.dirty {
                 let mut page_buf = page.frame.ppn.byte_array();
@@ -158,18 +176,34 @@ impl PageCache {
                 inode.write_direct(page_buf, (page_num * PAGE_SIZE) as isize).await?;
                 page.dirty = false;
             }
+            if dec_ref {
+                page.refs -= 1;
+            }
+            if page.refs == 0 {
+                removable.push(*page_num);
+            }
+        }
+        for page_num in removable {
+            inner.pages.remove(&page_num);
         }
         Ok(())
     }
 
-    pub async fn sync_all(&self, inode: &dyn Inode) -> SyscallResult {
-        self.sync(inode, 0, usize::MAX).await?;
+    pub async fn sync_all(&self, inode: &dyn Inode, dec_ref: bool) -> SyscallResult {
+        self.sync(inode, 0, usize::MAX, dec_ref).await?;
         Ok(())
+    }
+}
+
+impl Drop for Page {
+    fn drop(&mut self) {
+        ALLOCATED.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
 impl Drop for PageCacheInner {
     fn drop(&mut self) {
+        HOLDERS.fetch_sub(1, Ordering::Relaxed);
         if !self.deleted {
             for page in self.pages.values() {
                 if page.dirty {

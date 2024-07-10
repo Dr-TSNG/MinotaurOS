@@ -1,3 +1,4 @@
+use alloc::sync::Arc;
 use core::mem::size_of;
 use core::pin::pin;
 use core::time::Duration;
@@ -5,7 +6,6 @@ use log::{debug, warn};
 use zerocopy::{AsBytes, FromBytes};
 
 use crate::arch::VirtAddr;
-use crate::process::monitor::PROCESS_MONITOR;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
@@ -43,9 +43,9 @@ pub fn sys_setitimer(which: i32, new_value: usize, old_value: usize) -> SyscallR
 
     match which {
         ITimerType::Real => {
-            let pid = current_process().pid.0;
+            let proc = Arc::downgrade(current_process());
             let callback = move || {
-                if let Some(proc) = PROCESS_MONITOR.lock().get(pid).upgrade() {
+                if let Some(proc) = proc.upgrade() {
                     let proc_inner = &mut *proc.inner.lock();
                     let timer = &mut proc_inner.timers[which as usize];
                     let single_shot = Duration::from(timer.interval).is_zero();
@@ -71,7 +71,7 @@ pub fn sys_setitimer(which: i32, new_value: usize, old_value: usize) -> SyscallR
                 value: next_exp.into(),
             };
             if next_int != now {
-                spawn_kernel_thread(TimerFuture::new(current_process(), interval, next_exp, callback));
+                spawn_kernel_thread(TimerFuture::new(next_exp, callback));
             }
         }
         _ => {

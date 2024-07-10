@@ -224,7 +224,7 @@ impl dyn Inode {
 
     pub async fn sync(&self) -> SyscallResult<isize> {
         if let Some(page_cache) = &self.metadata().page_cache {
-            page_cache.sync_all(self).await?;
+            page_cache.sync_all(self, false).await?;
         }
         Ok(0)
     }
