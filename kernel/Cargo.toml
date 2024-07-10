@@ -50,5 +50,6 @@ info = []
 debug = []
 trace = []
 strace = []
+monitor = []
 
 default = ["error"]

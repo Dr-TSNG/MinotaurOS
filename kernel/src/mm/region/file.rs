@@ -114,9 +114,7 @@ impl ASRegion for FileRegion {
     }
 
     fn sync(&self) {
-        let inode = self.inode.upgrade().unwrap();
-        let page_cache = inode.page_cache().unwrap();
-        block_on(page_cache.sync_all(inode.as_ref())).unwrap()
+        block_on(self.inode.upgrade().unwrap().sync()).unwrap();
     }
 
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
@@ -198,7 +196,7 @@ impl FileRegion {
     fn unmap_one(&self, mut pt: PageTable, page_num: usize) {
         let inode = self.inode.upgrade().unwrap();
         let page_cache = inode.page_cache().unwrap();
-        block_on(page_cache.sync(inode.as_ref(), (page_num + self.offset) * PAGE_SIZE, PAGE_SIZE)).unwrap();
+        block_on(page_cache.sync(inode.as_ref(), (page_num + self.offset) * PAGE_SIZE, PAGE_SIZE, true)).unwrap();
         let vpn = self.metadata.start + page_num;
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
