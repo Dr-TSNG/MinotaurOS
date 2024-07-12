@@ -308,7 +308,7 @@ impl InodeInternal for FAT32Inode {
 impl Drop for FAT32Inode {
     fn drop(&mut self) {
         if let Some(page_cache) = self.metadata.page_cache.as_ref() {
-            block_on(page_cache.sync_all(self, false)).unwrap();
+            block_on(page_cache.sync_all(self)).unwrap();
         }
     }
 }
