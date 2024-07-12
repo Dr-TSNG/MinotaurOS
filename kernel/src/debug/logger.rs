@@ -1,6 +1,6 @@
 use log::{Level, LevelFilter, Metadata, Record};
 use crate::processor::hart::local_hart;
-use crate::sched::time::current_time;
+use crate::sched::time::cpu_time;
 
 #[cfg(feature = "error")]
 const LOG_LEVEL: LevelFilter = LevelFilter::Error;
@@ -28,7 +28,7 @@ impl log::Log for SimpleLogger {
                     println!(
                         "\x1b[{}m[{:6?}] [{:5}] [HART {}] [{}, {}] | {}\x1b[0m",
                         level_color(record.level()),
-                        current_time(),
+                        cpu_time(),
                         record.level(),
                         local_hart().id,
                         thread.process.pid.0,
@@ -40,7 +40,7 @@ impl log::Log for SimpleLogger {
                     println!(
                         "\x1b[{}m[{:6?}] [{:5}] [HART {}] kernel | {}\x1b[0m",
                         level_color(record.level()),
-                        current_time(),
+                        cpu_time(),
                         record.level(),
                         local_hart().id,
                         record.args(),
@@ -82,12 +82,12 @@ macro_rules! strace {
             println,
             processor::{current_process, current_thread},
             processor::hart::local_hart,
-            sched::time::current_time,
+            sched::time::cpu_time,
         };
         println!(
             concat!("\x1b[{}m[{:6?}] [SCALL] [HART {}] [{}, {}] | ", $fmt ,"\x1b[0m"),
             STRACE_COLOR_CODE,
-            current_time(),
+            cpu_time(),
             local_hart().id,
             current_process().pid.0,
             current_thread().tid.0

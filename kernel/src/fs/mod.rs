@@ -1,14 +1,14 @@
 use alloc::sync::Arc;
 use log::info;
-use crate::driver::{DEVICES, Device, BlockDevice};
-use crate::fs::fat32::FAT32FileSystem;
+use crate::driver::{DEVICES, Device};
+use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::MountNamespace;
 use crate::result::SyscallResult;
-use crate::sync::block_on;
 
 pub mod block_cache;
 pub mod devfs;
+pub mod ext4;
 pub mod fat32;
 pub mod fd;
 pub mod ffi;
@@ -28,14 +28,9 @@ pub fn init() -> SyscallResult<Arc<MountNamespace>> {
         }
     }
     let root_dev = root_dev.expect("Missing root block device");
-    let mnt_ns = block_on(async_init(root_dev))?;
+    let root_fs = Ext4FileSystem::new(root_dev, VfsFlags::empty());
+    let mnt_ns = Arc::new(MountNamespace::new(root_fs));
     info!("File systems initialized");
     path::path_test();
-    Ok(mnt_ns)
-}
-
-async fn async_init(root_dev: Arc<dyn BlockDevice>) -> SyscallResult<Arc<MountNamespace>> {
-    let root_fs = FAT32FileSystem::new(root_dev, VfsFlags::empty()).await?;
-    let mnt_ns = Arc::new(MountNamespace::new(root_fs));
     Ok(mnt_ns)
 }

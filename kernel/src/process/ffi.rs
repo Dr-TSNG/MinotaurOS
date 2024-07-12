@@ -1,6 +1,7 @@
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
-use zerocopy::AsBytes;
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use crate::sched::ffi::TimeVal;
 
 bitflags! {
     pub struct CloneFlags: u32 {
@@ -67,4 +68,62 @@ pub enum RlimitCmd {
 pub struct Rlimit {
     pub rlim_cur: usize,
     pub rlim_max: usize,
+}
+
+pub const RUSAGE_SELF: i32 = 0;
+pub const RUSAGE_THREAD: i32 = 1;
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Default, AsBytes)]
+pub struct RUsage {
+    /// user CPU time used
+    pub ru_utime: TimeVal,
+    /// system CPU time used
+    pub ru_stime: TimeVal,
+    /// maximum resident set size
+    pub ru_maxrss: usize,
+    /// integral shared memory size
+    pub ru_ixrss: usize,
+    /// integral unshared data size
+    pub ru_idrss: usize,
+    /// integral unshared stack size
+    pub ru_isrss: usize,
+    /// page reclaims (soft page faults)
+    pub ru_minflt: usize,
+    /// page faults (hard page faults)
+    pub ru_majflt: usize,
+    /// swaps
+    pub ru_nswap: usize,
+    /// block input operations
+    pub ru_inblock: usize,
+    /// block output operations
+    pub ru_oublock: usize,
+    /// IPC messages sent
+    pub ru_msgsnd: usize,
+    /// IPC messages received
+    pub ru_msgrcv: usize,
+    /// signals received
+    pub ru_nsignals: usize,
+    /// voluntary context switches
+    pub ru_nvcsw: usize,
+    /// involuntary context switches
+    pub ru_nivcsw: usize,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, AsBytes, FromZeroes, FromBytes)]
+pub struct CpuSet {
+    /// cpu set
+    pub set: usize,
+    /// for padding
+    pub dummy: [usize; 15],
+}
+
+impl CpuSet {
+    pub fn new(cpus: usize) -> Self {
+        Self {
+            set: (1 << cpus - 1),
+            dummy: [0; 15],
+        }
+    }
 }

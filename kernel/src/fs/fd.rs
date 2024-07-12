@@ -83,7 +83,7 @@ impl FdTable {
     /// 插入一个文件描述符，返回位置
     pub fn put(&mut self, fd_impl: FileDescriptor, start: FdNum) -> SyscallResult<FdNum> {
         let fd = self.find_slot(start as usize);
-        let mut proc_inner = current_process().inner.lock();
+        let proc_inner = current_process().inner.lock();
         if fd > proc_inner.fd_table.rlimit.rlim_max - 1 {
             return Err(Errno::EMFILE);
         }
@@ -157,3 +157,4 @@ impl FdTable {
         self.rlimit = rlimit;
     }
 }
+

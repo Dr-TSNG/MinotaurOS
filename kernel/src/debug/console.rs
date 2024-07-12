@@ -4,6 +4,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use core::fmt::Arguments;
 use lazy_static::lazy_static;
+use tap::Tap;
 use crate::fs::devfs::tty::DEFAULT_TTY;
 
 use crate::sync::block_on;
@@ -24,7 +25,7 @@ lazy_static! {
 
 pub fn print(args: Arguments) {
     let fmt = fmt::format(args);
-    DMESG.lock().apply_mut(|dmesg| {
+    DMESG.lock().tap_mut(|dmesg| {
         dmesg.buf.push_back(Arc::new(fmt));
         if dmesg.buf.len() > MAX_LINES {
             dmesg.start += 1;

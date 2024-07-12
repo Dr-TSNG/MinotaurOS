@@ -32,6 +32,29 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
 use log::{info, warn};
+use tap::{Pipe, Tap};
+use crate::arch::VirtAddr;
+use crate::config::USER_STACK_TOP;
+use crate::fs::fd::FdTable;
+use crate::fs::file_system::MountNamespace;
+use crate::mm::addr_space::AddressSpace;
+use crate::process::aux::Aux;
+use crate::process::ffi::{CloneFlags, CpuSet};
+use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
+use crate::process::thread::resource::ResourceUsage;
+use crate::process::thread::Thread;
+use crate::process::thread::tid::TidTracker;
+use crate::processor::{current_process, current_thread, current_trap_ctx};
+use crate::processor::hart::local_hart;
+use crate::result::SyscallResult;
+use crate::sched::ffi::ITimerVal;
+use crate::sched::spawn_user_thread;
+use crate::signal::ffi::Signal;
+use crate::signal::SignalController;
+use crate::sync::futex::FutexQueue;
+use crate::sync::mutex::IrqReMutex;
+use crate::trap::context::TrapContext;
+
 
 pub type Tid = usize;
 pub type Pid = usize;
@@ -63,6 +86,8 @@ pub struct ProcessInner {
     pub socket_table: SocketTable,
     /// 互斥锁队列
     pub futex_queue: FutexQueue,
+    /// 定时器
+    pub timers: [ITimerVal; 3],
     /// 工作目录
     pub cwd: String,
     /// 退出状态
@@ -89,23 +114,15 @@ impl Process {
                 fd_table: FdTable::new(),
                 socket_table: SocketTable::new(),
                 futex_queue: FutexQueue::default(),
+                timers: Default::default(),
                 cwd: String::from("/"),
                 exit_code: None,
             }),
         });
 
         let trap_ctx = TrapContext::new(entry, USER_STACK_TOP.0);
-        let thread = Thread::new(
-            process.clone(),
-            trap_ctx,
-            Some(pid.clone()),
-            SignalController::new(),
-        );
-        process
-            .inner
-            .lock()
-            .threads
-            .insert(pid.0, Arc::downgrade(&thread));
+        let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()), SignalController::new(), CpuSet::new(1));
+        process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
 
         PROCESS_MONITOR.lock().add(pid.0, Arc::downgrade(&process));
         spawn_user_thread(thread);
@@ -122,7 +139,7 @@ impl Process {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
         let (addr_space, entry, mut auxv) = AddressSpace::from_elf(&mnt_ns, elf_data).await?;
 
-        current_process().inner.lock().apply_mut(|proc_inner| {
+        current_process().inner.lock().tap_mut(|proc_inner| {
             if proc_inner.threads.len() > 1 {
                 warn!("[execve] More than one thread in process when execve");
             }
@@ -213,6 +230,15 @@ impl Process {
             *ptr = args.len();
         }
 
+        // 重置线程状态
+        let thread = current_thread();
+        thread.signals.reset();
+        thread.event_bus.reset();
+        thread.inner().tap_mut(|it| {
+            it.tid_address = Default::default();
+            it.rusage = ResourceUsage::new();
+        });
+
         // a0 -> argc, a1 -> argv, a2 -> envp, a3 -> auxv
         let trap_ctx = current_trap_ctx();
         *trap_ctx = TrapContext::new(entry, user_sp);
@@ -238,6 +264,7 @@ impl Process {
         let new_socket_table = SocketTable::from_another(&self.inner.lock().socket_table).unwrap();
 
         let new_thread = self.inner.lock().apply_mut(|proc_inner| {
+
             let new_process = Arc::new(Process {
                 pid: new_pid.clone(),
                 inner: IrqReMutex::new(ProcessInner {
@@ -249,7 +276,8 @@ impl Process {
                     mnt_ns: proc_inner.mnt_ns.clone(),
                     fd_table: proc_inner.fd_table.clone(),
                     socket_table: new_socket_table,
-                    futex_queue: FutexQueue::default(),
+                    futex_queue: Default::default(),
+                    timers: Default::default(),
                     cwd: proc_inner.cwd.clone(),
                     exit_code: None,
                 }),
@@ -269,17 +297,9 @@ impl Process {
             } else {
                 current_thread().signals.clone_private()
             };
-            let new_thread = Thread::new(
-                new_process.clone(),
-                trap_ctx,
-                Some(new_pid.clone()),
-                signals,
-            );
-            new_process
-                .inner
-                .lock()
-                .threads
-                .insert(new_pid.0, Arc::downgrade(&new_thread));
+            let new_cpu_set = current_thread().cpu_set.lock().clone();
+            let new_thread = Thread::new(new_process.clone(), trap_ctx, Some(new_pid.clone()), signals, new_cpu_set);
+            new_process.inner.lock().threads.insert(new_pid.0, Arc::downgrade(&new_thread));
             proc_inner.children.push(new_process.clone());
 
             new_thread
@@ -305,11 +325,12 @@ impl Process {
         ptid: usize,
         ctid: usize,
     ) -> SyscallResult<Tid> {
-        let new_thread = self.inner.lock().apply_mut(|proc_inner| {
-            proc_inner
-                .addr_space
-                .user_slice_r(VirtAddr(stack), size_of::<usize>() * 2)?;
-            let entry = unsafe { *(stack as *const usize) };
+
+        let new_thread = self.inner.lock().pipe_ref_mut(|proc_inner| {
+            proc_inner.addr_space.user_slice_r(VirtAddr(stack), size_of::<usize>() * 2)?;
+            let entry = unsafe {
+                *(stack as *const usize)
+            };
             let args_addr = unsafe {
                 let ptr = stack + size_of::<usize>();
                 *(ptr as *const usize)
@@ -325,7 +346,8 @@ impl Process {
                 current_thread().signals.clone_private()
             };
 
-            let new_thread = Thread::new(self.clone(), trap_ctx, None, signals);
+            let new_cpu_set = current_thread().cpu_set.lock().clone();
+            let new_thread = Thread::new(self.clone(), trap_ctx, None, signals, new_cpu_set);
             let new_tid = new_thread.tid.0;
             proc_inner
                 .threads
@@ -380,7 +402,7 @@ impl Process {
     pub fn on_thread_exit(&self, tid: Tid, exit_code: i8) {
         info!("Thread {} exited with code {}", tid, exit_code);
         let monitor = PROCESS_MONITOR.lock();
-        self.inner.lock().apply_mut(|inner| {
+        self.inner.lock().tap_mut(|inner| {
             inner.threads.remove(&tid);
             // 如果没有线程了，通知父进程
             if inner.threads.is_empty() {
@@ -398,7 +420,7 @@ impl Process {
 
     pub fn on_child_exit(&self, pid: Pid, exit_code: i8) {
         info!("Child {} exited with code {}", pid, exit_code);
-        self.inner.lock().apply_mut(|inner| {
+        self.inner.lock().tap_mut(|inner| {
             for thread in inner.threads.values() {
                 if let Some(thread) = thread.upgrade() {
                     thread.recv_signal(Signal::SIGCHLD);

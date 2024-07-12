@@ -1,7 +1,7 @@
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec;
-use core::ops::Deref;
+use core::ops::{Deref, DerefMut};
 use log::{debug, info};
 use crate::processor::current_thread;
 use crate::signal::ffi::{SIG_MAX, SigAction, Signal, SigSet};
@@ -75,17 +75,26 @@ pub struct SignalPoll {
     pub blocked_before: SigSet,
 }
 
-impl SignalController {
-    pub fn new() -> Self {
+impl SignalControllerInner {
+    fn new() -> Self {
         let handlers = core::array::from_fn(|signal| {
             SignalHandler::kernel(signal.try_into().unwrap())
         });
-        let inner = SignalControllerInner {
+        SignalControllerInner {
             pending: SignalQueue::default(),
             blocked: SigSet::default(),
             handlers: Arc::new(Mutex::new(handlers)),
-        };
-        Self(Mutex::new(inner))
+        }
+    }
+}
+
+impl SignalController {
+    pub fn new() -> Self {
+        Self(Mutex::new(SignalControllerInner::new()))
+    }
+
+    pub fn reset(&self) {
+        let _ = core::mem::replace(self.0.lock().deref_mut(), SignalControllerInner::new());
     }
 
     pub fn clone_private(&self) -> Self {
@@ -117,7 +126,7 @@ impl SignalController {
     }
 
     pub fn set_mask(&self, mask: SigSet) {
-        self.0.lock().blocked = mask;
+        self.0.lock().blocked = mask.difference(SigSet::SIGKILL | SigSet::SIGSEGV);
     }
 
     pub fn get_handler(&self, signal: Signal) -> SignalHandler {
@@ -140,8 +149,9 @@ impl SignalController {
             let blocked_before = inner.blocked;
             let handler = inner.handlers.lock()[signal as usize];
             if let SignalHandler::User(sig_action) = &handler {
-                inner.blocked.insert(signal.into());
+                inner.blocked |= signal.into();
                 inner.blocked |= sig_action.sa_mask;
+                inner.blocked -= SigSet::SIGKILL | SigSet::SIGSEGV;
             }
 
             inner.pending.extend(popped);

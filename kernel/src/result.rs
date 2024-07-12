@@ -4,11 +4,13 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use core::future::Future;
 use core::pin::Pin;
+use num_enum::TryFromPrimitive;
 use crate::arch::{PhysPageNum, VirtAddr, VirtPageNum};
 
 pub type SyscallResult<T = ()> = Result<T, Errno>;
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[repr(i32)]
+#[derive(TryFromPrimitive, Debug, PartialEq, Copy, Clone)]
 pub enum Errno {
     EUNDEF = 0,
     EPERM = 1,

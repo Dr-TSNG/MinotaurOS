@@ -31,3 +31,5 @@ impl From<MapProt> for ASPerms {
         perms
     }    
 }
+
+pub const IPC_PRIVATE: usize = 0;

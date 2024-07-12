@@ -13,6 +13,7 @@ pub mod allocator;
 pub mod ffi;
 pub mod page_table;
 pub mod region;
+mod sysv_shm;
 
 pub static KERNEL_SPACE: LateInit<Mutex<AddressSpace>> = LateInit::new();
 

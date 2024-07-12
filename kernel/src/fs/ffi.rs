@@ -98,8 +98,8 @@ pub enum FcntlCmd {
 }
 
 /// Inode 类型
-#[derive(PartialEq, Debug, Clone, Copy)]
-#[repr(u32)]
+#[derive(TryFromPrimitive, PartialEq, Debug, Clone, Copy)]
+#[repr(u16)]
 pub enum InodeMode {
     /// FIFO
     IFIFO = 0x1000,
@@ -118,6 +118,7 @@ pub enum InodeMode {
 }
 
 pub const AT_FDCWD: i32 = -100;
+pub const AT_SYMLINK_NOFOLLOW: u32 = 0x100;
 pub const AT_REMOVEDIR: u32 = 0x200;
 
 pub const PATH_MAX: usize = 260;
