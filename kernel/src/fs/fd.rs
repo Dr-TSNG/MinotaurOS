@@ -14,7 +14,7 @@ pub type FdNum = i32;
 #[derive(Clone)]
 pub struct FdTable {
     table: Vec<Option<FileDescriptor>>,
-    pub rlimit: Rlimit
+    pub rlimit: Rlimit,
 }
 
 #[derive(Clone)]
@@ -51,7 +51,8 @@ impl FdTable {
             table,
             rlimit: Rlimit {
                 rlim_cur: MAX_FD_NUM,
-                rlim_max: MAX_FD_NUM},
+                rlim_max: MAX_FD_NUM,
+            },
         }
     }
 
@@ -67,17 +68,7 @@ impl FdTable {
 
     /// 获取指定位置的文件描述符
     pub fn get(&self, fd: FdNum) -> SyscallResult<FileDescriptor> {
-        let fd = fd as usize;
-        self.table.get(fd).and_then(Option::clone).ok_or(Errno::EBADF)
-    }
-
-    /// 获取引用
-    pub fn get_ref(&self, fd: FdNum) -> Option<&FileDescriptor> {
-        if fd > self.table.len() as i32 {
-            None
-        } else {
-            self.table[fd as usize].as_ref()
-        }
+        self.table.get(fd as usize).and_then(Option::clone).ok_or(Errno::EBADF)
     }
 
     /// 插入一个文件描述符，返回位置
@@ -108,31 +99,8 @@ impl FdTable {
     }
 
     /// 删除一个文件描述符
-    pub fn remove(&mut self, fd: FdNum) -> SyscallResult {
-        let fd = fd as usize;
-        if fd >= self.table.len() {
-            return Err(Errno::EBADF);
-        }
-        self.table[fd] = None;
-        Ok(())
-    }
-
-    /// 获取一个文件描述符的所有权
-    pub fn take(&mut self, fd: FdNum) -> SyscallResult<Option<FileDescriptor>> {
-        if fd >= self.table.len() as i32 {
-            Ok(None)
-        } else {
-            Ok(self.table[fd as usize].take())
-        }
-    }
-
-    pub fn alloc_fd(&mut self) -> SyscallResult<usize> {
-        if let Some(fd) = self.free_slot() {
-            Ok(fd)
-        } else {
-            self.table.push(None);
-            Ok(self.table.len() - 1)
-        }
+    pub fn take(&mut self, fd: FdNum) -> SyscallResult<FileDescriptor> {
+        self.table.get_mut(fd as usize).and_then(Option::take).ok_or(Errno::EBADF)
     }
 }
 
@@ -148,13 +116,4 @@ impl FdTable {
         }
         self.table.len()
     }
-
-    fn free_slot(&self) -> Option<usize> {
-        (0..self.table.len()).find(|fd| self.table[*fd].is_none())
-    }
-
-    pub fn set_rlimit(&mut self, rlimit: Rlimit) {
-        self.rlimit = rlimit;
-    }
 }
-

@@ -3,26 +3,6 @@ pub mod ffi;
 pub mod monitor;
 pub mod thread;
 
-use crate::arch::VirtAddr;
-use crate::config::USER_STACK_TOP;
-use crate::fs::fd::FdTable;
-use crate::fs::file_system::MountNamespace;
-use crate::mm::addr_space::AddressSpace;
-use crate::net::SocketTable;
-use crate::process::aux::Aux;
-use crate::process::ffi::CloneFlags;
-use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
-use crate::process::thread::tid::TidTracker;
-use crate::process::thread::Thread;
-use crate::processor::hart::local_hart;
-use crate::processor::{current_process, current_thread, current_trap_ctx};
-use crate::result::SyscallResult;
-use crate::sched::spawn_user_thread;
-use crate::signal::ffi::Signal;
-use crate::signal::SignalController;
-use crate::sync::futex::FutexQueue;
-use crate::sync::mutex::IrqReMutex;
-use crate::trap::context::TrapContext;
 use alloc::collections::BTreeMap;
 use alloc::ffi::CString;
 use alloc::string::String;
@@ -38,6 +18,7 @@ use crate::config::USER_STACK_TOP;
 use crate::fs::fd::FdTable;
 use crate::fs::file_system::MountNamespace;
 use crate::mm::addr_space::AddressSpace;
+use crate::net::SocketTable;
 use crate::process::aux::Aux;
 use crate::process::ffi::{CloneFlags, CpuSet};
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
@@ -54,7 +35,6 @@ use crate::signal::SignalController;
 use crate::sync::futex::FutexQueue;
 use crate::sync::mutex::IrqReMutex;
 use crate::trap::context::TrapContext;
-
 
 pub type Tid = usize;
 pub type Pid = usize;
@@ -82,7 +62,7 @@ pub struct ProcessInner {
     pub mnt_ns: Arc<MountNamespace>,
     /// 文件描述符表
     pub fd_table: FdTable,
-    /// Socket table
+    /// Socket 表
     pub socket_table: SocketTable,
     /// 互斥锁队列
     pub futex_queue: FutexQueue,
@@ -112,8 +92,8 @@ impl Process {
                 addr_space,
                 mnt_ns,
                 fd_table: FdTable::new(),
-                socket_table: SocketTable::new(),
-                futex_queue: FutexQueue::default(),
+                socket_table: Default::default(),
+                futex_queue: Default::default(),
                 timers: Default::default(),
                 cwd: String::from("/"),
                 exit_code: None,
@@ -137,7 +117,8 @@ impl Process {
         envs: &[CString],
     ) -> SyscallResult<usize> {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
-        let (addr_space, entry, mut auxv) = AddressSpace::from_elf(&mnt_ns, elf_data).await?;
+        let (addr_space, entry, mut auxv) =
+            AddressSpace::from_elf(&mnt_ns, elf_data).await?;
 
         current_process().inner.lock().tap_mut(|proc_inner| {
             if proc_inner.threads.len() > 1 {
@@ -146,8 +127,7 @@ impl Process {
 
             // 终止除了当前线程外的所有线程
             let current_tid = current_thread().tid.0;
-            proc_inner
-                .threads
+            proc_inner.threads
                 .extract_if(|tid, _| *tid != current_tid)
                 .for_each(|(_, thread)| {
                     if let Some(thread) = thread.upgrade() {
@@ -156,9 +136,7 @@ impl Process {
                 });
 
             // 切换页表，复制文件描述符表
-            unsafe {
-                addr_space.activate();
-            }
+            unsafe { addr_space.activate(); }
             let hart = local_hart();
             hart.ctx.user_task.as_mut().unwrap().root_pt = addr_space.root_pt;
             proc_inner.addr_space = addr_space;
@@ -191,11 +169,7 @@ impl Process {
         user_sp -= platform_bytes.len();
         auxv.push(Aux::new(aux::AT_PLATFORM, user_sp));
         unsafe {
-            copy_nonoverlapping(
-                platform_bytes.as_ptr(),
-                user_sp as *mut u8,
-                platform_bytes.len(),
-            );
+            copy_nonoverlapping(platform_bytes.as_ptr(), user_sp as *mut u8, platform_bytes.len());
         }
 
         // 写入 16 字节随机数（这里直接写入 0）
@@ -249,9 +223,7 @@ impl Process {
 
         info!(
             "[execve] Execve process (pid: {}): args {:?}, env {:?}",
-            current_process().pid.0,
-            args,
-            envs,
+            current_process().pid.0, args, envs,
         );
         Ok(args.len())
     }
@@ -260,11 +232,7 @@ impl Process {
         let mut monitor = PROCESS_MONITOR.lock();
 
         let new_pid = Arc::new(TidTracker::new());
-
-        let new_socket_table = SocketTable::from_another(&self.inner.lock().socket_table).unwrap();
-
-        let new_thread = self.inner.lock().apply_mut(|proc_inner| {
-
+        let new_thread = self.inner.lock().pipe_ref_mut(|proc_inner| {
             let new_process = Arc::new(Process {
                 pid: new_pid.clone(),
                 inner: IrqReMutex::new(ProcessInner {
@@ -275,7 +243,7 @@ impl Process {
                     addr_space: proc_inner.addr_space.fork(),
                     mnt_ns: proc_inner.mnt_ns.clone(),
                     fd_table: proc_inner.fd_table.clone(),
-                    socket_table: new_socket_table,
+                    socket_table: proc_inner.socket_table.clone(),
                     futex_queue: Default::default(),
                     timers: Default::default(),
                     cwd: proc_inner.cwd.clone(),
@@ -283,9 +251,7 @@ impl Process {
                 }),
             });
             // 地址空间 fork 后需要刷新 TLB
-            unsafe {
-                proc_inner.addr_space.activate();
-            }
+            unsafe { proc_inner.addr_space.activate(); }
 
             let mut trap_ctx = current_trap_ctx().clone();
             trap_ctx.user_x[10] = 0;
@@ -306,9 +272,7 @@ impl Process {
         });
 
         monitor.add(new_pid.0, Arc::downgrade(&new_thread.process));
-        THREAD_MONITOR
-            .lock()
-            .add(new_thread.tid.0, Arc::downgrade(&new_thread));
+        THREAD_MONITOR.lock().add(new_thread.tid.0, Arc::downgrade(&new_thread));
         spawn_user_thread(new_thread);
         info!(
             "[fork_process] New process (pid = {}) created, flags {:?}",
@@ -325,7 +289,6 @@ impl Process {
         ptid: usize,
         ctid: usize,
     ) -> SyscallResult<Tid> {
-
         let new_thread = self.inner.lock().pipe_ref_mut(|proc_inner| {
             proc_inner.addr_space.user_slice_r(VirtAddr(stack), size_of::<usize>() * 2)?;
             let entry = unsafe {
@@ -349,26 +312,18 @@ impl Process {
             let new_cpu_set = current_thread().cpu_set.lock().clone();
             let new_thread = Thread::new(self.clone(), trap_ctx, None, signals, new_cpu_set);
             let new_tid = new_thread.tid.0;
-            proc_inner
-                .threads
-                .insert(new_tid, Arc::downgrade(&new_thread));
+            proc_inner.threads.insert(new_tid, Arc::downgrade(&new_thread));
 
             if flags.contains(CloneFlags::CLONE_PARENT_SETTID) {
-                let buf = proc_inner
-                    .addr_space
-                    .user_slice_w(VirtAddr(ptid), size_of::<usize>())?;
+                let buf = proc_inner.addr_space.user_slice_w(VirtAddr(ptid), size_of::<usize>())?;
                 buf.copy_from_slice(&new_tid.to_ne_bytes());
             }
             if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
-                proc_inner
-                    .addr_space
-                    .user_slice_w(VirtAddr(ctid), size_of::<usize>())?;
+                proc_inner.addr_space.user_slice_w(VirtAddr(ctid), size_of::<usize>())?;
                 new_thread.inner().tid_address.clear = Some(VirtAddr(ctid));
             }
             if flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
-                let buf = proc_inner
-                    .addr_space
-                    .user_slice_w(VirtAddr(ctid), size_of::<usize>())?;
+                let buf = proc_inner.addr_space.user_slice_w(VirtAddr(ctid), size_of::<usize>())?;
                 buf.copy_from_slice(&new_tid.to_ne_bytes());
                 new_thread.inner().tid_address.set = Some(VirtAddr(ctid));
             }
@@ -377,9 +332,7 @@ impl Process {
         })?;
         let new_tid = new_thread.tid.0;
 
-        THREAD_MONITOR
-            .lock()
-            .add(new_tid, Arc::downgrade(&new_thread));
+        THREAD_MONITOR.lock().add(new_tid, Arc::downgrade(&new_thread));
         spawn_user_thread(new_thread);
         info!(
             "[clone_thread] New thread (tid = {}) created, flags {:?}, ptid {:#x}, ctid {:#x}",

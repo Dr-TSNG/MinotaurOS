@@ -53,4 +53,3 @@ impl MutexStrategy for IrqStrategy {
         IrqGuard::new()
     }
 }
-

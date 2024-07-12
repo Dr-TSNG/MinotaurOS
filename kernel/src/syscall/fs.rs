@@ -304,7 +304,7 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
 }
 
 pub fn sys_close(fd: FdNum) -> SyscallResult<usize> {
-    current_process().inner.lock().fd_table.remove(fd)?;
+    current_process().inner.lock().fd_table.take(fd)?;
     Ok(0)
 }
 
@@ -321,14 +321,14 @@ pub fn sys_pipe2(fds: usize, flags: u32) -> SyscallResult<usize> {
 }
 
 pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<usize> {
-    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
-    let mut file_inner = fd_impl.file.metadata().inner.lock().await;
-    let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
+    let file = current_process().inner.lock().fd_table.get(fd)?.file;
+    let inode = file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
     if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
     }
     let mut cur = buf;
-    for (idx, child) in inode.list(file_inner.pos as usize).await?.enumerate() {
+    let pos = file.seek(Seek::Cur(0)).await? as usize;
+    for (idx, child) in inode.list(pos).await?.enumerate() {
         let name = match idx {
             0 => CString::new(".").unwrap(),
             1 => CString::new("..").unwrap(),
@@ -346,7 +346,7 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
         dirent.d_name[..name_bytes.len()].copy_from_slice(name_bytes);
         let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(cur), dirent_size)?;
         user_buf.copy_from_slice(&dirent.as_bytes()[..dirent_size]);
-        file_inner.pos += 1;
+        file.seek(Seek::Cur(1)).await?;
         cur += dirent_size;
     }
 

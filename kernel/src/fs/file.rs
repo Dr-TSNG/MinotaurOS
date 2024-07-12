@@ -7,27 +7,19 @@ use crate::arch::PAGE_SIZE;
 use crate::fs::ffi::InodeMode;
 use crate::fs::inode::Inode;
 use crate::result::{Errno, SyscallResult};
-use crate::sync::mutex::AsyncMutex;
+use crate::sync::mutex::{AsyncMutex, Mutex};
 use crate::fs::ffi::OpenFlags;
 
 pub struct FileMeta {
     pub inode: Option<Arc<dyn Inode>>,
-    pub prw_lock: AsyncMutex<()>,
-    pub inner: AsyncMutex<FileMetaInner>,
-}
-
-#[derive(Default)]
-pub struct FileMetaInner {
-    /// 位置指针
-    pub pos: isize,
+    pub flags: Mutex<OpenFlags>,
 }
 
 impl FileMeta {
-    pub fn new(inode: Option<Arc<dyn Inode>>) -> Self {
+    pub fn new(inode: Option<Arc<dyn Inode>>, flags: OpenFlags) -> Self {
         FileMeta {
             inode,
-            prw_lock: AsyncMutex::default(),
-            inner: AsyncMutex::default(),
+            flags: Mutex::new(flags),
         }
     }
 }
@@ -99,14 +91,6 @@ pub trait File: Send + Sync {
     fn pollout(&self, waker: Option<Waker>) -> SyscallResult<bool> {
         Ok(true)
     }
-
-    async fn socket_read(&self,buf: &mut [u8],flags: OpenFlags) -> SyscallResult<isize> {
-        return Err(Errno::EINVAL)
-    }
-
-    async fn socket_write(&self,buf: &[u8],flags: OpenFlags) -> SyscallResult<isize> {
-        return Err(Errno::EINVAL)
-    }
 }
 
 impl dyn File {
@@ -176,11 +160,17 @@ impl File for DirFile {
 
 pub struct RegularFile {
     metadata: FileMeta,
+    pos: AsyncMutex<isize>,
+    prw_lock: AsyncMutex<()>,
 }
 
 impl RegularFile {
     pub fn new(metadata: FileMeta) -> Arc<Self> {
-        Arc::new(Self { metadata })
+        Arc::new(Self {
+            metadata,
+            pos: AsyncMutex::default(),
+            prw_lock: AsyncMutex::default(),
+        })
     }
 }
 
@@ -195,9 +185,9 @@ impl File for RegularFile {
         if inode.metadata().mode == InodeMode::IFDIR {
             return Err(Errno::EISDIR);
         }
-        let mut inner = self.metadata.inner.lock().await;
-        let count = inode.read(buf, inner.pos).await?;
-        inner.pos += count;
+        let mut pos = self.pos.lock().await;
+        let count = inode.read(buf, *pos).await?;
+        *pos += count;
         Ok(count)
     }
 
@@ -206,9 +196,9 @@ impl File for RegularFile {
         if inode.metadata().mode == InodeMode::IFDIR {
             return Err(Errno::EISDIR);
         }
-        let mut inner = self.metadata.inner.lock().await;
-        let count = inode.write(buf, inner.pos).await?;
-        inner.pos += count;
+        let mut pos = self.pos.lock().await;
+        let count = inode.write(buf, *pos).await?;
+        *pos += count;
         Ok(count)
     }
 
@@ -233,8 +223,8 @@ impl File for RegularFile {
         if inode.metadata().mode == InodeMode::IFDIR {
             return Err(Errno::EISDIR);
         }
-        let mut inner = self.metadata.inner.lock().await;
-        inner.pos = match seek {
+        let mut pos = self.pos.lock().await;
+        *pos = match seek {
             Seek::Set(offset) => {
                 if offset < 0 {
                     return Err(Errno::EINVAL);
@@ -242,7 +232,7 @@ impl File for RegularFile {
                 offset
             }
             Seek::Cur(offset) => {
-                match inner.pos.checked_add(offset) {
+                match pos.checked_add(offset) {
                     Some(new_pos) => new_pos,
                     None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
                 }
@@ -255,11 +245,11 @@ impl File for RegularFile {
                 }
             }
         };
-        Ok(inner.pos)
+        Ok(*pos)
     }
 
     async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
-        let _lock = self.metadata().prw_lock.lock().await;
+        let _lock = self.prw_lock.lock().await;
         let old = self.seek(Seek::Cur(0)).await?;
         self.seek(Seek::Set(offset)).await?;
         let ret = self.read(buf).await;
@@ -268,7 +258,7 @@ impl File for RegularFile {
     }
 
     async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
-        let _lock = self.metadata().prw_lock.lock().await;
+        let _lock = self.prw_lock.lock().await;
         let old = self.seek(Seek::Cur(0)).await?;
         self.seek(Seek::Set(offset)).await?;
         let ret = self.write(buf).await;

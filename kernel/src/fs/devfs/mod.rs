@@ -11,11 +11,10 @@ use crate::fs::inode::{Inode, InodeChild, InodeInternal, InodeMeta};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::once::LateInit;
 
+mod net;
 mod null;
 pub mod tty;
 mod zero;
-pub(crate) mod unix_socket;
-pub(crate) mod net;
 
 pub struct DevFileSystem {
     vfsmeta: FileSystemMeta,
