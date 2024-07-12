@@ -19,7 +19,7 @@ use crate::fs::fd::FdTable;
 use crate::fs::file_system::MountNamespace;
 use crate::mm::addr_space::AddressSpace;
 use crate::process::aux::Aux;
-use crate::process::ffi::CloneFlags;
+use crate::process::ffi::{CloneFlags, CpuSet};
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
 use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::Thread;
@@ -95,7 +95,7 @@ impl Process {
         });
 
         let trap_ctx = TrapContext::new(entry, USER_STACK_TOP.0);
-        let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()), SignalController::new());
+        let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()), SignalController::new(), CpuSet::new(1));
         process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
 
         PROCESS_MONITOR.lock().add(pid.0, Arc::downgrade(&process));
@@ -256,7 +256,8 @@ impl Process {
             } else {
                 current_thread().signals.clone_private()
             };
-            let new_thread = Thread::new(new_process.clone(), trap_ctx, Some(new_pid.clone()), signals);
+            let new_cpu_set = current_thread().cpu_set.lock().clone();
+            let new_thread = Thread::new(new_process.clone(), trap_ctx, Some(new_pid.clone()), signals, new_cpu_set);
             new_process.inner.lock().threads.insert(new_pid.0, Arc::downgrade(&new_thread));
             proc_inner.children.push(new_process.clone());
 
@@ -301,7 +302,8 @@ impl Process {
                 current_thread().signals.clone_private()
             };
 
-            let new_thread = Thread::new(self.clone(), trap_ctx, None, signals);
+            let new_cpu_set = current_thread().cpu_set.lock().clone();
+            let new_thread = Thread::new(self.clone(), trap_ctx, None, signals, new_cpu_set);
             let new_tid = new_thread.tid.0;
             proc_inner.threads.insert(new_tid, Arc::downgrade(&new_thread));
 

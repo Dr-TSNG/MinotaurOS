@@ -9,7 +9,7 @@ use crate::arch::VirtAddr;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::{CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID, ITimerType, ITimerVal, TimeSpec, TimeVal, TMS};
+use crate::sched::ffi::{CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID, ITimerType, ITimerVal, TIMER_ABSTIME, TimeSpec, TimeVal, TMS};
 use crate::sched::{sleep_for, spawn_kernel_thread};
 use crate::sched::time::{cpu_time, GLOBAL_CLOCK, real_time};
 use crate::sched::timer::TimerFuture;
@@ -109,6 +109,39 @@ pub fn sys_clock_gettime(clock_id: usize, buf: usize) -> SyscallResult<usize> {
                 return Err(Errno::EINVAL);
             }
         }
+    }
+    Ok(0)
+}
+
+pub fn sys_clock_getres(clock_id: usize, buf: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<TimeSpec>())?;
+    if matches!(clock_id, CLOCK_PROCESS_CPUTIME_ID | CLOCK_THREAD_CPUTIME_ID) || GLOBAL_CLOCK.get(clock_id).is_some() {
+        let time = TimeSpec::from(Duration::from_nanos(1));
+        user_buf.copy_from_slice(time.as_bytes());
+        Ok(0)
+    } else {
+        Err(Errno::EINVAL)
+    }
+}
+
+pub async fn sys_clock_nanosleep(clock_id: usize, flags: i32, rqtp: usize, remain: usize) -> SyscallResult<usize> {
+    let rqtp = current_process().inner.lock()
+        .addr_space.user_slice_r(VirtAddr(rqtp), size_of::<TimeSpec>())?;
+    let rqtp = *TimeSpec::ref_from(rqtp).unwrap();
+    let clock_time = GLOBAL_CLOCK.get(clock_id).ok_or(Errno::EINVAL)?;
+    let now = cpu_time();
+    let sleep_time = if flags & TIMER_ABSTIME != 0 {
+        clock_time + Duration::from(rqtp)
+    } else {
+        clock_time + now + Duration::from(rqtp)
+    };
+    current_thread().event_bus.suspend_with(Event::all(), pin!(sleep_for(sleep_time))).await?;
+    if remain != 0 {
+        let remain = current_process().inner.lock()
+            .addr_space.user_slice_w(VirtAddr(remain), size_of::<TimeSpec>())?;
+        let rest = sleep_time.checked_sub(cpu_time() - now).unwrap_or_default();
+        remain.copy_from_slice(TimeSpec::from(rest).as_bytes());
     }
     Ok(0)
 }

@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
-use zerocopy::AsBytes;
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::sched::ffi::TimeVal;
 
 bitflags! {
@@ -108,4 +108,22 @@ pub struct RUsage {
     pub ru_nvcsw: usize,
     /// involuntary context switches
     pub ru_nivcsw: usize,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, AsBytes, FromZeroes, FromBytes)]
+pub struct CpuSet {
+    /// cpu set
+    pub set: usize,
+    /// for padding
+    pub dummy: [usize; 15],
+}
+
+impl CpuSet {
+    pub fn new(cpus: usize) -> Self {
+        Self {
+            set: (1 << cpus - 1),
+            dummy: [0; 15],
+        }
+    }
 }

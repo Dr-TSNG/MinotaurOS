@@ -14,7 +14,7 @@ use sync::*;
 use system::*;
 use time::*;
 
-use log::warn;
+use log::{debug, warn};
 use num_enum::FromPrimitive;
 use crate::fs::fd::FdNum;
 use crate::result::{Errno, SyscallResult};
@@ -95,7 +95,14 @@ pub enum SyscallCode {
     Nanosleep = 101,
     Setitimer = 103,
     ClockGettime = 113,
+    ClockGetres = 114,
+    ClockNanosleep = 115,
     Syslog = 116,
+    SchedSetScheduler = 119,
+    SchedGetScheduler = 120,
+    SchedGetParam = 121,
+    SchedSetAffinity = 122,
+    SchedGetAffinity = 123,
     SchedYield = 124,
     Kill = 129,
     Tkill = 130,
@@ -175,20 +182,27 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Readlinkat => async_syscall!(sys_readlinkat, args[0] as FdNum, args[1], args[2], args[3]),
         SyscallCode::Newfstatat => async_syscall!(sys_newfstatat, args[0] as FdNum, args[1], args[2], args[3] as u32),
         SyscallCode::Fstat => syscall!(sys_fstat, args[0] as FdNum, args[1]),
-        SyscallCode::Sync => async_syscall!(sys_sync),
+        SyscallCode::Sync => syscall!(dummy),
         SyscallCode::Fsync => async_syscall!(sys_fsync, args[0] as FdNum),
         SyscallCode::Utimensat => async_syscall!(sys_utimensat, args[0] as FdNum, args[1], args[2], args[3] as u32),
         SyscallCode::Exit => syscall!(sys_exit, args[0] as i8),
         SyscallCode::ExitGroup => syscall!(sys_exit_group, args[0] as i8),
         SyscallCode::SetTidAddress => syscall!(sys_set_tid_address, args[0]),
         SyscallCode::Futex => async_syscall!(sys_futex, args[0], args[1] as i32, args[2] as u32, args[3], args[4], args[5]),
-        SyscallCode::GetRobustList => syscall!(sys_get_robust_list, args[0], args[1], args[2]),
-        SyscallCode::SetRobustList => syscall!(sys_set_robust_list, args[0], args[1]),
+        SyscallCode::GetRobustList => syscall!(dummy),
+        SyscallCode::SetRobustList => syscall!(dummy),
         SyscallCode::Nanosleep => async_syscall!(sys_nanosleep, args[0], args[1]),
         SyscallCode::Setitimer => syscall!(sys_setitimer, args[0] as i32, args[1], args[2]),
         SyscallCode::ClockGettime => syscall!(sys_clock_gettime, args[0], args[1]),
+        SyscallCode::ClockGetres => syscall!(sys_clock_getres, args[0], args[1]),
+        SyscallCode::ClockNanosleep => async_syscall!(sys_clock_nanosleep, args[0], args[1] as i32, args[2], args[3]),
         SyscallCode::Syslog => syscall!(sys_syslog, args[0] as i32, args[1], args[2]),
-        SyscallCode::SchedYield => async_syscall!(sys_yield),
+        SyscallCode::SchedSetScheduler => syscall!(dummy),
+        SyscallCode::SchedGetScheduler => syscall!(dummy),
+        SyscallCode::SchedGetParam => syscall!(dummy),
+        SyscallCode::SchedSetAffinity => syscall!(sys_sched_setaffinity, args[0], args[1], args[2]),
+        SyscallCode::SchedGetAffinity => syscall!(sys_sched_getaffinity, args[0], args[1], args[2]),
+        SyscallCode::SchedYield => async_syscall!(sys_sched_yield),
         SyscallCode::Kill => syscall!(sys_kill, args[0], args[1]),
         SyscallCode::Tkill => syscall!(sys_tkill, args[0], args[1]),
         SyscallCode::RtSigsupend => async_syscall!(sys_rt_sigsuspend, args[0]),
@@ -205,9 +219,9 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::GetTimeOfDay => syscall!(sys_gettimeofday, args[0], args[1]),
         SyscallCode::Getpid => syscall!(sys_getpid),
         SyscallCode::Getppid => syscall!(sys_getppid),
-        SyscallCode::Getuid => syscall!(sys_getuid),
-        SyscallCode::Geteuid => syscall!(sys_geteuid),
-        SyscallCode::Getegid => syscall!(sys_getegid),
+        SyscallCode::Getuid => syscall!(dummy),
+        SyscallCode::Geteuid => syscall!(dummy),
+        SyscallCode::Getegid => syscall!(dummy),
         SyscallCode::Gettid => syscall!(sys_gettid),
         SyscallCode::Sysinfo => syscall!(sys_sysinfo, args[0]),
         SyscallCode::Shmget => syscall!(sys_shmget, args[0], args[1], args[2] as u32),
@@ -235,4 +249,9 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
     };
     strace!("return: {:?}", result);
     result
+}
+
+fn dummy() -> SyscallResult<usize> {
+    debug!("Dummy syscall");
+    Ok(0)
 }
