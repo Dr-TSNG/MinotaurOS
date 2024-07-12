@@ -3,12 +3,12 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::time::Duration;
 use log::{debug, info, warn};
-use zerocopy::AsBytes;
+use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
 use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
-use crate::process::ffi::{CloneFlags, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
+use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
 use crate::process::{Pid, Tid};
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
@@ -36,7 +36,35 @@ pub fn sys_set_tid_address(tid: usize) -> SyscallResult<usize> {
     Ok(current_thread().tid.0)
 }
 
-pub async fn sys_yield() -> SyscallResult<usize> {
+pub fn sys_sched_setaffinity(pid: usize, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
+    if cpusetsize != size_of::<CpuSet>() {
+        return Err(Errno::EINVAL);
+    }
+    let mask = current_process().inner.lock()
+        .addr_space.user_slice_r(VirtAddr(mask), size_of::<CpuSet>())?;
+    let thread = match pid {
+        0 => current_thread().clone(),
+        _ => THREAD_MONITOR.lock().get(pid).upgrade().ok_or(Errno::ESRCH)?,
+    };
+    *thread.cpu_set.lock() = *CpuSet::ref_from(mask).unwrap();
+    Ok(0)
+}
+
+pub fn sys_sched_getaffinity(pid: usize, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
+    if cpusetsize != size_of::<CpuSet>() {
+        return Err(Errno::EINVAL);
+    }
+    let mask = current_process().inner.lock()
+        .addr_space.user_slice_w(VirtAddr(mask), size_of::<CpuSet>())?;
+    let thread = match pid {
+        0 => current_thread().clone(),
+        _ => THREAD_MONITOR.lock().get(pid).upgrade().ok_or(Errno::ESRCH)?,
+    };
+    mask.copy_from_slice(thread.cpu_set.lock().as_bytes());
+    Ok(0)
+}
+
+pub async fn sys_sched_yield() -> SyscallResult<usize> {
     yield_now().await;
     Ok(0)
 }
@@ -118,21 +146,6 @@ pub fn sys_getppid() -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     // SAFETY: 由于我们将 init 进程的 parent 设置为自己，所以这里可以直接 unwrap
     Ok(proc_inner.parent.upgrade().unwrap().pid.0)
-}
-
-pub fn sys_getuid() -> SyscallResult<usize> {
-    // TODO: Real UID support
-    Ok(0)
-}
-
-pub fn sys_geteuid() -> SyscallResult<usize> {
-    // TODO: Real UID support
-    Ok(0)
-}
-
-pub fn sys_getegid() -> SyscallResult<usize> {
-    // TODO: Real UID support
-    Ok(0)
 }
 
 pub fn sys_gettid() -> SyscallResult<usize> {

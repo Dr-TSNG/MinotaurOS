@@ -733,10 +733,6 @@ pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
     Ok(0)
 }
 
-pub async fn sys_sync() -> SyscallResult<usize> {
-    Ok(0)
-}
-
 pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     fd_impl.file.sync().await?;

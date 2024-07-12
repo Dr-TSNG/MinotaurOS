@@ -10,6 +10,8 @@ pub const CLOCK_MONOTONIC: usize = 1;
 pub const CLOCK_PROCESS_CPUTIME_ID: usize = 2;
 pub const CLOCK_THREAD_CPUTIME_ID: usize = 3;
 
+pub const TIMER_ABSTIME: i32 = 1;
+
 #[derive(Copy, Clone, Debug, TryFromPrimitive)]
 #[repr(i32)]
 pub enum ITimerType {

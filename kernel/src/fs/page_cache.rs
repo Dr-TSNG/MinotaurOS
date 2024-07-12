@@ -1,6 +1,5 @@
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
-use alloc::vec;
 use core::cmp::min;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::arch::{PAGE_SIZE, PhysPageNum};
@@ -164,7 +163,6 @@ impl PageCache {
         let file_size = inode.metadata().inner.lock().size as usize;
         let page_start = offset / PAGE_SIZE;
         let page_end = min(file_size, offset + len).div_ceil(PAGE_SIZE);
-        let mut removable = vec![];
         for (page_num, page) in inner.pages.range_mut(page_start..page_end) {
             if page.dirty {
                 let mut page_buf = page.frame.ppn.byte_array();
@@ -175,13 +173,10 @@ impl PageCache {
                 page.dirty = false;
             }
         }
-        for page_num in removable {
-            inner.pages.remove(&page_num);
-        }
         Ok(())
     }
 
-    pub async fn sync_all(&self, inode: &dyn Inode, dec_ref: bool) -> SyscallResult {
+    pub async fn sync_all(&self, inode: &dyn Inode) -> SyscallResult {
         self.sync(inode, 0, usize::MAX).await?;
         Ok(())
     }

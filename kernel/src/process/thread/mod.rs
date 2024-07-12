@@ -2,6 +2,7 @@ use alloc::sync::Arc;
 use core::cell::SyncUnsafeCell;
 use log::{debug, info};
 use crate::arch::VirtAddr;
+use crate::process::ffi::CpuSet;
 use crate::process::monitor::THREAD_MONITOR;
 use crate::process::Process;
 use crate::process::thread::event_bus::{Event, EventBus};
@@ -9,6 +10,7 @@ use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::tid::TidTracker;
 use crate::signal::ffi::Signal;
 use crate::signal::SignalController;
+use crate::sync::mutex::Mutex;
 use crate::trap::context::TrapContext;
 
 pub mod event_bus;
@@ -21,6 +23,7 @@ pub struct Thread {
     pub process: Arc<Process>,
     pub signals: SignalController,
     pub event_bus: EventBus,
+    pub cpu_set: Mutex<CpuSet>,
     inner: SyncUnsafeCell<ThreadInner>,
 }
 
@@ -43,6 +46,7 @@ impl Thread {
         trap_ctx: TrapContext,
         tid: Option<Arc<TidTracker>>,
         signals: SignalController,
+        cpu_set: CpuSet,
     ) -> Arc<Self> {
         let tid = tid.unwrap_or(Arc::new(TidTracker::new()));
         let inner = ThreadInner {
@@ -56,6 +60,7 @@ impl Thread {
             process,
             signals,
             event_bus: EventBus::default(),
+            cpu_set: Mutex::new(cpu_set),
             inner: SyncUnsafeCell::new(inner),
         };
         Arc::new(thread)
