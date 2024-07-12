@@ -22,13 +22,12 @@ struct PageCacheInner {
 struct Page {
     frame: UserFrameTracker,
     dirty: bool,
-    refs: usize,
 }
 
 impl Page {
     fn new(frame: UserFrameTracker) -> Self {
         ALLOCATED.fetch_add(1, Ordering::Relaxed);
-        Self { frame, dirty: false, refs: 0 }
+        Self { frame, dirty: false }
     }
 }
 
@@ -67,7 +66,6 @@ impl PageCache {
             }
             inner.pages.insert(page_num, Page::new(frame));
         }
-        inner.pages.get_mut(&page_num).unwrap().refs += 1;
         Ok(())
     }
 
@@ -157,7 +155,7 @@ impl PageCache {
         Ok(())
     }
 
-    pub async fn sync(&self, inode: &dyn Inode, offset: usize, len: usize, dec_ref: bool) -> SyscallResult<()> {
+    pub async fn sync(&self, inode: &dyn Inode, offset: usize, len: usize) -> SyscallResult<()> {
         let mut inner = self.0.lock();
         if inner.deleted {
             return Ok(());
@@ -176,12 +174,6 @@ impl PageCache {
                 inode.write_direct(page_buf, (page_num * PAGE_SIZE) as isize).await?;
                 page.dirty = false;
             }
-            if dec_ref {
-                page.refs -= 1;
-            }
-            if page.refs == 0 {
-                removable.push(*page_num);
-            }
         }
         for page_num in removable {
             inner.pages.remove(&page_num);
@@ -190,7 +182,7 @@ impl PageCache {
     }
 
     pub async fn sync_all(&self, inode: &dyn Inode, dec_ref: bool) -> SyscallResult {
-        self.sync(inode, 0, usize::MAX, dec_ref).await?;
+        self.sync(inode, 0, usize::MAX).await?;
         Ok(())
     }
 }

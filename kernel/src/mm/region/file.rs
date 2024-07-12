@@ -196,7 +196,7 @@ impl FileRegion {
     fn unmap_one(&self, mut pt: PageTable, page_num: usize) {
         let inode = self.inode.upgrade().unwrap();
         let page_cache = inode.page_cache().unwrap();
-        block_on(page_cache.sync(inode.as_ref(), (page_num + self.offset) * PAGE_SIZE, PAGE_SIZE, true)).unwrap();
+        block_on(page_cache.sync(inode.as_ref(), (page_num + self.offset) * PAGE_SIZE, PAGE_SIZE)).unwrap();
         let vpn = self.metadata.start + page_num;
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
