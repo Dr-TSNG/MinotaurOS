@@ -210,9 +210,9 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Getegid => syscall!(sys_getegid),
         SyscallCode::Gettid => syscall!(sys_gettid),
         SyscallCode::Sysinfo => syscall!(sys_sysinfo, args[0]),
-        // SyscallCode::Shmget
-        // SyscallCode::Shmctl
-        // SyscallCode::Shmat
+        SyscallCode::Shmget => syscall!(sys_shmget, args[0], args[1], args[2] as u32),
+        SyscallCode::Shmctl => syscall!(sys_shmctl, args[0] as i32, args[1] as i32, args[2]),
+        SyscallCode::Shmat => syscall!(sys_shmat, args[0] as i32, args[1], args[2] as u32),
         SyscallCode::Brk => syscall!(sys_brk, args[0]),
         SyscallCode::Munmap => syscall!(sys_munmap, args[0], args[1]),
         SyscallCode::Clone => syscall!(sys_clone, args[0] as u32, args[1], args[2], args[3], args[4]),

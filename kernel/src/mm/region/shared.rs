@@ -1,5 +1,5 @@
 use alloc::boxed::Box;
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 use crate::arch::{PageTableEntry, PhysPageNum, PTEFlags, VirtPageNum};
@@ -21,6 +21,8 @@ enum PageState {
     Free,
     /// 页面已映射
     Framed(UserFrameTracker),
+    /// 通过 `shmem` 系统调用映射的页面
+    Reffed(Weak<UserFrameTracker>),
 }
 
 impl ASRegion for SharedRegion {
@@ -108,11 +110,10 @@ impl ASRegion for SharedRegion {
 
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
         let id = vpn - self.metadata.start;
-        match self.pages[id].as_ref() {
-            PageState::Free => {
-                self.pages[id] = Arc::new(PageState::Framed(alloc_user_frames(1)?));
-            }
-            PageState::Framed(_) => return Err(Errno::EFAULT),
+        if matches!(self.pages[id].as_ref(), PageState::Free) {
+            self.pages[id] = Arc::new(PageState::Framed(alloc_user_frames(1)?));
+        } else {
+            return Err(Errno::EFAULT);
         }
         self.map_one(root_pt, &self.pages[id], vpn, true);
         Ok(())
@@ -120,11 +121,23 @@ impl ASRegion for SharedRegion {
 }
 
 impl SharedRegion {
-    pub fn new(metadata: ASRegionMeta) -> Box<Self> {
+    pub fn new_free(metadata: ASRegionMeta) -> Box<Self> {
         let mut pages = vec![];
         for _ in 0..metadata.pages {
             pages.push(Arc::new(PageState::Free));
         }
+        let region = Self { metadata, pages };
+        Box::new(region)
+    }
+
+    pub fn new_reffed(
+        metadata: ASRegionMeta,
+        pages: &[Arc<UserFrameTracker>],
+    ) -> Box<Self> {
+        let pages = pages
+            .iter()
+            .map(|page| Arc::new(PageState::Reffed(Arc::downgrade(page))))
+            .collect();
         let region = Self { metadata, pages };
         Box::new(region)
     }
@@ -147,7 +160,15 @@ impl SharedRegion {
                 }
                 let (ppn, flags) = match page {
                     PageState::Free => (PhysPageNum(0), PTEFlags::empty()),
-                    PageState::Framed(ref tracker) => {
+                    PageState::Framed(tracker) => {
+                        let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
+                        if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
+                        if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
+                        if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
+                        (tracker.ppn, flags)
+                    }
+                    PageState::Reffed(tracker) => {
+                        let tracker = tracker.upgrade().unwrap();
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
                         if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
                         if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
