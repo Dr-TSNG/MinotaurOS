@@ -8,7 +8,7 @@ use core::arch::asm;
 use core::cmp::{max, min};
 use core::ffi::CStr;
 use bitflags::bitflags;
-use log::{debug, info, warn};
+use log::{debug, info};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
@@ -22,6 +22,7 @@ use crate::mm::region::{ASRegion, ASRegionMeta};
 use crate::mm::region::direct::DirectRegion;
 use crate::mm::region::file::FileRegion;
 use crate::mm::region::lazy::LazyRegion;
+use crate::mm::region::shared::SharedRegion;
 use crate::process::aux::{self, Aux};
 use crate::result::{Errno, SyscallResult};
 
@@ -316,9 +317,6 @@ impl AddressSpace {
         offset: usize,
         is_shared: bool,
     ) -> SyscallResult<usize> {
-        if is_shared {
-            warn!("Shared mapping is not supported yet");
-        }
         let start = if let Some(start) = start {
             self.munmap(start, pages)?;
             start
@@ -337,6 +335,7 @@ impl AddressSpace {
         let metadata = ASRegionMeta { name, perms, start, pages };
         let region: Box<dyn ASRegion> = match inode {
             Some(inode) => FileRegion::new(metadata, Arc::downgrade(&inode), offset),
+            None if is_shared => SharedRegion::new(metadata),
             None => LazyRegion::new_free(metadata),
         };
         self.map_region(region);

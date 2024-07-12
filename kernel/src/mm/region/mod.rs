@@ -1,6 +1,7 @@
 pub mod direct;
 pub mod file;
 pub mod lazy;
+pub mod shared;
 
 use alloc::boxed::Box;
 use alloc::string::String;
