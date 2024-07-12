@@ -24,6 +24,7 @@ fn main() {
     sys_mkdir("/sys", 0);
     mount("devfs", "/dev", "devfs", 0, None);
     run_cmd("busybox cp /lib/dlopen_dso.so /");
+    run_cmd("busybox cp busybox bin/sleep");
     run_cmd("busybox touch sort.src");
     run_cmd("busybox sh");
 }
