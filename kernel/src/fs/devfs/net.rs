@@ -10,11 +10,9 @@ use crate::sched::ffi::TimeSpec;
 
 pub struct NetInode {
     metadata: InodeMeta,
-    socket_id: usize, // socket handler, no use now
     fs: Weak<DevFileSystem>,
 }
 
-// 需要指定InodeMode::IFSOCK
 impl NetInode {
     pub fn new(fs: Arc<DevFileSystem>, parent: Arc<dyn Inode>) -> Arc<Self> {
         Arc::new(Self {
@@ -31,7 +29,6 @@ impl NetInode {
                 TimeSpec::default(),
                 0,
             ),
-            socket_id: 0,
             fs: Arc::downgrade(&fs),
         })
     }

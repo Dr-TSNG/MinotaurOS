@@ -676,6 +676,15 @@ pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize
         0 => ".",
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
     };
+
+    // TODO: This hack is for lmbench
+    if path == "/proc/self/exe" {
+        let target = "/lmbench_all";
+        let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), target.len())?;
+        user_buf.copy_from_slice(target.as_bytes());
+        return Ok(target.len());
+    }
+
     let inode = resolve_path(&proc_inner, dirfd, path, false).await?;
     if inode.metadata().mode != InodeMode::IFLNK {
         return Err(Errno::EINVAL);
@@ -727,6 +736,8 @@ pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
         stat.st_atim = inner.atime;
         stat.st_mtim = inner.mtime;
         stat.st_ctim = inner.ctime;
+    } else {
+        stat.st_mode = InodeMode::IFCHR as u32;
     }
     user_buf.copy_from_slice(stat.as_bytes());
     Ok(0)
