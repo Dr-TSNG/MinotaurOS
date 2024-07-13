@@ -1,9 +1,39 @@
-use log::debug;
+use log::{debug, warn};
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::fd::FdNum;
-use crate::mm::ffi::{MapFlags, MapProt};
+use crate::mm::ffi::{IPC_PRIVATE, MapFlags, MapProt};
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
+
+pub fn sys_shmget(key: usize, len: usize, _flags: u32) -> SyscallResult<usize> {
+    if len % PAGE_SIZE != 0 {
+        return Err(Errno::EINVAL);
+    }
+    if key != IPC_PRIVATE {
+        // TODO: Non-IPC_PRIVATE shmget
+        warn!("[shmget] Non-IPC_PRIVATE is not supported");
+        return Err(Errno::ENOSYS);
+    }
+    debug!("[shmget] key: {}, len: {}", key, len);
+    current_process().inner.lock().addr_space.shmget(len / PAGE_SIZE)
+}
+
+pub fn sys_shmctl(_shmid: i32, _op: i32, _buf: usize) -> SyscallResult<usize> {
+    warn!("sys_shmctl: unimplemented");
+    Ok(0)
+}
+
+pub fn sys_shmat(shmid: i32, addr: usize, _flags: u32) -> SyscallResult<usize> {
+    if addr % PAGE_SIZE != 0 {
+        return Err(Errno::EINVAL);
+    }
+    let start = match addr {
+        0 => None,
+        _ => Some(VirtAddr(addr).into()),
+    };
+    debug!("[shmat] shmid: {}, addr: {:?}", shmid, VirtAddr(addr));
+    current_process().inner.lock().addr_space.shmat(shmid as usize, start)
+}
 
 pub fn sys_brk(addr: usize) -> SyscallResult<usize> {
     current_process().inner.lock().addr_space.set_brk(VirtAddr(addr))

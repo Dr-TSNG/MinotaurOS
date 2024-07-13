@@ -1,11 +1,13 @@
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use crate::fs::ffi::VfsFlags;
+use log::debug;
+use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::inode::Inode;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
+use crate::split_path;
 use crate::sync::mutex::Mutex;
 
 #[derive(Copy, Clone)]
@@ -15,6 +17,7 @@ pub enum FileSystemType {
     FAT32 = 0x4d44,
     TMPFS = 0x01021994,
     PROCFS = 0x9fa0,
+    EXT4 = 0xef53,
 }
 
 /// 文件系统元数据
@@ -74,16 +77,61 @@ impl MountNamespace {
         Self { mnt_ns_id, tree }
     }
 
-    pub async fn lookup_absolute(&self, path: &str) -> SyscallResult<Arc<dyn Inode>> {
+    pub async fn lookup_absolute(
+        &self,
+        path: &str,
+        follow_link: bool,
+    ) -> SyscallResult<Arc<dyn Inode>> {
         assert!(is_absolute_path(path));
         let root = self.tree.lock().fs.root();
-        root.lookup_relative(&path[1..]).await
+        self.lookup_relative(root, &path[1..], follow_link).await
+    }
+
+    pub async fn lookup_relative(
+        &self,
+        mut inode: Arc<dyn Inode>,
+        path: &str,
+        follow_link: bool,
+    ) -> SyscallResult<Arc<dyn Inode>> {
+        assert!(!is_absolute_path(&path));
+        let mut names = split_path!(path).map(|s| s.to_string()).collect::<VecDeque<_>>();
+        loop {
+            if inode.metadata().mode == InodeMode::IFLNK && (!names.is_empty() || follow_link) {
+                let path = inode.clone().do_readlink().await?;
+                debug!("[lookup] Follow link: {}", path);
+                inode = if is_absolute_path(&path) {
+                    self.tree.lock().fs.root()
+                } else {
+                    match inode.metadata().parent.clone().unwrap().upgrade() {
+                        Some(parent) => parent,
+                        None => return Err(Errno::EIO),
+                    }
+                };
+                names = split_path!(path).map(|s| s.to_string()).chain(names).collect();
+            }
+            if let Some(name) = names.pop_front() {
+                if name == ".." {
+                    if let Some(parent) = inode.metadata().parent.clone() {
+                        inode = match parent.upgrade() {
+                            Some(parent) => parent,
+                            None => return Err(Errno::EIO),
+                        }
+                    }
+                } else {
+                    inode = inode.lookup_name(&name).await?;
+                }
+            } else {
+                break Ok(inode);
+            }
+        }
     }
 
     pub async fn mount<F>(&self, absolute_path: &str, fs_fn: F) -> SyscallResult
-        where F: FnOnce(Arc<dyn Inode>) -> Arc<dyn FileSystem> {
+    where
+        F: FnOnce(Arc<dyn Inode>) -> Arc<dyn FileSystem>,
+    {
         assert!(is_absolute_path(absolute_path));
-        let inode = self.lookup_absolute(absolute_path).await?;
+        let inode = self.lookup_absolute(absolute_path, false).await?;
         let inode = inode.metadata().parent.clone().unwrap().upgrade().unwrap();
         let dir_name = absolute_path.rsplit_once('/').unwrap().1.to_string();
         let fs = fs_fn(inode.clone());
@@ -95,7 +143,7 @@ impl MountNamespace {
 
     pub async fn unmount(&self, absolute_path: &str) -> SyscallResult {
         assert!(is_absolute_path(absolute_path));
-        let inode = self.lookup_absolute(absolute_path).await?;
+        let inode = self.lookup_absolute(absolute_path, false).await?;
         let inode = inode.metadata().parent.clone().unwrap().upgrade().unwrap();
         let dir_name = absolute_path.rsplit_once('/').unwrap().1.to_string();
         let mut tree = self.tree.lock();

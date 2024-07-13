@@ -1,13 +1,14 @@
 use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use log::{debug, info};
-use zerocopy::AsBytes;
+use core::time::Duration;
+use log::{debug, info, warn};
+use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
 use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
-use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
+use crate::fs::ffi::{AT_FDCWD, InodeMode, OpenFlags, PATH_MAX};
 use crate::fs::path::resolve_path;
-use crate::process::ffi::{CloneFlags, Rlimit, RlimitCmd, WaitOptions};
+use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
 use crate::process::{Pid, Tid};
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
@@ -35,7 +36,35 @@ pub fn sys_set_tid_address(tid: usize) -> SyscallResult<usize> {
     Ok(current_thread().tid.0)
 }
 
-pub async fn sys_yield() -> SyscallResult<usize> {
+pub fn sys_sched_setaffinity(pid: usize, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
+    if cpusetsize != size_of::<CpuSet>() {
+        return Err(Errno::EINVAL);
+    }
+    let mask = current_process().inner.lock()
+        .addr_space.user_slice_r(VirtAddr(mask), size_of::<CpuSet>())?;
+    let thread = match pid {
+        0 => current_thread().clone(),
+        _ => THREAD_MONITOR.lock().get(pid).upgrade().ok_or(Errno::ESRCH)?,
+    };
+    *thread.cpu_set.lock() = *CpuSet::ref_from(mask).unwrap();
+    Ok(0)
+}
+
+pub fn sys_sched_getaffinity(pid: usize, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
+    if cpusetsize != size_of::<CpuSet>() {
+        return Err(Errno::EINVAL);
+    }
+    let mask = current_process().inner.lock()
+        .addr_space.user_slice_w(VirtAddr(mask), size_of::<CpuSet>())?;
+    let thread = match pid {
+        0 => current_thread().clone(),
+        _ => THREAD_MONITOR.lock().get(pid).upgrade().ok_or(Errno::ESRCH)?,
+    };
+    mask.copy_from_slice(thread.cpu_set.lock().as_bytes());
+    Ok(0)
+}
+
+pub async fn sys_sched_yield() -> SyscallResult<usize> {
     yield_now().await;
     Ok(0)
 }
@@ -73,6 +102,42 @@ pub fn sys_setrlimit(resource: u32, rlim: usize) -> SyscallResult<usize> {
     sys_prlimit(current_process().pid.0, resource, rlim, 0)
 }
 
+pub fn sys_getrusage(who: i32, buf: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<RUsage>())?;
+    let rusage = match who {
+        RUSAGE_SELF => {
+            let mut utime = Duration::ZERO;
+            let mut stime = Duration::ZERO;
+            for thread in proc_inner.threads.values() {
+                if let Some(thread) = thread.upgrade() {
+                    utime += thread.inner().rusage.user_time;
+                    stime += thread.inner().rusage.sys_time;
+                }
+            }
+            RUsage {
+                ru_utime: utime.into(),
+                ru_stime: stime.into(),
+                ..Default::default()
+            }
+        }
+        RUSAGE_THREAD => {
+            let self_r = &current_thread().inner().rusage;
+            RUsage {
+                ru_utime: self_r.user_time.into(),
+                ru_stime: self_r.sys_time.into(),
+                ..Default::default()
+            }
+        }
+        _ => {
+            warn!("[getrusage] Invalid who: {}", who);
+            return Err(Errno::EINVAL);
+        }
+    };
+    user_buf.copy_from_slice(rusage.as_bytes());
+    Ok(0)
+}
+
 pub fn sys_getpid() -> SyscallResult<usize> {
     Ok(current_process().pid.0)
 }
@@ -81,21 +146,6 @@ pub fn sys_getppid() -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     // SAFETY: 由于我们将 init 进程的 parent 设置为自己，所以这里可以直接 unwrap
     Ok(proc_inner.parent.upgrade().unwrap().pid.0)
-}
-
-pub fn sys_getuid() -> SyscallResult<usize> {
-    // TODO: Real UID support
-    Ok(0)
-}
-
-pub fn sys_geteuid() -> SyscallResult<usize> {
-    // TODO: Real UID support
-    Ok(0)
-}
-
-pub fn sys_getegid() -> SyscallResult<usize> {
-    // TODO: Real UID support
-    Ok(0)
 }
 
 pub fn sys_gettid() -> SyscallResult<usize> {
@@ -140,22 +190,21 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
         args_vec.push(CString::new(path).unwrap());
     }
     if !envs_vec.iter().any(|s| s.to_str().unwrap().contains("PATH=")) {
-        envs_vec.push(CString::new("PATH=/").unwrap());
+        envs_vec.push(CString::new("PATH=/:/bin").unwrap());
     }
     if !envs_vec.iter().any(|s| s.to_str().unwrap().contains("LD_LIBRARY_PATH=")) {
-        envs_vec.push(CString::new("LD_LIBRARY_PATH=/").unwrap());
+        envs_vec.push(CString::new("LD_LIBRARY_PATH=/:/lib").unwrap());
     }
 
-    let inode = resolve_path(&proc_inner, AT_FDCWD, path).await?;
+    let inode = resolve_path(&proc_inner, AT_FDCWD, path, true).await?;
     if inode.metadata().mode == InodeMode::IFDIR {
         return Err(Errno::EISDIR);
     }
 
     drop(proc_inner);
-    let file = inode.open()?;
+    let file = inode.open(OpenFlags::O_RDONLY)?;
     let elf_data = file.read_all().await?;
-    let argc = current_process().execve(&elf_data, &args_vec, &envs_vec).await?;
-    Ok(argc)
+    current_process().execve(&elf_data, &args_vec, &envs_vec).await
 }
 
 pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
@@ -197,7 +246,7 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
             return Err(Errno::EINVAL);
         }
         let limit = Rlimit { rlim_cur: cur, rlim_max: max };
-        proc_inner.fd_table.set_rlimit(limit);
+        proc_inner.fd_table.rlimit = limit;
     }
     Ok(0)
 }

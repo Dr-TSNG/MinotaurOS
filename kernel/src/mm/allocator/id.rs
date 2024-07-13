@@ -1,5 +1,6 @@
 use alloc::collections::VecDeque;
 
+#[derive(Default)]
 pub struct IdAllocator {
     cur: usize,
     recycled: VecDeque<usize>,

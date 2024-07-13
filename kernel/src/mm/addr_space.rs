@@ -2,18 +2,19 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
-use alloc::vec;
+use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::arch::asm;
 use core::cmp::{max, min};
 use core::ffi::CStr;
 use bitflags::bitflags;
-use log::{debug, info, warn};
+use log::{debug, info};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::driver::GLOBAL_MAPPINGS;
+use crate::fs::ffi::OpenFlags;
 use crate::fs::file_system::MountNamespace;
 use crate::fs::inode::Inode;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
@@ -22,8 +23,11 @@ use crate::mm::region::{ASRegion, ASRegionMeta};
 use crate::mm::region::direct::DirectRegion;
 use crate::mm::region::file::FileRegion;
 use crate::mm::region::lazy::LazyRegion;
+use crate::mm::region::shared::SharedRegion;
+use crate::mm::sysv_shm::SysVShm;
 use crate::process::aux::{self, Aux};
 use crate::result::{Errno, SyscallResult};
+use crate::sync::mutex::Mutex;
 
 bitflags! {
     pub struct ASPerms: u8 {
@@ -47,6 +51,8 @@ pub struct AddressSpace {
     regions: BTreeMap<VirtPageNum, Box<dyn ASRegion>>,
     /// 该地址空间关联的页表帧
     pt_dirs: Vec<HeapFrameTracker>,
+    /// System V 共享内存 
+    sysv_shm: Arc<Mutex<SysVShm>>,
     /// 当前 brk 指针
     brk: VirtAddr,
 }
@@ -54,12 +60,13 @@ pub struct AddressSpace {
 impl AddressSpace {
     pub fn new_bare() -> Self {
         let root_pt_page = alloc_kernel_frames(1);
-        debug!("AddressSpace: create root page table {:?}", root_pt_page.ppn);
+        debug!("[addr_space] create root page table {:?}", root_pt_page.ppn);
         let mut addr_space = AddressSpace {
             root_pt: PageTable::new(root_pt_page.ppn),
             asid: 0,
             regions: BTreeMap::new(),
             pt_dirs: vec![],
+            sysv_shm: Default::default(),
             brk: VirtAddr(0),
         };
         addr_space.pt_dirs.push(root_pt_page);
@@ -72,7 +79,7 @@ impl AddressSpace {
         for region in addr_space.regions.values() {
             let start = region.metadata().start;
             let end = start + region.metadata().pages;
-            info!("AddressSpace: {:?} {:x?} - {:x?}", region.metadata().name, start, end)
+            info!("[addr_space] {:?} {:x?} - {:x?}", region.metadata().name, start, end)
         }
         addr_space
     }
@@ -128,11 +135,14 @@ impl AddressSpace {
                     )?;
                     max_end_vpn = region.metadata().end();
                     addr_space.map_region(region);
-                    debug!("Map elf section: {:?} - {:?}", start_vpn, end_vpn);
+                    debug!("[addr_space] Map elf section: {:?} - {:?} for {:?}", start_vpn, end_vpn, perms);
                 }
                 xmas_elf::program::Type::Interp => {
                     linker_base = DYNAMIC_LINKER_BASE;
-                    entry = addr_space.load_linker(mnt_ns, linker_base).await?;
+                    let linker = CStr::from_bytes_until_nul(&elf.input[phdr.offset() as usize..])
+                        .unwrap().to_str().unwrap();
+                    debug!("[addr_space] Load linker: {} at {:#x}", linker, linker_base);
+                    entry = addr_space.load_linker(mnt_ns, linker, linker_base).await?;
                 }
                 _ => {}
             }
@@ -148,7 +158,7 @@ impl AddressSpace {
             pages: ustack_top_vpn - ustack_bottom_vpn,
         });
         addr_space.map_region(region);
-        debug!("Map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
+        debug!("[addr_space] Map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
 
         // 映射用户堆
         let uheap_bottom_vpn = max_end_vpn;
@@ -161,7 +171,7 @@ impl AddressSpace {
         });
         addr_space.map_region(region);
         addr_space.brk = VirtAddr::from(uheap_top_vpn);
-        debug!("Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
+        debug!("[addr_space] Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
 
         let mut auxv: Vec<Aux> = Vec::with_capacity(64);
         auxv.push(Aux::new(aux::AT_PHDR, load_base + elf.header.pt2.ph_offset() as usize));
@@ -180,7 +190,17 @@ impl AddressSpace {
     }
 
     pub fn fork(&mut self) -> AddressSpace {
-        let mut forked = Self::new_bare();
+        let root_pt_page = alloc_kernel_frames(1);
+        debug!("[addr_space] forked root page table {:?}", root_pt_page.ppn);
+        let mut forked = AddressSpace {
+            root_pt: PageTable::new(root_pt_page.ppn),
+            asid: 0,
+            regions: BTreeMap::new(),
+            pt_dirs: vec![],
+            sysv_shm: self.sysv_shm.clone(),
+            brk: VirtAddr(0),
+        };
+        forked.pt_dirs.push(root_pt_page);
         for region in self.regions.values_mut() {
             let forked_region = region.fork(self.root_pt);
             forked.map_region(forked_region);
@@ -216,7 +236,7 @@ impl AddressSpace {
         let result = if region.metadata().perms.contains(perform) {
             region.fault_handler(self.root_pt, vpn)
         } else {
-            info!("Page access violation: {:?} - {:?} / {:?}", addr, perform, region.metadata().perms);
+            info!("[addr_space] Page access violation: {:?} - {:?} / {:?}", addr, perform, region.metadata().perms);
             return Err(Errno::EACCES);
         };
         unsafe { self.activate(); }
@@ -286,7 +306,7 @@ impl AddressSpace {
         }
         if let Some((upper_vpn, _)) = self.regions.range(heap_start..).skip(1).next() {
             if addr.floor() >= *upper_vpn {
-                return Ok(self.brk.0);
+                return Err(Errno::ENOMEM);
             }
         }
         let mut brk = self.unmap_region(heap_start).unwrap();
@@ -297,9 +317,10 @@ impl AddressSpace {
         } else if addr.ceil() > heap_end {
             brk.extend(addr.ceil() - heap_end);
         }
+        self.brk = addr.ceil().into();
         self.map_region(brk);
         unsafe { self.activate(); }
-        Ok(core::mem::replace(&mut self.brk, addr).0)
+        Ok(self.brk.0)
     }
 
     pub fn mmap(
@@ -312,9 +333,6 @@ impl AddressSpace {
         offset: usize,
         is_shared: bool,
     ) -> SyscallResult<usize> {
-        if is_shared {
-            warn!("Shared mapping is not supported yet");
-        }
         let start = if let Some(start) = start {
             self.munmap(start, pages)?;
             start
@@ -333,6 +351,7 @@ impl AddressSpace {
         let metadata = ASRegionMeta { name, perms, start, pages };
         let region: Box<dyn ASRegion> = match inode {
             Some(inode) => FileRegion::new(metadata, Arc::downgrade(&inode), offset),
+            None if is_shared => SharedRegion::new_free(metadata),
             None => LazyRegion::new_free(metadata),
         };
         self.map_region(region);
@@ -341,7 +360,7 @@ impl AddressSpace {
     }
 
     pub fn munmap(&mut self, start: VirtPageNum, pages: usize) -> SyscallResult {
-        self.modify_region(start, pages, |region| false)
+        self.modify_region(start, pages, |_| false)
     }
 
     pub fn mprotect(&mut self, start: VirtPageNum, pages: usize, perms: ASPerms) -> SyscallResult {
@@ -349,6 +368,38 @@ impl AddressSpace {
             region.set_perms(perms);
             true
         })
+    }
+
+    pub fn shmget(&self, pages: usize) -> SyscallResult<usize> {
+        self.sysv_shm.lock().alloc(pages)
+    }
+
+    pub fn shmat(&mut self, id: usize, start: Option<VirtPageNum>) -> SyscallResult<usize> {
+        let shm = self.sysv_shm.lock().get(id).ok_or(Errno::EINVAL)?;
+        let start = if let Some(start) = start {
+            self.munmap(start, shm.len())?;
+            start
+        } else {
+            let mut iter = self.regions
+                .iter()
+                .skip_while(|(_, region)| region.metadata().name.as_deref() != Some("[heap]"));
+            let mut region_low = iter.next().unwrap().1;
+            let mut region_high = iter.next().unwrap().1;
+            while region_low.metadata().end() + shm.len() > region_high.metadata().start {
+                region_low = region_high;
+                region_high = iter.next().unwrap().1;
+            }
+            region_low.metadata().end()
+        };
+        let metadata = ASRegionMeta {
+            name: Some(format!("/dev/shm/{}", id)),
+            perms: ASPerms::R | ASPerms::W | ASPerms::X | ASPerms::U,
+            start,
+            pages: shm.len(),
+        };
+        let region = SharedRegion::new_reffed(metadata, &shm);
+        self.map_region(region);
+        Ok(VirtAddr::from(start).0)
     }
 }
 
@@ -405,7 +456,7 @@ impl AddressSpace {
 
     fn copy_global_mappings(&mut self) {
         for map in GLOBAL_MAPPINGS.iter() {
-            debug!("Copy global mappings: {} from {:?} to {:?}", map.name, map.phys_start, map.phys_end());
+            debug!("[addr_space] Copy global mappings: {} from {:?} to {:?}", map.name, map.phys_start, map.phys_end());
             let ppn_start = PhysPageNum::from(map.phys_start);
             let vpn_start = VirtPageNum::from(map.virt_start);
             let vpn_end = VirtPageNum::from(map.virt_end());
@@ -438,9 +489,14 @@ impl AddressSpace {
         Ok(())
     }
 
-    async fn load_linker(&mut self, mnt_ns: &MountNamespace, offset: usize) -> SyscallResult<usize> {
-        let inode = mnt_ns.lookup_absolute("/libc.so").await?;
-        let file = inode.open().unwrap();
+    async fn load_linker(
+        &mut self,
+        mnt_ns: &MountNamespace,
+        linker: &str,
+        offset: usize,
+    ) -> SyscallResult<usize> {
+        let inode = mnt_ns.lookup_absolute(linker, true).await?;
+        let file = inode.open(OpenFlags::O_RDONLY).unwrap();
         let elf_data = file.read_all().await.unwrap();
         let elf = ElfFile::new(&elf_data).map_err(|_| Errno::ENOEXEC)?;
         let ph_count = elf.header.pt2.ph_count();
@@ -477,7 +533,7 @@ impl AddressSpace {
                     start_addr.page_offset(2),
                 )?;
                 self.map_region(region);
-                debug!("Map linker section: {:?} - {:?}", start_vpn, end_vpn);
+                debug!("[addr_space] Map linker section: {:?} - {:?}", start_vpn, end_vpn);
             }
         }
         Ok(elf.header.pt2.entry_point() as usize + offset)

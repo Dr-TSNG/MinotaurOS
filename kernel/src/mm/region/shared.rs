@@ -1,35 +1,31 @@
 use alloc::boxed::Box;
-use alloc::sync::Weak;
+use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
-use crate::arch::{PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtPageNum};
-use crate::fs::inode::Inode;
+use crate::arch::{PageTableEntry, PhysPageNum, PTEFlags, VirtPageNum};
 use crate::mm::addr_space::ASPerms;
-use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
+use crate::mm::allocator::{alloc_kernel_frames, alloc_user_frames, HeapFrameTracker, UserFrameTracker};
 use crate::mm::page_table::{PageTable, SlotType};
 use crate::mm::region::{ASRegion, ASRegionMeta};
-use crate::result::SyscallResult;
-use crate::sync::block_on;
+use crate::result::{Errno, SyscallResult};
 
 #[derive(Clone)]
-pub struct FileRegion {
+pub struct SharedRegion {
     metadata: ASRegionMeta,
-    inode: Weak<dyn Inode>,
-    pages: Vec<PageState>,
-    offset: usize,
+    pages: Vec<Arc<PageState>>,
 }
 
-#[derive(Clone)]
+/// 虚拟页状态
 enum PageState {
-    /// 页面为空，未绑定页缓存
+    /// 页面为空，未分配物理页帧
     Free,
-    /// 页面已绑定页缓存，未修改
-    Clean,
-    /// 页面已绑定页缓存，已修改
-    Dirty,
+    /// 页面已映射
+    Framed(UserFrameTracker),
+    /// 通过 `shmem` 系统调用映射的页面
+    Reffed(Weak<UserFrameTracker>),
 }
 
-impl ASRegion for FileRegion {
+impl ASRegion for SharedRegion {
     fn metadata(&self) -> &ASRegionMeta {
         &self.metadata
     }
@@ -41,16 +37,18 @@ impl ASRegion for FileRegion {
     fn map(&self, root_pt: PageTable, overwrite: bool) -> Vec<HeapFrameTracker> {
         let mut dirs = vec![];
         let mut vpn = self.metadata.start;
-        for i in 0..self.pages.len() {
-            dirs.extend(self.map_one(root_pt, i, vpn, overwrite));
+        for page in self.pages.iter() {
+            dirs.extend(self.map_one(root_pt, page, vpn, overwrite));
             vpn = vpn + 1;
         }
         dirs
     }
 
     fn unmap(&self, root_pt: PageTable) {
-        for i in 0..self.pages.len() {
-            self.unmap_one(root_pt, i);
+        let mut vpn = self.metadata.start;
+        for _ in self.pages.iter() {
+            self.unmap_one(root_pt, vpn);
+            vpn = vpn + 1;
         }
     }
 
@@ -61,43 +59,37 @@ impl ASRegion for FileRegion {
         if start != 0 {
             let mut off = self.pages.split_off(start);
             if size != 0 {
-                let mid = FileRegion {
+                let mid = SharedRegion {
                     metadata: ASRegionMeta {
                         start: self.metadata.start + start,
                         pages: size,
                         ..self.metadata.clone()
                     },
-                    inode: self.inode.clone(),
                     pages: off.drain(..size).collect(),
-                    offset: self.offset + start,
                 };
                 regions.push(Box::new(mid));
             }
             if !off.is_empty() {
-                let right = FileRegion {
+                let right = SharedRegion {
                     metadata: ASRegionMeta {
                         start: self.metadata.start + start + size,
                         pages: self.metadata.pages - start - size,
                         ..self.metadata.clone()
                     },
-                    inode: self.inode.clone(),
                     pages: off,
-                    offset: self.offset + start + size,
                 };
                 regions.push(Box::new(right));
             }
             self.metadata.pages = start;
         } else {
             let off = self.pages.split_off(size);
-            let right = FileRegion {
+            let right = SharedRegion {
                 metadata: ASRegionMeta {
                     start: self.metadata.start + size,
                     pages: self.metadata.pages - size,
                     ..self.metadata.clone()
                 },
-                inode: self.inode.clone(),
                 pages: off,
-                offset: self.offset + size,
             };
             regions.push(Box::new(right));
             self.metadata.pages = size;
@@ -105,41 +97,57 @@ impl ASRegion for FileRegion {
         regions
     }
 
-    fn extend(&mut self, _size: usize) {
-        panic!("FileRegion cannot be extended");
+    fn extend(&mut self, size: usize) {
+        self.metadata.pages += size;
+        for _ in 0..size {
+            self.pages.push(Arc::new(PageState::Free));
+        }
     }
 
     fn fork(&mut self, _parent_pt: PageTable) -> Box<dyn ASRegion> {
         Box::new(self.clone())
     }
 
-    fn sync(&self) {
-        block_on(self.inode.upgrade().unwrap().sync()).unwrap();
-    }
-
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
-        let page_num = vpn - self.metadata.start;
-        self.pages[page_num] = match self.pages[page_num] {
-            PageState::Free => PageState::Clean,
-            PageState::Clean => PageState::Dirty,
-            PageState::Dirty => panic!("Page should not be dirty"),
-        };
-        self.map_one(root_pt, page_num, vpn, true);
+        let id = vpn - self.metadata.start;
+        if matches!(self.pages[id].as_ref(), PageState::Free) {
+            self.pages[id] = Arc::new(PageState::Framed(alloc_user_frames(1)?));
+        } else {
+            return Err(Errno::EFAULT);
+        }
+        self.map_one(root_pt, &self.pages[id], vpn, true);
         Ok(())
     }
 }
 
-impl FileRegion {
-    pub fn new(metadata: ASRegionMeta, inode: Weak<dyn Inode>, offset: usize) -> Box<Self> {
-        let pages = vec![PageState::Free; metadata.pages];
-        let region = Self { metadata, inode, pages, offset };
+impl SharedRegion {
+    pub fn new_free(metadata: ASRegionMeta) -> Box<Self> {
+        let mut pages = vec![];
+        for _ in 0..metadata.pages {
+            pages.push(Arc::new(PageState::Free));
+        }
+        let region = Self { metadata, pages };
         Box::new(region)
     }
 
+    pub fn new_reffed(
+        metadata: ASRegionMeta,
+        pages: &[Arc<UserFrameTracker>],
+    ) -> Box<Self> {
+        let pages = pages
+            .iter()
+            .map(|page| Arc::new(PageState::Reffed(Arc::downgrade(page))))
+            .collect();
+        let region = Self { metadata, pages };
+        Box::new(region)
+    }
+}
+
+impl SharedRegion {
     fn map_one(
         &self,
         mut pt: PageTable,
-        page_num: usize,
+        page: &PageState,
         vpn: VirtPageNum,
         overwrite: bool,
     ) -> Vec<HeapFrameTracker> {
@@ -150,29 +158,22 @@ impl FileRegion {
                 if !overwrite && pte.valid() {
                     panic!("Page already mapped: {:?}", pte.ppn());
                 }
-                let (ppn, flags) = match self.pages[page_num] {
+                let (ppn, flags) = match page {
                     PageState::Free => (PhysPageNum(0), PTEFlags::empty()),
-                    PageState::Clean => {
-                        let inode = self.inode.upgrade().unwrap();
-                        let page_cache = inode.page_cache().unwrap();
-                        block_on(page_cache.load(inode.as_ref(), page_num + self.offset)).unwrap();
-                        let page = page_cache.ppn_of(page_num + self.offset).unwrap();
-                        let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
-                        if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
-                        // No W
-                        if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
-                        (page, flags)
-                    }
-                    PageState::Dirty => {
-                        let inode = self.inode.upgrade().unwrap();
-                        let page_cache = inode.page_cache().unwrap();
-                        block_on(page_cache.load(inode.as_ref(), page_num + self.offset)).unwrap();
-                        let page = page_cache.ppn_of(page_num + self.offset).unwrap();
+                    PageState::Framed(tracker) => {
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
                         if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
                         if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
                         if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
-                        (page, flags)
+                        (tracker.ppn, flags)
+                    }
+                    PageState::Reffed(tracker) => {
+                        let tracker = tracker.upgrade().unwrap();
+                        let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
+                        if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
+                        if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
+                        if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }
+                        (tracker.ppn, flags)
                     }
                 };
                 *pte = PageTableEntry::new(ppn, flags);
@@ -193,11 +194,7 @@ impl FileRegion {
         dirs
     }
 
-    fn unmap_one(&self, mut pt: PageTable, page_num: usize) {
-        let inode = self.inode.upgrade().unwrap();
-        let page_cache = inode.page_cache().unwrap();
-        block_on(page_cache.sync(inode.as_ref(), (page_num + self.offset) * PAGE_SIZE, PAGE_SIZE)).unwrap();
-        let vpn = self.metadata.start + page_num;
+    fn unmap_one(&self, mut pt: PageTable, vpn: VirtPageNum) {
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == 2 {
@@ -206,16 +203,9 @@ impl FileRegion {
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    SlotType::Page(ppn) => panic!("Page already mapped: {:?}", ppn),
-                    SlotType::Invalid => panic!("Page not mapped"),
+                    _ => panic!("Page not mapped: {:?}", pte.ppn()),
                 }
             }
         }
-    }
-}
-
-impl Drop for FileRegion {
-    fn drop(&mut self) {
-        self.sync();
     }
 }

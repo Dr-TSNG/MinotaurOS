@@ -1,9 +1,12 @@
 use alloc::collections::BinaryHeap;
 use core::cmp::Reverse;
-use core::task::Waker;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
 use core::time::Duration;
 use lazy_static::lazy_static;
-use crate::sched::time::current_time;
+use pin_project::pin_project;
+use crate::sched::time::cpu_time;
 use crate::sync::mutex::IrqMutex;
 
 struct Timer {
@@ -54,7 +57,7 @@ pub fn sched_timer(expire: Duration, waker: Waker) {
 }
 
 pub fn query_timer() -> bool {
-    let now = current_time();
+    let now = cpu_time();
     let mut queue = TIMER_QUEUE.0.lock();
     if queue.is_empty() {
         return false;
@@ -68,4 +71,31 @@ pub fn query_timer() -> bool {
         }
     }
     true
+}
+
+#[pin_project]
+pub struct TimerFuture<F: Fn() -> Duration> {
+    trigger: Duration,
+    callback: F,
+}
+
+impl<F: Fn() -> Duration> TimerFuture<F> {
+    pub fn new(trigger: Duration, callback: F) -> Self {
+        Self { trigger, callback }
+    }
+}
+
+impl<F: Fn() -> Duration> Future for TimerFuture<F> {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if cpu_time() >= self.trigger {
+            self.trigger = (self.callback)();
+            if self.trigger.is_zero() {
+                return Poll::Ready(());
+            }
+        }
+        sched_timer(self.trigger, cx.waker().clone());
+        Poll::Pending
+    }
 }

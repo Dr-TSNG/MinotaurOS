@@ -7,20 +7,21 @@ use core::ffi::CStr;
 use core::mem::size_of;
 use core::time::Duration;
 use log::{debug, info, warn};
+use tap::Tap;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::devfs::DevFileSystem;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd, VfsFlags, FdSet, FD_SET_LEN, PollEvents, KernelStatfs};
+use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd, VfsFlags, FdSet, FD_SET_LEN, PollEvents, KernelStatfs, AT_SYMLINK_NOFOLLOW};
 use crate::fs::file::Seek;
-use crate::fs::path::resolve_path;
+use crate::fs::path::{resolve_path, split_last_path};
 use crate::fs::pipe::Pipe;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::{TimeSpec, UTIME_NOW, UTIME_OMIT};
 use crate::sched::iomultiplex::{FdSetRWE, IOFormat, IOMultiplexFuture};
-use crate::sched::time::{current_time, TimeoutFuture, TimeoutResult};
+use crate::sched::time::{real_time, TimeoutFuture, TimeoutResult};
 use crate::signal::ffi::SigSet;
 
 pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
@@ -42,7 +43,7 @@ pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
 
 pub fn sys_dup(fd: FdNum) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?.dup(false);
+    let fd_impl = proc_inner.fd_table.get(fd)?;
     proc_inner.fd_table.put(fd_impl, 0).map(|fd| fd as usize)
 }
 
@@ -59,7 +60,7 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
         }
     }).ok_or(Errno::EINVAL)?;
     let mut proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(old_fd)?.dup(cloexec);
+    let fd_impl = proc_inner.fd_table.get(old_fd)?.tap_mut(|it| it.cloexec = cloexec);
     proc_inner.fd_table.insert(new_fd, fd_impl)?;
     Ok(new_fd as usize)
 }
@@ -67,41 +68,36 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
 pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
     let cmd = FcntlCmd::try_from(cmd).map_err(|_| Errno::EINVAL)?;
     debug!("[fcntl] fd: {}, cmd: {:?}, arg2: {}", fd, cmd, arg2);
-    let mut proc_inner = current_process().inner.lock();
-    let mut fd_impl = proc_inner.fd_table.get(fd)?;
+    let proc_inner = &mut *current_process().inner.lock();
+    let fd_impl = proc_inner.fd_table.get_mut(fd)?;
     match cmd {
         FcntlCmd::F_DUPFD => {
-            return proc_inner.fd_table.put(fd_impl, arg2 as FdNum).map(|fd| fd as usize);
+            let new_fd_impl = fd_impl.clone();
+            proc_inner.fd_table.put(new_fd_impl, arg2 as FdNum).map(|fd| fd as usize)
         }
         FcntlCmd::F_DUPFD_CLOEXEC => {
-            let fd_impl = fd_impl.dup(true);
-            return proc_inner.fd_table.put(fd_impl, arg2 as FdNum).map(|fd| fd as usize);
+            let new_fd_impl = fd_impl.clone().tap_mut(|it| it.cloexec = true);
+            proc_inner.fd_table.put(new_fd_impl, arg2 as FdNum).map(|fd| fd as usize)
         }
         FcntlCmd::F_GETFD => {
-            let flags = fd_impl.flags;
-            if flags.contains(OpenFlags::O_CLOEXEC){
-                return Ok(1usize);
-            }
-            return Ok(flags.bits() as usize);
+            Ok(fd_impl.cloexec as usize)
         }
         FcntlCmd::F_SETFD => {
             let flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
-            let fd_impl = fd_impl.dup(flags.intersects(OpenFlags::O_CLOEXEC));
-            proc_inner.fd_table.insert(fd, fd_impl)?;
+            fd_impl.cloexec = flags.contains(OpenFlags::O_CLOEXEC);
+            Ok(0)
         }
         FcntlCmd::F_GETFL => {
-            let flags = fd_impl.flags & OpenFlags::O_STATUS;
-            return Ok(flags.bits() as usize);
+            let flags = fd_impl.file.metadata().flags.lock();
+            Ok(flags.bits() as usize)
         }
         FcntlCmd::F_SETFL => {
-            // TODO: Only change status flags
-            warn!("F_SETFL");
-            let flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
-            fd_impl.flags |= flags;
-            proc_inner.fd_table.insert(fd, fd_impl)?;
+            let new_flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
+            let mut old_flags = fd_impl.file.metadata().flags.lock();
+            *old_flags = (*old_flags - OpenFlags::O_STATUS) | (new_flags & OpenFlags::O_STATUS);
+            Ok(0)
         }
     }
-    Ok(0)
 }
 
 pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<usize> {
@@ -114,12 +110,12 @@ pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<
     let mut proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
     debug!("[mkdirat] fd: {}, path: {:?}, mode: {:?}", dirfd, path, mode);
-    let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
-    let inode = resolve_path(&mut proc_inner, dirfd, parent).await?;
+    let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
+    let inode = resolve_path(&mut proc_inner, dirfd, &parent, true).await?;
     if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
     }
-    inode.create(InodeMode::IFDIR, name).await?;
+    inode.create(InodeMode::IFDIR, &name).await?;
     Ok(0)
 }
 
@@ -139,9 +135,9 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
         path = "/tmp/testshm";
     }
 
-    let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
-    let parent = resolve_path(&proc_inner, dirfd, parent).await?;
-    let inode = parent.clone().lookup_name(name).await?;
+    let (parent, name) = split_last_path(path).ok_or(Errno::EINVAL)?;
+    let parent = resolve_path(&proc_inner, dirfd, &parent, true).await?;
+    let inode = parent.clone().lookup_name(&name).await?;
     if inode.metadata().mode == InodeMode::IFDIR {
         if flags & AT_REMOVEDIR == 0 {
             return Err(Errno::EISDIR);
@@ -154,7 +150,7 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
             return Err(Errno::ENOTDIR);
         }
     }
-    parent.unlink(name).await?;
+    parent.unlink(&name).await?;
     Ok(0)
 }
 
@@ -187,7 +183,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
     match fstype {
         "devfs" => {
             proc_inner.mnt_ns.mount(target, |p| {
-                DevFileSystem::new(flags, source.to_string(), Some(p))
+                DevFileSystem::new(flags, Some(p))
             }).await?;
         }
         _ => return Err(Errno::ENODEV),
@@ -199,7 +195,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
 pub async fn sys_statfs(path: usize, buf: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
-    let inode = resolve_path(&mut proc_inner, AT_FDCWD, path).await?;
+    let inode = resolve_path(&mut proc_inner, AT_FDCWD, path, true).await?;
     let fs = inode.file_system().upgrade().ok_or(Errno::ENODEV)?;
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStatfs>())?;
     let mut stat = KernelStatfs::default();
@@ -242,7 +238,7 @@ pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
 
 pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
-    if !fd_impl.flags.writable() {
+    if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EBADF);
     }
     fd_impl.file.truncate(size).await?;
@@ -255,14 +251,14 @@ pub async fn sys_faccessat(fd: FdNum, path: usize, _mode: u32, _flags: u32) -> S
         0 => ".",
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
     };
-    resolve_path(&proc_inner, fd, path).await?;
+    resolve_path(&proc_inner, fd, path, false).await?;
     Ok(0)
 }
 
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
-    resolve_path(&mut proc_inner, AT_FDCWD, path).await?;
+    resolve_path(&mut proc_inner, AT_FDCWD, path, true).await?;
     proc_inner.cwd = path.to_string();
     Ok(0)
 }
@@ -281,29 +277,31 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
         path = "/tmp/testshm";
     }
 
-    let inode = match resolve_path(&mut proc_inner, dirfd, path).await {
+    let inode = match resolve_path(&mut proc_inner, dirfd, path, true).await {
         Ok(inode) => inode,
         Err(Errno::ENOENT) if flags.contains(OpenFlags::O_CREAT) => {
-            let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
-            let parent_inode = resolve_path(&mut proc_inner, dirfd, parent).await?;
-            parent_inode.create(InodeMode::IFREG, name).await?
+            let (parent, name) = split_last_path(path).ok_or(Errno::EISDIR)?;
+            let parent_inode = resolve_path(&mut proc_inner, dirfd, &parent, true).await?;
+            parent_inode.create(InodeMode::IFREG, &name).await?
         }
         Err(e) => return Err(e),
     };
-    let file = inode.open()?;
+    let file = inode.open(flags - OpenFlags::O_CLOEXEC)?;
     if flags.contains(OpenFlags::O_TRUNC) {
         file.truncate(0).await?;
     }
     if flags.contains(OpenFlags::O_APPEND) {
         file.seek(Seek::End(0)).await?;
     }
-    let fd_impl = FileDescriptor::new(file, flags);
+    let fd_impl = FileDescriptor::new(file, flags.contains(OpenFlags::O_CLOEXEC));
     let fd = proc_inner.fd_table.put(fd_impl, 0)?;
     Ok(fd as usize)
 }
 
 pub fn sys_close(fd: FdNum) -> SyscallResult<usize> {
-    current_process().inner.lock().fd_table.remove(fd)?;
+    let mut proc_inner = current_process().inner.lock();
+    proc_inner.fd_table.remove(fd)?;
+    proc_inner.socket_table.take(fd);
     Ok(0)
 }
 
@@ -312,22 +310,21 @@ pub fn sys_pipe2(fds: usize, flags: u32) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let user_fds = proc_inner.addr_space.user_slice_w(VirtAddr(fds), size_of::<[FdNum; 2]>())?;
     let (reader, writer) = Pipe::new();
-    let reader_fd = proc_inner.fd_table.put(FileDescriptor::new(reader, OpenFlags::O_RDONLY | flags.intersection(OpenFlags::O_CLOEXEC)), 0)?;
-    let writer_fd = proc_inner.fd_table.put(FileDescriptor::new(writer, OpenFlags::O_WRONLY | flags.intersection(OpenFlags::O_CLOEXEC)), 0)?;
+    let reader_fd = proc_inner.fd_table.put(FileDescriptor::new(reader, flags.contains(OpenFlags::O_CLOEXEC)), 0)?;
+    let writer_fd = proc_inner.fd_table.put(FileDescriptor::new(writer, flags.contains(OpenFlags::O_CLOEXEC)), 0)?;
     drop(proc_inner);
     user_fds.copy_from_slice(AsBytes::as_bytes(&[reader_fd, writer_fd]));
     Ok(0)
 }
 
 pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<usize> {
-    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
-    let mut file_inner = fd_impl.file.metadata().inner.lock().await;
-    let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
+    let file = current_process().inner.lock().fd_table.get(fd)?.file;
+    let inode = file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
     if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
     }
     let mut cur = buf;
-    for (idx, child) in inode.list(file_inner.pos as usize).await?.enumerate() {
+    while let Some((idx, child)) = file.readdir().await? {
         let name = match idx {
             0 => CString::new(".").unwrap(),
             1 => CString::new("..").unwrap(),
@@ -345,10 +342,8 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
         dirent.d_name[..name_bytes.len()].copy_from_slice(name_bytes);
         let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(cur), dirent_size)?;
         user_buf.copy_from_slice(&dirent.as_bytes()[..dirent_size]);
-        file_inner.pos += 1;
         cur += dirent_size;
     }
-
     Ok(cur - buf)
 }
 
@@ -362,7 +357,7 @@ pub async fn sys_lseek(fd: FdNum, offset: isize, whence: i32) -> SyscallResult<u
 pub async fn sys_read(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.readable() {
+    if !fd_impl.file.metadata().flags.lock().readable() {
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), len)?;
@@ -374,7 +369,7 @@ pub async fn sys_read(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize>
 pub async fn sys_write(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.writable() {
+    if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(buf), len)?;
@@ -386,7 +381,7 @@ pub async fn sys_write(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize
 pub async fn sys_readv(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.readable() {
+    if !fd_impl.file.metadata().flags.lock().readable() {
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(iov), size_of::<IoVec>() * iovcnt)?;
@@ -405,7 +400,7 @@ pub async fn sys_readv(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<us
 pub async fn sys_writev(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.writable() {
+    if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EPERM);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(iov), size_of::<IoVec>() * iovcnt)?;
@@ -425,7 +420,7 @@ pub async fn sys_writev(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<u
 pub async fn sys_pread(fd: FdNum, buf: usize, len: usize, offset: isize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.readable() {
+    if !fd_impl.file.metadata().flags.lock().readable() {
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), len)?;
@@ -437,7 +432,7 @@ pub async fn sys_pread(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sysc
 pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.writable() {
+    if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(buf), len)?;
@@ -450,7 +445,9 @@ pub async fn sys_sendfile(out_fd: FdNum, in_fd: FdNum, offset: usize, count: usi
     let proc_inner = current_process().inner.lock();
     let out_fd_impl = proc_inner.fd_table.get(out_fd)?;
     let in_fd_impl = proc_inner.fd_table.get(in_fd)?;
-    if !out_fd_impl.flags.writable() || !in_fd_impl.flags.readable() {
+    let out_flags = out_fd_impl.file.metadata().flags.lock();
+    let in_flags = in_fd_impl.file.metadata().flags.lock();
+    if !out_flags.writable() || !in_flags.readable() {
         return Err(Errno::EBADF);
     }
     drop(proc_inner);
@@ -673,13 +670,30 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     ret
 }
 
-pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, _flags: u32) -> SyscallResult<usize> {
+pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let path = match path {
         0 => ".",
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
     };
-    let inode = resolve_path(&proc_inner, dirfd, path).await?;
+    let inode = resolve_path(&proc_inner, dirfd, path, false).await?;
+    if inode.metadata().mode != InodeMode::IFLNK {
+        return Err(Errno::EINVAL);
+    }
+    let target = inode.readlink().await?.into_bytes();
+    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), min(target.len(), bufsiz))?;
+    user_buf[..target.len()].copy_from_slice(&target);
+    Ok(target.len())
+}
+
+pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, flags: u32) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let path = match path {
+        0 => ".",
+        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
+    };
+    let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
+    let inode = resolve_path(&proc_inner, dirfd, path, follow_link).await?;
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStat>())?;
     drop(proc_inner);
     let mut stat = KernelStat::default();
@@ -724,14 +738,15 @@ pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {
     Ok(0)
 }
 
-pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, _flags: u32) -> SyscallResult<usize> {
+pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let path = match path {
         0 => ".",
         _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
     };
-    let inode = resolve_path(&proc_inner, dirfd, path).await?;
-    let now = TimeSpec::from(current_time());
+    let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
+    let inode = resolve_path(&proc_inner, dirfd, path, follow_link).await?;
+    let now = TimeSpec::from(real_time());
     let (atime, mtime) = match times {
         0 => (Some(now), Some(now)),
         _ => {
@@ -751,7 +766,7 @@ pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, _flags: u32)
             (atime, mtime)
         }
     };
-    inode.metadata().inner.lock().apply_mut(|inner| {
+    inode.metadata().inner.lock().tap_mut(|inner| {
         if let Some(atime) = atime {
             inner.atime = atime;
         }
@@ -778,33 +793,33 @@ pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, 
         "[renameat] old_dirfd: {}, old_path: {:?}, new_dirfd: {}, new_path: {:?}, flags: {:?}",
         old_dirfd, old_path, new_dirfd, new_path, flags,
     );
-    let (old_parent, old_name) = old_path.rsplit_once('/').unwrap_or((".", old_path));
-    let (new_parent, new_name) = new_path.rsplit_once('/').unwrap_or((".", new_path));
-    let old_parent = resolve_path(&proc_inner, old_dirfd, old_parent).await?;
-    let new_parent = resolve_path(&proc_inner, new_dirfd, new_parent).await?;
-    let old_inode = old_parent.clone().lookup_name(old_name).await?;
-    let new_inode = new_parent.clone().lookup_name(new_name).await;
+    let (old_parent, old_name) = split_last_path(old_path).ok_or(Errno::EINVAL)?;
+    let (new_parent, new_name) = split_last_path(new_path).ok_or(Errno::EINVAL)?;
+    let old_parent = resolve_path(&proc_inner, old_dirfd, &old_parent, true).await?;
+    let new_parent = resolve_path(&proc_inner, new_dirfd, &new_parent, true).await?;
+    let old_inode = old_parent.clone().lookup_name(&old_name).await?;
+    let new_inode = new_parent.clone().lookup_name(&new_name).await;
     match flags {
         RenameFlags::RENAME_DEFAULT => {
             if new_inode.is_ok() {
-                new_parent.clone().unlink(new_name).await?;
+                new_parent.clone().unlink(&new_name).await?;
             }
-            old_parent.unlink(old_name).await?;
-            new_parent.movein(new_name, old_inode).await?;
+            old_parent.unlink(&old_name).await?;
+            new_parent.movein(&new_name, old_inode).await?;
         }
         RenameFlags::RENAME_NOREPLACE => {
             if new_inode.is_ok() {
                 return Err(Errno::EEXIST);
             }
-            old_parent.unlink(old_name).await?;
-            new_parent.movein(new_name, old_inode).await?;
+            old_parent.unlink(&old_name).await?;
+            new_parent.movein(&new_name, old_inode).await?;
         }
         RenameFlags::RENAME_EXCHANGE => {
             let new_inode = new_inode?;
-            old_parent.clone().unlink(old_name).await?;
-            new_parent.clone().unlink(new_name).await?;
-            old_parent.movein(new_name, new_inode).await?;
-            new_parent.movein(old_name, old_inode).await?;
+            old_parent.clone().unlink(&old_name).await?;
+            new_parent.clone().unlink(&new_name).await?;
+            old_parent.movein(&new_name, new_inode).await?;
+            new_parent.movein(&old_name, old_inode).await?;
         }
         _ => {
             warn!("[renameat] Invalid flags: {:?}", flags);

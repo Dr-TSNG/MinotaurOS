@@ -6,8 +6,7 @@ mod tcp;
 mod udp;
 mod unix;
 
-pub const MAX_BUFFER_SIZE: usize = 1 << 17;
-type Mutex<T> = crate::sync::mutex::Mutex<T>;
+const MAX_BUFFER_SIZE: usize = 1 << 17;
 
 pub use crate::net::socket::listen_endpoint;
 pub use crate::net::socket::Socket;
