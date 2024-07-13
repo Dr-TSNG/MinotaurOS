@@ -5,13 +5,13 @@ use alloc::sync::{Arc, Weak};
 use core::any::Any;
 use async_trait::async_trait;
 use downcast_rs::{DowncastSync, impl_downcast};
-use crate::fs::ffi::InodeMode;
+use crate::fs::ffi::{InodeMode, OpenFlags};
 use crate::fs::file::{CharacterFile, DirFile, File, FileMeta, RegularFile};
 use crate::fs::file_system::FileSystem;
 use crate::fs::page_cache::PageCache;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
-use crate::sync::mutex::{Mutex, MutexGuard};
+use crate::sync::mutex::Mutex;
 
 pub struct InodeMeta {
     /// 结点编号
@@ -188,11 +188,11 @@ pub trait Inode: DowncastSync + InodeInternal {
 impl_downcast!(sync Inode);
 
 impl dyn Inode {
-    pub fn open(self: Arc<Self>) -> SyscallResult<Arc<dyn File>> {
+    pub fn open(self: Arc<Self>, flags: OpenFlags) -> SyscallResult<Arc<dyn File>> {
         match self.metadata().mode {
-            InodeMode::IFCHR => Ok(CharacterFile::new(FileMeta::new(Some(self)))),
-            InodeMode::IFDIR => Ok(DirFile::new(FileMeta::new(Some(self)))),
-            InodeMode::IFREG => Ok(RegularFile::new(FileMeta::new(Some(self)))),
+            InodeMode::IFCHR => Ok(CharacterFile::new(FileMeta::new(Some(self), flags))),
+            InodeMode::IFDIR => Ok(DirFile::new(FileMeta::new(Some(self), flags))),
+            InodeMode::IFREG => Ok(RegularFile::new(FileMeta::new(Some(self), flags))),
             _ => Err(Errno::EPERM),
         }
     }
@@ -227,14 +227,6 @@ impl dyn Inode {
             page_cache.sync_all(self).await?;
         }
         Ok(0)
-    }
-
-    pub async fn list<'a>(self: &'a Arc<Self>, idx: usize) -> SyscallResult<ChildIter<'a>> {
-        let mut inner = self.metadata().inner.lock();
-        if !inner.children_loaded {
-            self.clone().load_children(&mut inner).await?;
-        }
-        Ok(ChildIter { inode: self, inner, idx })
     }
 
     pub async fn lookup_name(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
@@ -306,25 +298,5 @@ impl dyn Inode {
             return Err(Errno::EINVAL);
         }
         self.do_readlink().await
-    }
-}
-
-pub struct ChildIter<'a> {
-    inode: &'a Arc<dyn Inode>,
-    inner: MutexGuard<'a, InodeMetaInner>,
-    idx: usize,
-}
-
-impl Iterator for ChildIter<'_> {
-    type Item = Arc<dyn Inode>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let inode = match self.idx {
-            0 => Some(self.inode.clone()),
-            1 => Some(self.inode.metadata().parent.clone().and_then(|p| p.upgrade()).unwrap_or(self.inode.clone())),
-            _ => self.inner.children.values().nth(self.idx - 2).map(|child| child.inode.clone()),
-        };
-        self.idx += 1;
-        inode
     }
 }

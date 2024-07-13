@@ -9,8 +9,12 @@ use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpCidr};
 
 use crate::net::netaddress::IpAddr;
-use crate::sched::time::current_time;
+use crate::sched::time::cpu_time;
 use crate::sync::mutex::Mutex;
+
+pub fn init() {
+    NET_INTERFACE.init();
+}
 
 pub static NET_INTERFACE: NetInterface = NetInterface::new();
 
@@ -88,7 +92,7 @@ impl<'a> NetInterface<'a> {
     pub fn poll(&self) {
         self.inner_handle(|inner| {
             inner.i_face.poll(
-                Instant::from_millis(current_time().as_millis() as i64),
+                Instant::from_millis(cpu_time().as_millis() as i64),
                 &mut inner.dev,
                 &mut inner.sockets_set,
             );
@@ -111,7 +115,7 @@ impl<'a> InterfaceInner<'a> {
         let mut i_face = Interface::new(
             config,
             &mut dev,
-            Instant::from_millis(current_time().as_millis() as i64),
+            Instant::from_millis(cpu_time().as_millis() as i64),
         );
         i_face.update_ip_addrs(|ip_address| {
             ip_address

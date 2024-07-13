@@ -4,29 +4,21 @@ use alloc::vec::Vec;
 use core::task::Waker;
 use async_trait::async_trait;
 use crate::arch::PAGE_SIZE;
-use crate::fs::ffi::InodeMode;
 use crate::fs::inode::Inode;
 use crate::result::{Errno, SyscallResult};
-use crate::sync::mutex::AsyncMutex;
+use crate::sync::mutex::{AsyncMutex, Mutex};
+use crate::fs::ffi::OpenFlags;
 
 pub struct FileMeta {
     pub inode: Option<Arc<dyn Inode>>,
-    pub prw_lock: AsyncMutex<()>,
-    pub inner: AsyncMutex<FileMetaInner>,
-}
-
-#[derive(Default)]
-pub struct FileMetaInner {
-    /// 位置指针
-    pub pos: isize,
+    pub flags: Mutex<OpenFlags>,
 }
 
 impl FileMeta {
-    pub fn new(inode: Option<Arc<dyn Inode>>) -> Self {
+    pub fn new(inode: Option<Arc<dyn Inode>>, flags: OpenFlags) -> Self {
         FileMeta {
             inode,
-            prw_lock: AsyncMutex::default(),
-            inner: AsyncMutex::default(),
+            flags: Mutex::new(flags),
         }
     }
 }
@@ -60,23 +52,23 @@ pub trait File: Send + Sync {
     fn metadata(&self) -> &FileMeta;
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
-        Err(Errno::EPERM)
+        Err(Errno::EOPNOTSUPP)
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
-        Err(Errno::EPERM)
+        Err(Errno::EOPNOTSUPP)
     }
 
     async fn truncate(&self, size: isize) -> SyscallResult {
-        Err(Errno::EPERM)
+        Err(Errno::EOPNOTSUPP)
     }
 
     async fn sync(&self) -> SyscallResult {
-        Err(Errno::EINVAL)
+        Err(Errno::EOPNOTSUPP)
     }
 
     async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
-        Err(Errno::ESPIPE)
+        Err(Errno::EOPNOTSUPP)
     }
 
     async fn ioctl(&self, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
@@ -84,11 +76,15 @@ pub trait File: Send + Sync {
     }
 
     async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
-        Err(Errno::ESPIPE)
+        Err(Errno::EOPNOTSUPP)
     }
 
     async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
-        Err(Errno::ESPIPE)
+        Err(Errno::EOPNOTSUPP)
+    }
+
+    async fn readdir(&self) -> SyscallResult<Option<(usize, Arc<dyn Inode>)>> {
+        Err(Errno::ENOTDIR)
     }
 
     fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
@@ -134,44 +130,65 @@ impl File for CharacterFile {
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
-        if inode.metadata().mode != InodeMode::IFCHR {
-            return Err(Errno::ENOTTY);
-        }
         inode.read(buf, 0).await
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
-        if inode.metadata().mode != InodeMode::IFCHR {
-            return Err(Errno::ENOTTY);
-        }
         inode.write(buf, 0).await
     }
 }
 
 pub struct DirFile {
     metadata: FileMeta,
+    pos: AsyncMutex<usize>,
 }
 
 impl DirFile {
     pub fn new(metadata: FileMeta) -> Arc<Self> {
-        Arc::new(Self { metadata })
+        Arc::new(Self {
+            metadata,
+            pos: AsyncMutex::default(),
+        })
     }
 }
 
+#[async_trait]
 impl File for DirFile {
     fn metadata(&self) -> &FileMeta {
         &self.metadata
+    }
+
+    async fn readdir(&self) -> SyscallResult<Option<(usize, Arc<dyn Inode>)>> {
+        let inode = self.metadata.inode.as_ref().unwrap();
+        let mut pos = self.pos.lock().await;
+        let inode = match *pos {
+            0 => inode.clone(),
+            1 => inode.metadata().parent.clone().and_then(|p| p.upgrade()).unwrap_or(inode.clone()),
+            _ => match inode.clone().lookup_idx(*pos - 2).await {
+                Ok(inode) => inode,
+                Err(Errno::ENOENT) => return Ok(None),
+                Err(e) => return Err(e),
+            },
+        };
+        *pos += 1;
+        Ok(Some((*pos - 1, inode)))
     }
 }
 
 pub struct RegularFile {
     metadata: FileMeta,
+    pos: AsyncMutex<isize>,
+    prw_lock: AsyncMutex<()>,
 }
 
 impl RegularFile {
     pub fn new(metadata: FileMeta) -> Arc<Self> {
-        Arc::new(Self { metadata })
+        Arc::new(Self {
+            metadata,
+            pos: AsyncMutex::default(),
+            prw_lock: AsyncMutex::default(),
+        })
     }
 }
 
@@ -183,31 +200,22 @@ impl File for RegularFile {
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        let mut inner = self.metadata.inner.lock().await;
-        let count = inode.read(buf, inner.pos).await?;
-        inner.pos += count;
+        let mut pos = self.pos.lock().await;
+        let count = inode.read(buf, *pos).await?;
+        *pos += count;
         Ok(count)
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        let mut inner = self.metadata.inner.lock().await;
-        let count = inode.write(buf, inner.pos).await?;
-        inner.pos += count;
+        let mut pos = self.pos.lock().await;
+        let count = inode.write(buf, *pos).await?;
+        *pos += count;
         Ok(count)
     }
 
     async fn truncate(&self, size: isize) -> SyscallResult {
         let inode = self.metadata.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
         inode.truncate(size).await?;
         // The value of the seek pointer shall not be modified by a call to ftruncate().
         Ok(())
@@ -220,12 +228,8 @@ impl File for RegularFile {
     }
 
     async fn seek(&self, seek: Seek) -> SyscallResult<isize> {
-        let inode = self.metadata.inode.as_ref().unwrap();
-        if inode.metadata().mode == InodeMode::IFDIR {
-            return Err(Errno::EISDIR);
-        }
-        let mut inner = self.metadata.inner.lock().await;
-        inner.pos = match seek {
+        let mut pos = self.pos.lock().await;
+        *pos = match seek {
             Seek::Set(offset) => {
                 if offset < 0 {
                     return Err(Errno::EINVAL);
@@ -233,7 +237,7 @@ impl File for RegularFile {
                 offset
             }
             Seek::Cur(offset) => {
-                match inner.pos.checked_add(offset) {
+                match pos.checked_add(offset) {
                     Some(new_pos) => new_pos,
                     None => return Err(if offset < 0 { Errno::EINVAL } else { Errno::EOVERFLOW }),
                 }
@@ -246,11 +250,11 @@ impl File for RegularFile {
                 }
             }
         };
-        Ok(inner.pos)
+        Ok(*pos)
     }
 
     async fn pread(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
-        let _lock = self.metadata().prw_lock.lock().await;
+        let _lock = self.prw_lock.lock().await;
         let old = self.seek(Seek::Cur(0)).await?;
         self.seek(Seek::Set(offset)).await?;
         let ret = self.read(buf).await;
@@ -259,7 +263,7 @@ impl File for RegularFile {
     }
 
     async fn pwrite(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
-        let _lock = self.metadata().prw_lock.lock().await;
+        let _lock = self.prw_lock.lock().await;
         let old = self.seek(Seek::Cur(0)).await?;
         self.seek(Seek::Set(offset)).await?;
         let ret = self.write(buf).await;

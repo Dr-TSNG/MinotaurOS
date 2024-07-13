@@ -5,9 +5,11 @@ mod signal;
 mod sync;
 mod system;
 mod time;
+mod net;
 
 use fs::*;
 use mm::*;
+use net::*;
 use process::*;
 use signal::*;
 use sync::*;
@@ -128,6 +130,18 @@ pub enum SyscallCode {
     Shmget = 194,
     Shmctl = 195,
     Shmat = 196,
+    Socket = 198,
+    Bind = 200,
+    Listen = 201,
+    Accept = 202,
+    Connect = 203,
+    Getsockname = 204,
+    Getpeername = 205,
+    Sendto = 206,
+    Recvfrom = 207,
+    Setsockopt = 208,
+    Getsockopt = 209,
+    Sockshutdown = 210,
     Brk = 214,
     Munmap = 215,
     Clone = 220,
@@ -227,6 +241,18 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Shmget => syscall!(sys_shmget, args[0], args[1], args[2] as u32),
         SyscallCode::Shmctl => syscall!(sys_shmctl, args[0] as i32, args[1] as i32, args[2]),
         SyscallCode::Shmat => syscall!(sys_shmat, args[0] as i32, args[1], args[2] as u32),
+        SyscallCode::Socket => syscall!(sys_socket, args[0] as u32, args[1] as u32, args[2] as u32),
+        SyscallCode::Bind => syscall!(sys_bind, args[0] as FdNum, args[1], args[2] as u32),
+        SyscallCode::Listen => syscall!(sys_listen, args[0] as FdNum, args[1] as u32),
+        SyscallCode::Accept => async_syscall!(sys_accept, args[0] as FdNum, args[1], args[2]),
+        SyscallCode::Connect => async_syscall!(sys_connect, args[0] as FdNum, args[1], args[2] as u32),
+        SyscallCode::Getsockname => syscall!(sys_getsockname, args[0] as FdNum, args[1], args[2]),
+        SyscallCode::Getpeername => syscall!(sys_getpeername, args[0] as FdNum, args[1], args[2]),
+        SyscallCode::Sendto => async_syscall!(sys_sendto, args[0] as FdNum, args[1], args[2], args[3] as u32, args[4], args[5] as u32),
+        SyscallCode::Recvfrom => async_syscall!(sys_recvfrom, args[0] as FdNum, args[1], args[2] as u32, args[3] as u32, args[4], args[5]),
+        SyscallCode::Setsockopt => syscall!(sys_setsockopt, args[0] as FdNum, args[1] as u32, args[2] as u32, args[3], args[4] as u32),
+        SyscallCode::Getsockopt => syscall!(sys_getsockopt, args[0] as FdNum, args[1] as u32, args[2] as u32, args[3], args[4]),
+        SyscallCode::Sockshutdown => syscall!(sys_sockshutdown, args[0] as FdNum, args[1] as u32),
         SyscallCode::Brk => syscall!(sys_brk, args[0]),
         SyscallCode::Munmap => syscall!(sys_munmap, args[0], args[1]),
         SyscallCode::Clone => syscall!(sys_clone, args[0] as u32, args[1], args[2], args[3], args[4]),

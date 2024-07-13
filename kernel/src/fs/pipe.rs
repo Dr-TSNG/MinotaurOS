@@ -7,6 +7,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use async_trait::async_trait;
 use log::debug;
+use crate::fs::ffi::OpenFlags;
 use crate::fs::file::{File, FileMeta};
 use crate::process::thread::event_bus::Event;
 use crate::processor::current_thread;
@@ -48,13 +49,13 @@ impl Pipe {
     pub fn new() -> (Arc<Self>, Arc<Self>) {
         let inner = Arc::new(Mutex::new(PipeInner::default()));
         let reader = Arc::new(Pipe {
-            metadata: FileMeta::new(None),
+            metadata: FileMeta::new(None, OpenFlags::O_RDONLY),
             is_reader: true,
             other: LateInit::new(),
             inner: inner.clone(),
         });
         let writer = Arc::new(Pipe {
-            metadata: FileMeta::new(None),
+            metadata: FileMeta::new(None, OpenFlags::O_WRONLY),
             is_reader: false,
             other: LateInit::new(),
             inner,
