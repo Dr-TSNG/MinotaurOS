@@ -17,7 +17,7 @@ use core::time::Duration;
 use tap::Pipe;
 use crate::fs::file::{File, FileMeta};
 use crate::net::iface::NET_INTERFACE;
-use crate::net::port::PORTS;
+use crate::net::port::random_port;
 use crate::net::socket::{endpoint, fill_with_endpoint, Socket, SocketType, BUFFER_SIZE};
 use crate::net::socket::{SHUT_WR};
 use crate::net::MAX_BUFFER_SIZE;
@@ -55,7 +55,7 @@ impl TcpSocket {
         // 将 socket 加入 interface，返回 handle
         let handle = NET_INTERFACE.add_socket(socket);
         NET_INTERFACE.poll();
-        let port = unsafe { PORTS.positive_u32() as u16 };
+        let port = random_port();
         info!("[tcp] New socket handle {} at port {}", handle, port);
         Self {
             metadata: FileMeta::new(None, OpenFlags::empty()),
@@ -77,7 +77,7 @@ impl TcpSocket {
         // 将 socket 加入 interface，返回 handle
         let handle = NET_INTERFACE.add_socket(socket);
         NET_INTERFACE.poll();
-        let port = unsafe { PORTS.positive_u32() as u16 };
+        let port = random_port();
         info!("[tcp] New socket handle {} at port {}", handle, port);
         Self {
             metadata: FileMeta::new(None, OpenFlags::empty()),

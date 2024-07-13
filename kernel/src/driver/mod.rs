@@ -26,6 +26,7 @@ use crate::sync::once::LateInit;
 
 pub mod ns16550a;
 pub mod plic;
+pub mod random;
 pub mod virtio;
 
 pub static BOARD_INFO: LateInit<BoardInfo> = LateInit::new();

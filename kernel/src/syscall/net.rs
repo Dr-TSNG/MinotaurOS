@@ -25,7 +25,7 @@ const SO_KEEPALIVE: u32 = 9;
 
 pub fn sys_socket(domain: u32, socket_type: u32, protocol: u32) -> SyscallResult<usize> {
     let sockfd = <dyn Socket>::alloc(domain, socket_type)?;
-    info!("[sys_socket] new sockfd: {}", sockfd);
+    info!("[socket] new sockfd: {}", sockfd);
     Ok(sockfd)
 }
 
@@ -34,9 +34,10 @@ pub fn sys_bind(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallResult<usize
     let addr_buf = proc_inner.addr_space.user_slice_r(VirtAddr(addr), addrlen as usize)?;
     let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
     let endpoint = listen_endpoint(addr_buf)?;
+    info!("[bind] sockfd: {}, ep: {}", sockfd, endpoint);
     match socket.socket_type() {
         SocketType::SOCK_STREAM => socket.bind(endpoint)?,
-        SocketType::SOCK_DGRAM if proc_inner.socket_table.can_bind(endpoint) => {
+        SocketType::SOCK_DGRAM => {
             if proc_inner.socket_table.can_bind(endpoint) {
                 socket.bind(endpoint)?;
             } else {
@@ -49,6 +50,7 @@ pub fn sys_bind(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallResult<usize
 }
 
 pub fn sys_listen(sockfd: FdNum, _backlog: u32) -> SyscallResult<usize> {
+    info!("[listen] sockfd: {}", sockfd);
     current_process().inner.lock()
         .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?
         .listen()?;
@@ -56,6 +58,7 @@ pub fn sys_listen(sockfd: FdNum, _backlog: u32) -> SyscallResult<usize> {
 }
 
 pub async fn sys_accept(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallResult<usize> {
+    info!("[accept] sockfd: {}", sockfd);
     current_process().inner.lock()
         .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?
         .accept(addr, addrlen).await

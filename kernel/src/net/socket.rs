@@ -6,7 +6,7 @@ use core::mem::size_of;
 use core::slice;
 use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::fs::file::File;
-use crate::net::port::PORTS;
+use crate::net::port::random_port;
 use crate::net::tcp::TcpSocket;
 use crate::net::udp::UdpSocket;
 use crate::processor::current_process;
@@ -156,7 +156,7 @@ impl From<SocketAddressV4> for IpListenEndpoint {
             } else {
                 IpListenEndpoint {
                     addr: None,
-                    port: unsafe { PORTS.positive_u32() as u16 },
+                    port: random_port(),
                 }
             }
         } else {
@@ -199,7 +199,7 @@ impl From<SocketAddressV6> for IpListenEndpoint {
             } else {
                 IpListenEndpoint {
                     addr: None,
-                    port: unsafe { PORTS.positive_u32() as u16 },
+                    port: random_port(),
                 }
             }
         } else {

@@ -21,6 +21,7 @@ log = "0.4"
 lru = "0.12"
 num_enum = { version = "0.7.2", default-features = false }
 pin-project = "1.1.5"
+rand = { version = "0.8.5", features = ["alloc", "small_rng"], default-features = false }
 sbi-spec = "0.0.7"
 spin = "0.9"
 tap = "1.0"
@@ -43,7 +44,6 @@ smoltcp = { version = "0.10.0", default-features = false, features = [
     "async",
 ] }
 managed = { version = "0.8", default-features = false, features = ["map"] }
-rand_core = "0.6.4"
 
 [features]
 error = []
