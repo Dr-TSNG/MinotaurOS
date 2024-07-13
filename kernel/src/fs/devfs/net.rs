@@ -1,65 +1,50 @@
-use alloc::boxed::Box;
-use alloc::sync::{Arc, Weak};
-use alloc::vec::Vec;
-
-use async_trait::async_trait;
-use bitvec_rs::BitVec;
-
+use alloc::string::ToString;
+use alloc::sync::Arc;
+use alloc::sync::Weak;
+use core::sync::atomic::Ordering;
 use crate::fs::devfs::DevFileSystem;
-use crate::fs::fat32::FAT32FileSystem;
 use crate::fs::ffi::InodeMode;
-use crate::fs::inode::{Inode, InodeChild, InodeInternal, InodeMeta, InodeMetaInner};
-use crate::result::SyscallResult;
-use crate::sync::block_on;
-use crate::sync::mutex::AsyncMutex;
+use crate::fs::file_system::FileSystem;
+use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
+use crate::sched::ffi::TimeSpec;
 
 pub struct NetInode {
     metadata: InodeMeta,
-    fs: Weak<FAT32FileSystem>,
-    ext: Arc<AsyncMutex<FAT32InodeExt>>,
-}
-struct FAT32InodeExt {
-    dir_occupy: BitVec,
-    clusters: Vec<usize>,
+    socket_id: usize, // socket handler, no use now
+    fs: Weak<DevFileSystem>,
 }
 
+// 需要指定InodeMode::IFSOCK
 impl NetInode {
-    pub fn new(fs: &DevFileSystem, parent: Arc<dyn Inode>) -> SyscallResult<Arc<Self>> {
-        todo!()
-    }
-}
-#[async_trait]
-impl InodeInternal for NetInode {
-    async fn read_direct(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
-        todo!()
-    }
-    async fn write_direct(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
-        todo!()
-    }
-    async fn truncate_direct(&self, size: isize) -> SyscallResult {
-        todo!()
-    }
-    async fn do_create(
-        self: Arc<Self>,
-        inner: &mut InodeMetaInner,
-        mode: InodeMode,
-        name: &str,
-    ) -> SyscallResult<InodeChild> {
-        todo!()
+    pub fn new(fs: Arc<DevFileSystem>, parent: Arc<dyn Inode>) -> Arc<Self> {
+        Arc::new(Self {
+            metadata: InodeMeta::new(
+                fs.ino_pool.fetch_add(1, Ordering::Relaxed),
+                0,
+                InodeMode::IFDIR,
+                "net".to_string(),
+                "/net".to_string(),
+                Some(parent),
+                None,
+                TimeSpec::default(),
+                TimeSpec::default(),
+                TimeSpec::default(),
+                0,
+            ),
+            socket_id: 0,
+            fs: Arc::downgrade(&fs),
+        })
     }
 }
 
-#[async_trait]
+impl InodeInternal for NetInode {}
+
 impl Inode for NetInode {
     fn metadata(&self) -> &InodeMeta {
         &self.metadata
     }
-}
 
-impl Drop for NetInode {
-    fn drop(&mut self) {
-        if let Some(page_cache) = self.metadata.page_cache.as_ref() {
-            block_on(page_cache.sync_all(self)).unwrap();
-        }
+    fn file_system(&self) -> Weak<dyn FileSystem> {
+        self.fs.clone()
     }
 }

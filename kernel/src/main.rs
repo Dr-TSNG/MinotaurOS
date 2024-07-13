@@ -13,6 +13,7 @@
 #![feature(stmt_expr_attributes)]
 #![feature(strict_provenance)]
 #![feature(sync_unsafe_cell)]
+#![feature(trait_upcasting)]
 
 extern crate alloc;
 
@@ -23,6 +24,7 @@ mod debug;
 mod driver;
 mod fs;
 mod mm;
+mod net;
 mod process;
 mod processor;
 mod result;
@@ -92,6 +94,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     driver::init_driver()?;
     builtin::init();
     dmesg_flush_tty();
+    net::init();
 
     let data = builtin::builtin_app("shell").unwrap();
     let mnt_ns = fs::init()?;

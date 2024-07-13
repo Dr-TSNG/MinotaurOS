@@ -1,7 +1,7 @@
 pub mod aux;
-pub mod thread;
-pub mod monitor;
 pub mod ffi;
+pub mod monitor;
+pub mod thread;
 
 use alloc::collections::BTreeMap;
 use alloc::ffi::CString;
@@ -18,6 +18,7 @@ use crate::config::USER_STACK_TOP;
 use crate::fs::fd::FdTable;
 use crate::fs::file_system::MountNamespace;
 use crate::mm::addr_space::AddressSpace;
+use crate::net::SocketTable;
 use crate::process::aux::Aux;
 use crate::process::ffi::{CloneFlags, CpuSet};
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
@@ -61,6 +62,8 @@ pub struct ProcessInner {
     pub mnt_ns: Arc<MountNamespace>,
     /// 文件描述符表
     pub fd_table: FdTable,
+    /// Socket 表
+    pub socket_table: SocketTable,
     /// 互斥锁队列
     pub futex_queue: FutexQueue,
     /// 定时器
@@ -72,9 +75,11 @@ pub struct ProcessInner {
 }
 
 impl Process {
-    pub async fn new_initproc(mnt_ns: Arc<MountNamespace>, elf_data: &[u8]) -> SyscallResult<Arc<Self>> {
-        let (addr_space, entry, _) =
-            AddressSpace::from_elf(&mnt_ns, elf_data).await?;
+    pub async fn new_initproc(
+        mnt_ns: Arc<MountNamespace>,
+        elf_data: &[u8],
+    ) -> SyscallResult<Arc<Self>> {
+        let (addr_space, entry, _) = AddressSpace::from_elf(&mnt_ns, elf_data).await?;
         let pid = Arc::new(TidTracker::new());
 
         let process = Arc::new(Process {
@@ -87,6 +92,7 @@ impl Process {
                 addr_space,
                 mnt_ns,
                 fd_table: FdTable::new(),
+                socket_table: Default::default(),
                 futex_queue: Default::default(),
                 timers: Default::default(),
                 cwd: String::from("/"),
@@ -237,6 +243,7 @@ impl Process {
                     addr_space: proc_inner.addr_space.fork(),
                     mnt_ns: proc_inner.mnt_ns.clone(),
                     fd_table: proc_inner.fd_table.clone(),
+                    socket_table: proc_inner.socket_table.clone(),
                     futex_queue: Default::default(),
                     timers: Default::default(),
                     cwd: proc_inner.cwd.clone(),
