@@ -1,16 +1,16 @@
 use super::{Socket, SocketType};
-use crate::fs::devfs::unix_socket::UnixSockNode;
-use crate::fs::ffi::InodeMode;
 use crate::fs::file::{File, FileMeta};
 use crate::fs::pipe::Pipe;
 use crate::result::{Errno, SyscallResult};
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use async_trait::async_trait;
-use smoltcp::wire::IpEndpoint;
+use log::info;
+use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
+use crate::fs::ffi::OpenFlags;
 
 pub struct UnixSocket {
-    file_meta: FileMeta,
+    metadata: FileMeta,
     read_end: Arc<Pipe>,
     write_end: Arc<Pipe>,
 }
@@ -18,7 +18,7 @@ pub struct UnixSocket {
 #[async_trait]
 impl File for UnixSocket {
     fn metadata(&self) -> &FileMeta {
-        &self.file_meta
+        &self.metadata
     }
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
@@ -31,22 +31,6 @@ impl File for UnixSocket {
 }
 #[async_trait]
 impl Socket for UnixSocket {
-    fn bind(&self, addr: smoltcp::wire::IpListenEndpoint) -> SyscallResult<usize> {
-        Err(Errno::EOPNOTSUPP)
-    }
-
-    async fn connect(&self, addr: &[u8]) -> SyscallResult<usize> {
-        Err(Errno::EOPNOTSUPP)
-    }
-
-    fn listen(&self) -> SyscallResult<usize> {
-        Err(Errno::EOPNOTSUPP)
-    }
-
-    async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize> {
-        Err(Errno::EOPNOTSUPP)
-    }
-
     fn set_send_buf_size(&self, size: usize) -> SyscallResult<()> {
         todo!()
     }
@@ -67,7 +51,7 @@ impl Socket for UnixSocket {
         todo!()
     }
 
-    fn local_endpoint(&self) -> SyscallResult<smoltcp::wire::IpListenEndpoint> {
+    fn local_endpoint(&self) -> IpListenEndpoint {
         todo!()
     }
 
@@ -76,7 +60,7 @@ impl Socket for UnixSocket {
     }
 
     fn shutdown(&self, how: u32) -> SyscallResult<()> {
-        log::info!("[UnixSocket::shutdown] how {}", how);
+        info!("[UnixSocket::shutdown] how {}", how);
         Ok(())
     }
 
@@ -99,9 +83,8 @@ impl Socket for UnixSocket {
 
 impl UnixSocket {
     pub fn new(read_end: Arc<Pipe>, write_end: Arc<Pipe>) -> Self {
-        let unix_node = UnixSockNode::new();
         Self {
-            file_meta: FileMeta::new(Some(unix_node)),
+            metadata: FileMeta::new(None, OpenFlags::empty()),
             // buf: Mutex::new(VecDeque::new()),
             read_end,
             write_end,

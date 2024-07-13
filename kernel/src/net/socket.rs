@@ -2,12 +2,11 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use async_trait::async_trait;
-use core::mem;
+use core::mem::size_of;
 use core::slice;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::fs::ffi::OpenFlags;
 use crate::fs::file::File;
-use crate::net::port::Ports;
+use crate::net::port::PORTS;
 use crate::net::tcp::TcpSocket;
 use crate::net::udp::UdpSocket;
 use crate::processor::current_process;
@@ -32,33 +31,31 @@ impl SocketTable {
     pub const fn new() -> Self {
         Self(BTreeMap::new())
     }
+
     pub fn insert(&mut self, key: FdNum, value: Arc<dyn Socket>) {
         self.0.insert(key, value);
     }
-    pub fn get_ref(&self, fd: FdNum) -> Option<&Arc<dyn Socket>> {
-        self.0.get(&fd)
+
+    pub fn get(&self, fd: FdNum) -> Option<Arc<dyn Socket>> {
+        self.0.get(&fd).cloned()
     }
+
     pub fn take(&mut self, fd: FdNum) -> Option<Arc<dyn Socket>> {
         self.0.remove(&fd)
     }
-    pub fn can_bind(&self, endpoint: IpListenEndpoint) -> Option<(FdNum, Arc<dyn Socket>)> {
-        for (sockfd, socket) in self.0.clone() {
-            if socket.socket_type().contains(SocketType::SOCK_DGRAM) {
-                if socket.local_endpoint().unwrap().eq(&endpoint) {
-                    log::info!("[SockTable::can_bind] find port exist");
-                    return Some((sockfd, socket));
-                }
-            }
-        }
-        None
+
+    pub fn can_bind(&self, endpoint: IpListenEndpoint) -> bool {
+        self.0.values().all(|socket| socket.local_endpoint() != endpoint)
     }
 }
+
 /// shutdown
 #[allow(unused)]
 pub const SHUT_RD: u32 = 0;
 pub const SHUT_WR: u32 = 1;
 #[allow(unused)]
 pub const SHUT_RDWR: u32 = 2;
+
 bitflags! {
     /// socket type, use when you alloc a socket , didn't impl yet
     pub struct SocketType: u32 {
@@ -67,17 +64,20 @@ bitflags! {
         const SOCK_CLOEXEC = 1 << 19;
     }
 }
+
 /// used when you want trans a socket_address to IpEndPoint or IpListenEndPoint
 pub enum SocketAddress {
     V4(SocketAddressV4),
     V6(SocketAddressV6),
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(C)]
 pub struct SocketAddressV4 {
     port: [u8; 2],
     addr_v4: [u8; 4],
 }
+
 impl SocketAddressV4 {
     pub fn new(buf: &[u8]) -> Self {
         let addr = Self {
@@ -96,6 +96,7 @@ impl SocketAddressV4 {
         }
     }
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
 #[repr(C)]
 pub struct SocketAddressV6 {
@@ -103,6 +104,7 @@ pub struct SocketAddressV6 {
     flowinfo: [u8; 4],
     addr_v6: [u8; 16],
 }
+
 impl SocketAddressV6 {
     pub fn new(buf: &[u8]) -> Self {
         let addr = Self {
@@ -123,6 +125,7 @@ impl SocketAddressV6 {
         }
     }
 }
+
 impl From<IpEndpoint> for SocketAddressV4 {
     fn from(value: IpEndpoint) -> Self {
         Self {
@@ -135,12 +138,14 @@ impl From<IpEndpoint> for SocketAddressV4 {
         }
     }
 }
+
 impl From<SocketAddressV4> for IpEndpoint {
     fn from(value: SocketAddressV4) -> Self {
         let port = u16::from_be_bytes(value.port);
         Self::new(IpAddress::Ipv4(Ipv4Address(value.addr_v4)), port)
     }
 }
+
 impl From<SocketAddressV4> for IpListenEndpoint {
     fn from(value: SocketAddressV4) -> Self {
         let port = u16::from_be_bytes(value.port);
@@ -151,7 +156,7 @@ impl From<SocketAddressV4> for IpListenEndpoint {
             } else {
                 IpListenEndpoint {
                     addr: None,
-                    port: unsafe { Ports.positive_u32() as u16 },
+                    port: unsafe { PORTS.positive_u32() as u16 },
                 }
             }
         } else {
@@ -162,6 +167,7 @@ impl From<SocketAddressV4> for IpListenEndpoint {
         }
     }
 }
+
 impl From<IpEndpoint> for SocketAddressV6 {
     fn from(value: IpEndpoint) -> Self {
         Self {
@@ -175,12 +181,14 @@ impl From<IpEndpoint> for SocketAddressV6 {
         }
     }
 }
+
 impl From<SocketAddressV6> for IpEndpoint {
     fn from(value: SocketAddressV6) -> Self {
         let port = u16::from_be_bytes(value.port);
         Self::new(IpAddress::Ipv6(Ipv6Address(value.addr_v6)), port)
     }
 }
+
 impl From<SocketAddressV6> for IpListenEndpoint {
     fn from(value: SocketAddressV6) -> Self {
         let port = u16::from_be_bytes(value.port);
@@ -191,7 +199,7 @@ impl From<SocketAddressV6> for IpListenEndpoint {
             } else {
                 IpListenEndpoint {
                     addr: None,
-                    port: unsafe { Ports.positive_u32() as u16 },
+                    port: unsafe { PORTS.positive_u32() as u16 },
                 }
             }
         } else {
@@ -204,24 +212,52 @@ impl From<SocketAddressV6> for IpListenEndpoint {
 }
 
 /// for syscall on net part , return SyscallResult
+#[allow(unused)]
 #[async_trait]
 pub trait Socket: File {
-    fn bind(&self, addr: IpListenEndpoint) -> SyscallResult;
-    async fn connect(&self, addr: &[u8]) -> SyscallResult<usize>;
-    fn listen(&self) -> SyscallResult<usize>;
-    async fn accept(&self, socketfd: u32, addr: usize, addrlen: usize) -> SyscallResult<usize>;
+    fn bind(&self, addr: IpListenEndpoint) -> SyscallResult {
+        Err(Errno::EOPNOTSUPP)
+    }
+
+    async fn connect(&self, addr: &[u8]) -> SyscallResult {
+        Err(Errno::EOPNOTSUPP)
+    }
+
+    fn listen(&self) -> SyscallResult {
+        Err(Errno::EOPNOTSUPP)
+    }
+
+    async fn accept(&self, addr: usize, addrlen: usize) -> SyscallResult<usize> {
+        Err(Errno::EOPNOTSUPP)
+    }
+
     fn set_send_buf_size(&self, size: usize) -> SyscallResult;
+
     fn set_recv_buf_size(&self, size: usize) -> SyscallResult;
+
     fn set_keep_live(&self, enabled: bool) -> SyscallResult;
+
     fn dis_connect(&self, how: u32) -> SyscallResult;
+
     fn socket_type(&self) -> SocketType;
-    fn local_endpoint(&self) -> SyscallResult<IpListenEndpoint>;
+
+    fn local_endpoint(&self) -> IpListenEndpoint;
+
     fn remote_endpoint(&self) -> Option<IpEndpoint>;
+
     fn shutdown(&self, how: u32) -> SyscallResult;
+
     fn recv_buf_size(&self) -> SyscallResult<usize>;
+
     fn send_buf_size(&self) -> SyscallResult<usize>;
-    fn set_nagle_enabled(&self, enabled: bool) -> SyscallResult<usize>;
-    fn set_keep_alive(&self, enabled: bool) -> SyscallResult<usize>;
+
+    fn set_nagle_enabled(&self, enabled: bool) -> SyscallResult<usize> {
+        Err(Errno::EOPNOTSUPP)
+    }
+
+    fn set_keep_alive(&self, enabled: bool) -> SyscallResult<usize> {
+        Err(Errno::EOPNOTSUPP)
+    }
 }
 pub fn to_endpoint(listen_endpoint: IpListenEndpoint) -> IpEndpoint {
     let addr = if listen_endpoint.addr.is_none() {
@@ -263,13 +299,13 @@ pub fn fill_with_endpoint(
 ) -> SyscallResult<usize> {
     match endpoint.addr {
         IpAddress::Ipv4(_) => {
-            let len = mem::size_of::<u16>() + mem::size_of::<SocketAddressV4>();
+            let len = size_of::<u16>() + size_of::<SocketAddressV4>();
             // tos在此处使用UserCheck检查了addr开始处的len长度内存是否支持写入。
             let addr_buf = unsafe { slice::from_raw_parts_mut(addr as *mut u8, len) };
             SocketAddressV4::from(endpoint).fill(addr_buf, addrlen);
         }
         IpAddress::Ipv6(_) => {
-            let len = mem::size_of::<u16>() + mem::size_of::<SocketAddressV6>();
+            let len = size_of::<u16>() + size_of::<SocketAddressV6>();
             let addr_buf = unsafe { slice::from_raw_parts_mut(addr as *mut u8, len) };
             SocketAddressV6::from(endpoint).fill(addr_buf, addrlen);
         }
@@ -282,22 +318,18 @@ impl dyn Socket {
         match domain as u16 {
             AF_INET | AF_INET6 => {
                 let socket_type = SocketType::from_bits(socket_type).ok_or(Errno::EINVAL)?;
-                let flags = if socket_type.contains(SocketType::SOCK_CLOEXEC) {
-                    OpenFlags::O_RDWR | OpenFlags::O_CLOEXEC
-                } else {
-                    OpenFlags::O_RDWR
-                };
-                // 创建 inode， 赋值给 生成的 udp socket ， inode 的类型为 IFSOCK
+                let cloexec = socket_type.contains(SocketType::SOCK_CLOEXEC);
+                // 创建 inode， 赋值给生成的 udp socket， inode 的类型为 IFSOCK
                 if socket_type.contains(SocketType::SOCK_DGRAM) {
                     let socket = Arc::new(UdpSocket::new());
                     let mut proc_inner = current_process().inner.lock();
-                    let fd = proc_inner.fd_table.put(FileDescriptor::new(socket.clone(), flags), 0)?;
+                    let fd = proc_inner.fd_table.put(FileDescriptor::new(socket.clone(), cloexec), 0)?;
                     proc_inner.socket_table.insert(fd, socket);
                     Ok(fd as usize)
                 } else if socket_type.contains(SocketType::SOCK_STREAM) {
                     let socket = Arc::new(TcpSocket::new());
                     let mut proc_inner = current_process().inner.lock();
-                    let fd = proc_inner.fd_table.put(FileDescriptor::new(socket.clone(), flags), 0)?;
+                    let fd = proc_inner.fd_table.put(FileDescriptor::new(socket.clone(), cloexec), 0)?;
                     proc_inner.socket_table.insert(fd, socket);
                     Ok(fd as usize)
                 } else {
@@ -312,16 +344,15 @@ impl dyn Socket {
         }
     }
     pub fn addr(self: &Arc<Self>, addr: usize, addrlen: usize) -> SyscallResult<usize> {
-        let local_endpoint = self.local_endpoint().unwrap();
+        let local_endpoint = self.local_endpoint();
         let local_endpoint = to_endpoint(local_endpoint);
         fill_with_endpoint(local_endpoint, addr, addrlen)
     }
 
     pub fn peer_addr(self: &Arc<Self>, addr: usize, addrlen: usize) -> SyscallResult<usize> {
-        let remote_endpoint = self.remote_endpoint();
-        if remote_endpoint.is_none() {
-            return Err(Errno::ENOTCONN);
+        match self.remote_endpoint() {
+            Some(remote_endpoint) => fill_with_endpoint(remote_endpoint, addr, addrlen),
+            None => Err(Errno::ENOTCONN),
         }
-        fill_with_endpoint(remote_endpoint.unwrap(), addr, addrlen)
     }
 }

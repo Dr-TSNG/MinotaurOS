@@ -6,7 +6,7 @@ use log::{debug, info, warn};
 use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
 use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
-use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
+use crate::fs::ffi::{AT_FDCWD, InodeMode, OpenFlags, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
 use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
@@ -202,7 +202,7 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     }
 
     drop(proc_inner);
-    let file = inode.open()?;
+    let file = inode.open(OpenFlags::O_RDONLY)?;
     let elf_data = file.read_all().await?;
     current_process().execve(&elf_data, &args_vec, &envs_vec).await
 }

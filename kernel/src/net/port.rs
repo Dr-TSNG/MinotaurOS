@@ -1,28 +1,24 @@
-use alloc::collections::VecDeque;
-use lazy_static::lazy_static;
-use log::info;
-use spin::Mutex;
-
-pub static mut Ports: Rng::Rng = Rng::Rng {
-    seed: Rng::BIGPRIME,
+pub static mut PORTS: rng::Rng = rng::Rng {
+    seed: rng::BIGPRIME,
 };
 
-mod Rng {
-    use crate::sched::time::current_time;
+mod rng {
     use rand_core::RngCore;
+    use crate::sched::time::cpu_time;
+
     pub struct Rng {
         pub seed: usize,
     }
     pub const BIGPRIME: usize = 1242132739;
     impl RngCore for Rng {
         fn next_u32(&mut self) -> u32 {
-            let next = self.seed + current_time().as_micros() as usize;
+            let next = self.seed + cpu_time().as_micros() as usize;
             self.seed = next;
             next as u32
         }
 
         fn next_u64(&mut self) -> u64 {
-            let next = self.seed + current_time().as_micros() as usize;
+            let next = self.seed + cpu_time().as_micros() as usize;
             self.seed = next;
             next as u64
         }
@@ -41,10 +37,10 @@ mod Rng {
 
     impl Rng {
         pub fn positive_u32(&mut self) -> u32 {
-            let mut next = self.seed + current_time().as_micros() as usize;
+            let mut next = self.seed + cpu_time().as_micros() as usize;
             while (next & 0xff) as u32 == 0 {
                 self.seed = next;
-                next = self.seed + current_time().as_micros() as usize;
+                next = self.seed + cpu_time().as_micros() as usize;
             }
             (next & 0xff) as u32
         }

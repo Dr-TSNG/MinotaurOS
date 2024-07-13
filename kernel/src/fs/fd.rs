@@ -3,7 +3,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 use crate::config::MAX_FD_NUM;
 use crate::fs::devfs::tty::DEFAULT_TTY;
-use crate::fs::ffi::OpenFlags;
 use crate::fs::file::File;
 use crate::result::{Errno, SyscallResult};
 use crate::process::ffi::{Rlimit};
@@ -20,30 +19,21 @@ pub struct FdTable {
 #[derive(Clone)]
 pub struct FileDescriptor {
     pub file: Arc<dyn File>,
-    pub flags: OpenFlags,
+    pub cloexec: bool,
 }
 
 impl FileDescriptor {
-    pub fn new(file: Arc<dyn File>, flags: OpenFlags) -> Self {
-        Self { file, flags }
-    }
-
-    pub fn dup(mut self, cloexec: bool) -> Self {
-        if cloexec {
-            self.flags.insert(OpenFlags::O_CLOEXEC);
-        } else {
-            self.flags.remove(OpenFlags::O_CLOEXEC);
-        }
-        self
+    pub fn new(file: Arc<dyn File>, cloexec: bool) -> Self {
+        Self { file, cloexec }
     }
 }
 
 impl FdTable {
     pub fn new() -> Self {
         let mut table = vec![];
-        let stdin = FileDescriptor::new(DEFAULT_TTY.clone(), OpenFlags::O_RDONLY);
-        let stdout = FileDescriptor::new(DEFAULT_TTY.clone(), OpenFlags::O_WRONLY);
-        let stderr = FileDescriptor::new(DEFAULT_TTY.clone(), OpenFlags::O_WRONLY);
+        let stdin = FileDescriptor::new(DEFAULT_TTY.clone(), false);
+        let stdout = FileDescriptor::new(DEFAULT_TTY.clone(), false);
+        let stderr = FileDescriptor::new(DEFAULT_TTY.clone(), false);
         table.push(Some(stdin));
         table.push(Some(stdout));
         table.push(Some(stderr));
@@ -58,17 +48,18 @@ impl FdTable {
 
     pub fn cloexec(&mut self) {
         for fd in self.table.iter_mut() {
-            if let Some(fd_impl) = fd {
-                if fd_impl.flags.contains(OpenFlags::O_CLOEXEC) {
-                    *fd = None;
-                }
-            }
+            fd.take_if(|fd| fd.cloexec);
         }
     }
 
     /// 获取指定位置的文件描述符
     pub fn get(&self, fd: FdNum) -> SyscallResult<FileDescriptor> {
         self.table.get(fd as usize).and_then(Option::clone).ok_or(Errno::EBADF)
+    }
+
+    /// 获取指定位置的文件描述符的可变引用
+    pub fn get_mut(&mut self, fd: FdNum) -> SyscallResult<&mut FileDescriptor> {
+        self.table.get_mut(fd as usize).and_then(Option::as_mut).ok_or(Errno::EBADF)
     }
 
     /// 插入一个文件描述符，返回位置
@@ -99,8 +90,9 @@ impl FdTable {
     }
 
     /// 删除一个文件描述符
-    pub fn take(&mut self, fd: FdNum) -> SyscallResult<FileDescriptor> {
-        self.table.get_mut(fd as usize).and_then(Option::take).ok_or(Errno::EBADF)
+    pub fn remove(&mut self, fd: FdNum) -> SyscallResult<()> {
+        self.table.get_mut(fd as usize).and_then(Option::take).ok_or(Errno::EBADF)?;
+        Ok(())
     }
 }
 

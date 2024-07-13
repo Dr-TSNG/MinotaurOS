@@ -14,6 +14,7 @@ use xmas_elf::ElfFile;
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::driver::GLOBAL_MAPPINGS;
+use crate::fs::ffi::OpenFlags;
 use crate::fs::file_system::MountNamespace;
 use crate::fs::inode::Inode;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
@@ -495,7 +496,7 @@ impl AddressSpace {
         offset: usize,
     ) -> SyscallResult<usize> {
         let inode = mnt_ns.lookup_absolute(linker, true).await?;
-        let file = inode.open().unwrap();
+        let file = inode.open(OpenFlags::O_RDONLY).unwrap();
         let elf_data = file.read_all().await.unwrap();
         let elf = ElfFile::new(&elf_data).map_err(|_| Errno::ENOEXEC)?;
         let ph_count = elf.header.pt2.ph_count();

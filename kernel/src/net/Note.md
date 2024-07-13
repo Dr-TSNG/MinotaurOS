@@ -41,7 +41,7 @@ pub fn new() -> Self {
         let handler = NET_INTERFACE.add_socket(socket);
         info!("[TcpSocket::new] new{}", handler);
         NET_INTERFACE.poll();
-        let port = unsafe { Ports.positive_u32() as u16 };
+        let port = unsafe { PORTS.positive_u32() as u16 };
         info!("[TcpSocket handle{} : port is {}]", handler, port);
         let mut file_data = FileMeta::new(None);
         let net_inode = NetInode::new();

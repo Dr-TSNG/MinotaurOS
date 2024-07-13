@@ -43,7 +43,7 @@ pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
 
 pub fn sys_dup(fd: FdNum) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?.dup(false);
+    let fd_impl = proc_inner.fd_table.get(fd)?;
     proc_inner.fd_table.put(fd_impl, 0).map(|fd| fd as usize)
 }
 
@@ -60,7 +60,7 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
         }
     }).ok_or(Errno::EINVAL)?;
     let mut proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(old_fd)?.dup(cloexec);
+    let fd_impl = proc_inner.fd_table.get(old_fd)?.tap_mut(|it| it.cloexec = cloexec);
     proc_inner.fd_table.insert(new_fd, fd_impl)?;
     Ok(new_fd as usize)
 }
@@ -68,41 +68,36 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
 pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
     let cmd = FcntlCmd::try_from(cmd).map_err(|_| Errno::EINVAL)?;
     debug!("[fcntl] fd: {}, cmd: {:?}, arg2: {}", fd, cmd, arg2);
-    let mut proc_inner = current_process().inner.lock();
-    let mut fd_impl = proc_inner.fd_table.get(fd)?;
+    let proc_inner = &mut *current_process().inner.lock();
+    let fd_impl = proc_inner.fd_table.get_mut(fd)?;
     match cmd {
         FcntlCmd::F_DUPFD => {
-            return proc_inner.fd_table.put(fd_impl, arg2 as FdNum).map(|fd| fd as usize);
+            let new_fd_impl = fd_impl.clone();
+            proc_inner.fd_table.put(new_fd_impl, arg2 as FdNum).map(|fd| fd as usize)
         }
         FcntlCmd::F_DUPFD_CLOEXEC => {
-            let fd_impl = fd_impl.dup(true);
-            return proc_inner.fd_table.put(fd_impl, arg2 as FdNum).map(|fd| fd as usize);
+            let new_fd_impl = fd_impl.clone().tap_mut(|it| it.cloexec = true);
+            proc_inner.fd_table.put(new_fd_impl, arg2 as FdNum).map(|fd| fd as usize)
         }
         FcntlCmd::F_GETFD => {
-            let flags = fd_impl.flags;
-            if flags.contains(OpenFlags::O_CLOEXEC){
-                return Ok(1usize);
-            }
-            return Ok(flags.bits() as usize);
+            Ok(fd_impl.cloexec as usize)
         }
         FcntlCmd::F_SETFD => {
             let flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
-            let fd_impl = fd_impl.dup(flags.intersects(OpenFlags::O_CLOEXEC));
-            proc_inner.fd_table.insert(fd, fd_impl)?;
+            fd_impl.cloexec = flags.contains(OpenFlags::O_CLOEXEC);
+            Ok(0)
         }
         FcntlCmd::F_GETFL => {
-            let flags = fd_impl.flags & OpenFlags::O_STATUS;
-            return Ok(flags.bits() as usize);
+            let flags = fd_impl.file.metadata().flags.lock();
+            Ok(flags.bits() as usize)
         }
         FcntlCmd::F_SETFL => {
-            // TODO: Only change status flags
-            warn!("F_SETFL");
-            let flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
-            fd_impl.flags |= flags;
-            proc_inner.fd_table.insert(fd, fd_impl)?;
+            let new_flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
+            let mut old_flags = fd_impl.file.metadata().flags.lock();
+            *old_flags = (*old_flags - OpenFlags::O_STATUS) | (new_flags & OpenFlags::O_STATUS);
+            Ok(0)
         }
     }
-    Ok(0)
 }
 
 pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<usize> {
@@ -243,7 +238,7 @@ pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
 
 pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
-    if !fd_impl.flags.writable() {
+    if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EBADF);
     }
     fd_impl.file.truncate(size).await?;
@@ -291,20 +286,22 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
         }
         Err(e) => return Err(e),
     };
-    let file = inode.open()?;
+    let file = inode.open(flags - OpenFlags::O_CLOEXEC)?;
     if flags.contains(OpenFlags::O_TRUNC) {
         file.truncate(0).await?;
     }
     if flags.contains(OpenFlags::O_APPEND) {
         file.seek(Seek::End(0)).await?;
     }
-    let fd_impl = FileDescriptor::new(file, flags);
+    let fd_impl = FileDescriptor::new(file, flags.contains(OpenFlags::O_CLOEXEC));
     let fd = proc_inner.fd_table.put(fd_impl, 0)?;
     Ok(fd as usize)
 }
 
 pub fn sys_close(fd: FdNum) -> SyscallResult<usize> {
-    current_process().inner.lock().fd_table.take(fd)?;
+    let mut proc_inner = current_process().inner.lock();
+    proc_inner.fd_table.remove(fd)?;
+    proc_inner.socket_table.take(fd);
     Ok(0)
 }
 
@@ -313,8 +310,8 @@ pub fn sys_pipe2(fds: usize, flags: u32) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     let user_fds = proc_inner.addr_space.user_slice_w(VirtAddr(fds), size_of::<[FdNum; 2]>())?;
     let (reader, writer) = Pipe::new();
-    let reader_fd = proc_inner.fd_table.put(FileDescriptor::new(reader, OpenFlags::O_RDONLY | flags.intersection(OpenFlags::O_CLOEXEC)), 0)?;
-    let writer_fd = proc_inner.fd_table.put(FileDescriptor::new(writer, OpenFlags::O_WRONLY | flags.intersection(OpenFlags::O_CLOEXEC)), 0)?;
+    let reader_fd = proc_inner.fd_table.put(FileDescriptor::new(reader, flags.contains(OpenFlags::O_CLOEXEC)), 0)?;
+    let writer_fd = proc_inner.fd_table.put(FileDescriptor::new(writer, flags.contains(OpenFlags::O_CLOEXEC)), 0)?;
     drop(proc_inner);
     user_fds.copy_from_slice(AsBytes::as_bytes(&[reader_fd, writer_fd]));
     Ok(0)
@@ -327,8 +324,7 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
         return Err(Errno::ENOTDIR);
     }
     let mut cur = buf;
-    let pos = file.seek(Seek::Cur(0)).await? as usize;
-    for (idx, child) in inode.list(pos).await?.enumerate() {
+    while let Some((idx, child)) = file.readdir().await? {
         let name = match idx {
             0 => CString::new(".").unwrap(),
             1 => CString::new("..").unwrap(),
@@ -346,10 +342,8 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
         dirent.d_name[..name_bytes.len()].copy_from_slice(name_bytes);
         let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(cur), dirent_size)?;
         user_buf.copy_from_slice(&dirent.as_bytes()[..dirent_size]);
-        file.seek(Seek::Cur(1)).await?;
         cur += dirent_size;
     }
-
     Ok(cur - buf)
 }
 
@@ -363,7 +357,7 @@ pub async fn sys_lseek(fd: FdNum, offset: isize, whence: i32) -> SyscallResult<u
 pub async fn sys_read(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.readable() {
+    if !fd_impl.file.metadata().flags.lock().readable() {
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), len)?;
@@ -375,7 +369,7 @@ pub async fn sys_read(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize>
 pub async fn sys_write(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.writable() {
+    if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(buf), len)?;
@@ -387,7 +381,7 @@ pub async fn sys_write(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize
 pub async fn sys_readv(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.readable() {
+    if !fd_impl.file.metadata().flags.lock().readable() {
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(iov), size_of::<IoVec>() * iovcnt)?;
@@ -406,7 +400,7 @@ pub async fn sys_readv(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<us
 pub async fn sys_writev(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.writable() {
+    if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EPERM);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(iov), size_of::<IoVec>() * iovcnt)?;
@@ -426,7 +420,7 @@ pub async fn sys_writev(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<u
 pub async fn sys_pread(fd: FdNum, buf: usize, len: usize, offset: isize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.readable() {
+    if !fd_impl.file.metadata().flags.lock().readable() {
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), len)?;
@@ -438,7 +432,7 @@ pub async fn sys_pread(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sysc
 pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
-    if !fd_impl.flags.writable() {
+    if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EBADF);
     }
     let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(buf), len)?;
@@ -451,7 +445,9 @@ pub async fn sys_sendfile(out_fd: FdNum, in_fd: FdNum, offset: usize, count: usi
     let proc_inner = current_process().inner.lock();
     let out_fd_impl = proc_inner.fd_table.get(out_fd)?;
     let in_fd_impl = proc_inner.fd_table.get(in_fd)?;
-    if !out_fd_impl.flags.writable() || !in_fd_impl.flags.readable() {
+    let out_flags = out_fd_impl.file.metadata().flags.lock();
+    let in_flags = in_fd_impl.file.metadata().flags.lock();
+    if !out_flags.writable() || !in_flags.readable() {
         return Err(Errno::EBADF);
     }
     drop(proc_inner);
