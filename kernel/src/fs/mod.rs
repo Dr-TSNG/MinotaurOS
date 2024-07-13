@@ -9,7 +9,7 @@ use crate::result::SyscallResult;
 pub mod block_cache;
 pub mod devfs;
 pub mod ext4;
-pub mod fat32;
+// pub mod fat32;
 pub mod fd;
 pub mod ffi;
 pub mod file;
@@ -18,6 +18,7 @@ pub mod inode;
 pub mod path;
 pub mod page_cache;
 pub mod pipe;
+pub mod procfs;
 
 pub fn init() -> SyscallResult<Arc<MountNamespace>> {
     let mut root_dev = None;
