@@ -15,7 +15,6 @@ use crate::config::{KERNEL_ADDR_OFFSET, KERNEL_MMIO_BASE};
 use crate::driver::plic::PLIC;
 use crate::driver::virtio::VirtIODevice;
 use crate::fs::devfs::tty::{DEFAULT_TTY, TtyFile};
-use crate::fs::ffi::OpenFlags;
 use crate::fs::file::FileMeta;
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::IdAllocator;
@@ -26,7 +25,6 @@ use crate::sync::once::LateInit;
 
 pub mod ns16550a;
 pub mod plic;
-pub mod random;
 pub mod virtio;
 pub mod virtnet;
 
@@ -152,15 +150,15 @@ pub trait CharacterDevice: Send + Sync {
     async fn putchar(&self, ch: u8) -> SyscallResult;
 }
 
+trait IrqDevice: Send + Sync {
+    fn handle_irq(&self);
+}
+
 #[async_trait]
 pub trait NetDevice: Send + Sync{
     /// 设备元数据
     fn metadata(&self) -> &DeviceMeta;
     fn init(&self);
-}
-
-trait IrqDevice: Send + Sync {
-    fn handle_irq(&self);
 }
 
 pub fn init_dtb(dtb_paddr: usize) {
@@ -172,7 +170,7 @@ pub fn init_driver() -> SyscallResult<()> {
         device.init();
         if let Device::Character(dev) = device {
             if dev.metadata().dev_name == "uart" {
-                DEFAULT_TTY.init(TtyFile::new(FileMeta::new(None, OpenFlags::O_RDWR), dev.clone()));
+                DEFAULT_TTY.init(TtyFile::new(FileMeta::new(None), dev.clone()));
             }
         }
     }

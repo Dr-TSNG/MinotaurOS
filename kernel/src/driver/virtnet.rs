@@ -1,6 +1,6 @@
-use core::any::Any;
-use alloc::{format, string::String, sync::Arc};
 use alloc::string::ToString;
+use alloc::sync::Arc;
+
 use async_trait::async_trait;
 use smoltcp::{
     phy::{self, DeviceCapabilities},
@@ -9,9 +9,10 @@ use smoltcp::{
 use spin::mutex::SpinMutex;
 use virtio_drivers::{
     device::net::{RxBuffer, VirtIONet},
-    transport::mmio::{MmioTransport, VirtIOHeader},
     Error,
+    transport::mmio::{MmioTransport, VirtIOHeader},
 };
+
 use crate::arch::VirtAddr;
 use crate::driver::DeviceMeta;
 use crate::driver::virtio::VirtioHal;
@@ -119,4 +120,3 @@ impl VirtIONetDevice {
         }
     }
 }
-

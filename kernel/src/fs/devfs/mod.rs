@@ -15,8 +15,6 @@ mod net;
 mod null;
 pub mod tty;
 mod zero;
-pub(crate) mod unix_socket;
-pub(crate) mod net;
 
 pub struct DevFileSystem {
     vfsmeta: FileSystemMeta,
