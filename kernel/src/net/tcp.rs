@@ -19,7 +19,8 @@ use xmas_elf::header::Class;
 use crate::fs::file::{File, FileMeta};
 use crate::net::iface::NET_INTERFACE;
 use crate::net::port::random_port;
-use crate::net::socket::{fill_with_endpoint, Socket, SocketType, BUFFER_SIZE};
+use crate::net::socket::{Socket, SocketType, BUFFER_SIZE};
+use crate::net::netaddress::fill_with_endpoint;
 use crate::net::socket::{SHUT_WR};
 use crate::net::MAX_BUFFER_SIZE;
 use crate::net::netaddress::{endpoint, is_local};
@@ -61,10 +62,10 @@ impl TcpSocket {
         let rx_buf = smoltcp::socket::tcp::SocketBuffer::new(vec![0 as u8; MAX_BUFFER_SIZE]);
         let socket_dev = smoltcp::socket::tcp::Socket::new(rx_buf, tx_buf);
         // 将 socket 加入 interface，返回 handle
-        let (handler_loop, handler_dev) = NET_INTERFACE.add_socket(socket_loop, socket_dev);
+        let (handle_loop, handle_dev) = NET_INTERFACE.add_socket(socket_loop, socket_dev);
         // info!("[TcpSocket::new] new ({}, {})", handler_loop, handler_loop);
         let port = random_port();
-        info!("[tcp] New socket handle_loop {} handle_dev {} at port {}", handler_loop,handler_dev, port);
+        info!("[tcp] New socket handle_loop {} handle_dev {} at port {}", handle_loop,handle_dev, port);
         Self {
             metadata: FileMeta::new(None, OpenFlags::empty()),
             inner: Mutex::new(TcpInner {
@@ -89,9 +90,9 @@ impl TcpSocket {
         let rx_buf = smoltcp::socket::tcp::SocketBuffer::new(vec![0 as u8; MAX_BUFFER_SIZE]);
         let socket_dev = smoltcp::socket::tcp::Socket::new(rx_buf, tx_buf);
         // 将 socket 加入 interface，返回 handle
-        let (handler_loop, handler_dev) = NET_INTERFACE.add_socket(socket_loop, socket_dev);
+        let (handle_loop, handle_dev) = NET_INTERFACE.add_socket(socket_loop, socket_dev);
         let port = random_port();
-        info!("[tcp] New socket handle_loop {} handle_dev {} at port {}", handler_loop,handler_dev, port);
+        info!("[tcp] New socket handle_loop {} handle_dev {} at port {}", handle_loop,handle_dev, port);
         Self {
             metadata: FileMeta::new(None, OpenFlags::empty()),
             inner: Mutex::new(TcpInner {
@@ -256,9 +257,9 @@ impl File for TcpSocket {
         };
         NET_INTERFACE.poll(is_local);
         if is_local {
-            NET_INTERFACE.tcp_socket_loop(self.inner.lock().handle_loop, poll_func)
+            NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, poll_func)
         } else {
-            NET_INTERFACE.tcp_socket_dev(self.inner.lock().handle_dev, poll_func)
+            NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, poll_func)
         }
     }
 }
@@ -294,13 +295,13 @@ impl Socket for TcpSocket {
                 tcp::State::Closed => {
                     // close but not already connect, retry
                     info!("[Tcp::connect] {} already closed, try again", handler);
-                    self._connect(remote_endpoint)?;
+                    self.tcp_connect(remote_endpoint)?;
                     yield_now().await;
                 }
                 tcp::State::Established => {
                     info!("[Tcp::connect] {} connected, state {:?}", handler, state);
                     yield_now().await;
-                    return Ok(0);
+                    return Ok(());
                 }
                 _ => {
                     info!(
@@ -507,7 +508,7 @@ impl<'a> Future for TcpAcceptFuture<'a> {
                 log::info!("[TcpAcceptFuture::poll] state become {:?}", socket.state());
                 return Poll::Ready(Ok(socket.remote_endpoint().unwrap()));
             }
-            if self.flags.contains(OpenFlags::NONBLOCK){
+            if self.flags.contains(OpenFlags::O_NONBLOCK){
                 log::info!("[TcpAcceptFuture::poll] flags set nonblock");
                 return Poll::Ready(Err(Errno::EAGAIN));
             }
@@ -566,7 +567,7 @@ impl<'a> Future for TcpRecvFuture<'a> {
                 log::info!("[TcpRecvFuture::poll] state {:?}", socket.state());
                 if !socket.can_recv() {
                     log::info!("[TcpRecvFuture::poll] cannot recv yet");
-                    if self.flags.contains(OpenFlags::NONBLOCK) {
+                    if self.flags.contains(OpenFlags::O_NONBLOCK) {
                         log::info!("[TcpRecvFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }
@@ -608,7 +609,7 @@ impl<'a> Future for TcpRecvFuture<'a> {
                 log::info!("[TcpRecvFuture::poll] state {:?}", socket.state());
                 if !socket.can_recv() {
                     log::info!("[TcpRecvFuture::poll] cannot recv yet");
-                    if self.flags.contains(OpenFlags::NONBLOCK) {
+                    if self.flags.contains(OpenFlags::O_NONBLOCK) {
                         log::info!("[TcpRecvFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }
@@ -663,7 +664,7 @@ impl<'a> Future for TcpSendFuture<'a> {
                 }
                 if !socket.can_send() {
                     log::info!("[TcpSendFuture::poll] cannot send yet");
-                    if self.flags.contains(OpenFlags::NONBLOCK) {
+                    if self.flags.contains(OpenFlags::O_NONBLOCK) {
                         log::info!("[TcpSendFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }
@@ -693,7 +694,7 @@ impl<'a> Future for TcpSendFuture<'a> {
                 }
                 if !socket.can_send() {
                     log::info!("[TcpSendFuture::poll] cannot send yet");
-                    if self.flags.contains(OpenFlags::NONBLOCK) {
+                    if self.flags.contains(OpenFlags::O_NONBLOCK) {
                         log::info!("[TcpSendFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }

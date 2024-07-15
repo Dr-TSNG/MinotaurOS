@@ -8,10 +8,10 @@ mod unix;
 
 const MAX_BUFFER_SIZE: usize = 1 << 17;
 
-pub use crate::net::socket::listen_endpoint;
+pub use crate::net::netaddress::listen_endpoint;
 pub use crate::net::socket::Socket;
-pub use crate::net::socket::SocketAddressV4;
-pub use crate::net::socket::SocketAddressV6;
+pub use crate::net::netaddress::SocketAddressV4;
+pub use crate::net::netaddress::SocketAddressV6;
 pub use crate::net::socket::SocketType;
 pub use crate::net::tcp::*;
 pub use crate::net::unix::make_unix_socket_pair;

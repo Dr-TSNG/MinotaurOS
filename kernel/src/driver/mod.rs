@@ -14,6 +14,7 @@ use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 use crate::config::{KERNEL_ADDR_OFFSET, KERNEL_MMIO_BASE};
 use crate::driver::plic::PLIC;
 use crate::driver::virtio::VirtIODevice;
+use crate::driver::virtnet::{VirtIONetDevice, VirtioRxToken, VirtioTxToken};
 use crate::fs::devfs::tty::{DEFAULT_TTY, TtyFile};
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::FileMeta;

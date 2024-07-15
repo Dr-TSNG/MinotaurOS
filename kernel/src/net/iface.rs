@@ -13,7 +13,7 @@ use crate::driver::{DEVICES, NetDevice};
 use crate::driver::Device as DriverDevice;
 use crate::driver::virtnet::VirtIONetDevice;
 use crate::net::netaddress::IpAddr;
-use crate::net::socket::to_endpoint;
+use crate::net::netaddress::to_endpoint;
 use crate::sched::time::cpu_time;
 use crate::sync::mutex::Mutex;
 
@@ -40,7 +40,7 @@ pub struct LoopBackDev{
 }
 
 impl LoopBackDev {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         let mut device = Loopback::new(Medium::Ip);
         let iface = {
             let config = match device.capabilities().medium {
@@ -75,8 +75,11 @@ impl LoopBackDev {
 }
 
 impl OSNetDevice {
-    fn new() -> Self {
 
+    /// 这里是 os net dev的初始化， 我们需要在注册的DEVICES中，找到我们需要
+    /// 的Net(device)，初始化 iface ，将这个os dev保存起来 ， 保存到
+    /// OSNetDevice的device字段，以便之后poll调用时使用。
+    fn new() -> Self {
         for device in DEVICES.read().values() {
             if let DriverDevice::Net(device) = device {
                 let iface = {
@@ -117,8 +120,6 @@ impl OSNetDevice {
             }
         }
         panic!("cannot find NetDevice , add NetDevice in DEVICES , ERROR!!!");
-
-
     }
 }
 

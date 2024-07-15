@@ -62,8 +62,8 @@ impl UdpSocket {
             vec![0u8; MAX_BUFFER_SIZE],
         );
         let socket_dev = udp::Socket::new(rx_buf, tx_buf);
-        let (handler_loop, handler_dev) = NET_INTERFACE.add_socket(socket_loop, socket_dev);
-        info!("[UdpSocket::new] new (handler_loop {}, handler_dev {})", handler_loop, handler_dev);
+        let (handle_loop, handle_dev) = NET_INTERFACE.add_socket(socket_loop, socket_dev);
+        info!("[UdpSocket::new] new (handler_loop {}, handler_dev {})", handle_loop, handle_dev);
         Self {
             metadata: FileMeta::new(None, OpenFlags::empty()),
             inner: Mutex::new(UdpSocketInner {
@@ -372,7 +372,7 @@ impl<'a> Future for UdpRecvFuture<'a> {
                 let this = self.get_mut();
                 if !socket.can_recv() {
                     info!("[UdpRecvFuture::poll] cannot recv yet");
-                    if this.flags.contains(OpenFlags::NONBLOCK) {
+                    if this.flags.contains(OpenFlags::O_NONBLOCK) {
                         info!("[UdpRecvFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }
@@ -406,7 +406,7 @@ impl<'a> Future for UdpRecvFuture<'a> {
                 let this = self.get_mut();
                 if !socket.can_recv() {
                     info!("[UdpRecvFuture::poll] cannot recv yet");
-                    if this.flags.contains(OpenFlags::NONBLOCK) {
+                    if this.flags.contains(OpenFlags::O_NONBLOCK) {
                         info!("[UdpRecvFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }
@@ -458,7 +458,7 @@ impl<'a> Future for UdpSendFuture<'a> {
             NET_INTERFACE.handle_udp_socket_loop(self.socket.inner.lock().handle_loop, |socket| {
                 if !socket.can_send() {
                     info!("[UdpSendFuture::poll] cannot send yet");
-                    if self.flags.contains(OpenFlags::NONBLOCK) {
+                    if self.flags.contains(OpenFlags::O_NONBLOCK) {
                         info!("[UdpSendFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }
@@ -494,7 +494,7 @@ impl<'a> Future for UdpSendFuture<'a> {
             NET_INTERFACE.handle_udp_socket_dev(self.socket.inner.lock().handle_dev, |socket| {
                 if !socket.can_send() {
                     info!("[UdpSendFuture::poll] cannot send yet");
-                    if self.flags.contains(OpenFlags::NONBLOCK) {
+                    if self.flags.contains(OpenFlags::O_NONBLOCK) {
                         info!("[UdpSendFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }
