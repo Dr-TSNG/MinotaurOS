@@ -5,6 +5,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use core::time::Duration;
+use futures::future::{Either, select};
 use log::{debug, info, warn};
 use managed::ManagedSlice;
 use crate::fs::ffi::OpenFlags;
@@ -17,8 +18,9 @@ use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
 use crate::fs::file::{File, FileMeta};
 use crate::net::iface::NET_INTERFACE;
 use crate::net::MAX_BUFFER_SIZE;
-use crate::net::socket::{is_local, Socket};
-use crate::net::socket::{endpoint, SocketAddressV4, SocketType, BUFFER_SIZE};
+use crate::net::netaddress::{endpoint, is_local, SocketAddressV4};
+use crate::net::socket::{Socket};
+use crate::net::socket::{SocketType, BUFFER_SIZE};
 use crate::processor::current_thread;
 use crate::result::{Errno, SyscallResult};
 use crate::result::Errno::EOPNOTSUPP;
@@ -88,8 +90,44 @@ impl File for UdpSocket {
         );
         let buf_start = buf.as_ptr() as usize;
         let flags = self.metadata().flags.lock();
-
-        todo!()
+        // back loop dev
+        let future1 = UdpRecvFuture::new(self, buf_start, buf.len(), *flags, true);
+        // os virt-net dev
+        let future2 = UdpRecvFuture::new(self,buf_start,buf.len(),*flags,false);
+        match select(future1,future2).await {
+            Either::Left(ret1) => {
+                match ret1 {
+                    Ok(len) => {
+                        if len > MAX_BUFFER_SIZE / 2 {
+                            // need to be slow
+                            sleep_for(Duration::from_millis(1)).await.expect("TODO: panic message");
+                        } else {
+                            yield_now().await;
+                        }
+                        Ok(len as isize)
+                    }
+                    Err(e) => {
+                        Err(e)
+                    }
+                }
+            }
+            Either::Right(ret2) => {
+                match ret2 {
+                    Ok(len) => {
+                        if len > MAX_BUFFER_SIZE / 2 {
+                            // need to be slow
+                            sleep_for(Duration::from_millis(1)).await.expect("TODO: panic message");
+                        } else {
+                            yield_now().await;
+                        }
+                        Ok(len as isize)
+                    }
+                    Err(e) => {
+                        Err(e)
+                    }
+                }
+            }
+        }
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
@@ -293,6 +331,11 @@ impl Drop for UdpSocket {
     }
 }
 
+
+// udp recv future 无连接过程， 不知道远程发送信息的 socket 是否是 local ，
+// 所以这里加入 for_loop ， 在 recv 时，同时启动两个接受过程 。
+// 方法有两个，一个是在 recv函数中启动两个future ， 等待任意一个结束；
+// 另一个是改造 UdpRecvFuture，使它可以等待 本地loop成功接受或者 os virt-net成功接受
 struct UdpRecvFuture<'a> {
     socket: &'a UdpSocket,
     // buf: ManagedSlice<'a, u8>,

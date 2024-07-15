@@ -76,6 +76,7 @@ impl LoopBackDev {
 
 impl OSNetDevice {
     fn new() -> Self {
+
         for device in DEVICES.read().values() {
             if let DriverDevice::Net(device) = device {
                 let iface = {
@@ -116,6 +117,8 @@ impl OSNetDevice {
             }
         }
         panic!("cannot find NetDevice , add NetDevice in DEVICES , ERROR!!!");
+
+
     }
 }
 

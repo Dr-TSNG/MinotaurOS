@@ -19,9 +19,10 @@ use xmas_elf::header::Class;
 use crate::fs::file::{File, FileMeta};
 use crate::net::iface::NET_INTERFACE;
 use crate::net::port::random_port;
-use crate::net::socket::{endpoint, fill_with_endpoint, Socket, SocketType, BUFFER_SIZE, is_local};
+use crate::net::socket::{fill_with_endpoint, Socket, SocketType, BUFFER_SIZE};
 use crate::net::socket::{SHUT_WR};
 use crate::net::MAX_BUFFER_SIZE;
+use crate::net::netaddress::{endpoint, is_local};
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::{sleep_for, yield_now};
@@ -331,7 +332,7 @@ impl Socket for TcpSocket {
     }
 
     async fn accept(&self, addr: usize, addrlen: usize) -> SyscallResult<usize> {
-        info!("[tcp] Accept on {}", self.inner.lock().handle);
+        info!("[tcp] Accept on handle_loop {} handle_dev {}", self.inner.lock().handle_loop,self.inner.lock().handle_dev);
         let peer_addr = self.tcp_accept(*self.metadata.flags.lock()).await?;
         debug!("[tcp] Peer address: {:?}", peer_addr);
         let local = self.local_endpoint();
