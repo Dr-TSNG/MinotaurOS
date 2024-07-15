@@ -3,7 +3,6 @@ use core::cell::SyncUnsafeCell;
 use log::{debug, info};
 use crate::arch::VirtAddr;
 use crate::process::ffi::CpuSet;
-use crate::process::monitor::THREAD_MONITOR;
 use crate::process::Process;
 use crate::process::thread::event_bus::{Event, EventBus};
 use crate::process::thread::resource::ResourceUsage;
@@ -48,7 +47,7 @@ impl Thread {
         signals: SignalController,
         cpu_set: CpuSet,
     ) -> Arc<Self> {
-        let tid = tid.unwrap_or(Arc::new(TidTracker::new()));
+        let tid = tid.unwrap_or_else(|| Arc::new(TidTracker::new()));
         let inner = ThreadInner {
             trap_ctx,
             tid_address: TidAddress::default(),
@@ -99,7 +98,6 @@ impl Thread {
             debug!("[futex] Wake up clear tid address {:?}", tid_address);
             self.process.inner.lock().futex_queue.wake(tid_address, 1);
         }
-        THREAD_MONITOR.lock().remove(self.tid.0);
         let exit_code = self.inner().exit_code.unwrap();
         self.process.on_thread_exit(self.tid.0, exit_code);
     }

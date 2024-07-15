@@ -1,5 +1,6 @@
 use alloc::ffi::CString;
 use alloc::string::ToString;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
 use core::time::Duration;
@@ -10,8 +11,8 @@ use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::fs::ffi::{AT_FDCWD, InodeMode, OpenFlags, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
-use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
 use crate::process::{Pid, Tid};
+use crate::process::monitor::MONITORS;
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
@@ -45,7 +46,7 @@ pub fn sys_sched_setaffinity(pid: usize, cpusetsize: usize, mask: usize) -> Sysc
         .addr_space.user_slice_r(VirtAddr(mask), size_of::<CpuSet>())?;
     let thread = match pid {
         0 => current_thread().clone(),
-        _ => THREAD_MONITOR.lock().get(pid).upgrade().ok_or(Errno::ESRCH)?,
+        _ => MONITORS.lock().thread.get(pid).upgrade().ok_or(Errno::ESRCH)?,
     };
     *thread.cpu_set.lock() = *CpuSet::ref_from(mask).unwrap();
     Ok(0)
@@ -59,7 +60,7 @@ pub fn sys_sched_getaffinity(pid: usize, cpusetsize: usize, mask: usize) -> Sysc
         .addr_space.user_slice_w(VirtAddr(mask), size_of::<CpuSet>())?;
     let thread = match pid {
         0 => current_thread().clone(),
-        _ => THREAD_MONITOR.lock().get(pid).upgrade().ok_or(Errno::ESRCH)?,
+        _ => MONITORS.lock().thread.get(pid).upgrade().ok_or(Errno::ESRCH)?,
     };
     mask.copy_from_slice(thread.cpu_set.lock().as_bytes());
     Ok(0)
@@ -72,27 +73,62 @@ pub async fn sys_sched_yield() -> SyscallResult<usize> {
 
 pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
     let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
-    let monitor = PROCESS_MONITOR.lock();
-    if let Some(process) = monitor.get(pid).upgrade() {
-        for thread in process.inner.lock().threads.values() {
-            if let Some(thread) = thread.upgrade() {
-                thread.recv_signal(signal);
-                break;
-            }
+    let monitors = MONITORS.lock();
+    let procs = match pid {
+        0 => {
+            let pgid = current_process().inner.lock().pgid.0;
+            monitors.group.get_group(pgid).unwrap()
         }
-        return Ok(0);
+        _ => vec![pid],
+    };
+    for pid in procs {
+        if let Some(process) = monitors.process.get(pid).upgrade() {
+            for thread in process.inner.lock().threads.values() {
+                if let Some(thread) = thread.upgrade() {
+                    thread.recv_signal(signal);
+                    break;
+                }
+            }
+            return Ok(0);
+        }
     }
     Err(Errno::EINVAL)
 }
 
 pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
     let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
-    let monitor = THREAD_MONITOR.lock();
-    if let Some(thread) = monitor.get(tid).upgrade() {
+    if let Some(thread) = MONITORS.lock().thread.get(tid).upgrade() {
         thread.recv_signal(signal);
         return Ok(0);
     }
     Err(Errno::EINVAL)
+}
+
+pub fn sys_setpgid(pid: usize, pgid: usize) -> SyscallResult<usize> {
+    let mut monitors = MONITORS.lock();
+    let proc = match pid {
+        0 => current_process().clone(),
+        _ => monitors.process.get(pid).upgrade().ok_or(Errno::ESRCH)?,
+    };
+    let new_pgid = match pgid {
+        0 => proc.inner.lock().pgid.0,
+        _ => pgid,
+    };
+
+    let mut proc_inner = proc.inner.lock();
+    let delegate = monitors.process.get(new_pgid).upgrade().ok_or(Errno::EPERM)?;
+    monitors.group.move_to_group(proc_inner.pgid.0, proc.pid.0, delegate.pid.0)?;
+    proc_inner.pgid = delegate.pid.clone();
+    Ok(0)
+}
+
+pub fn sys_getpgid(pid: usize) -> SyscallResult<usize> {
+    let proc = match pid {
+        0 => current_process().clone(),
+        _ => MONITORS.lock().process.get(pid).upgrade().ok_or(Errno::ESRCH)?,
+    };
+    let pgid = proc.inner.lock().pgid.0;
+    Ok(pgid)
 }
 
 pub fn sys_getrlimit(resource: u32, rlim: usize) -> SyscallResult<usize> {

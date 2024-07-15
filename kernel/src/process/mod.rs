@@ -21,7 +21,7 @@ use crate::mm::addr_space::AddressSpace;
 use crate::net::SocketTable;
 use crate::process::aux::Aux;
 use crate::process::ffi::{CloneFlags, CpuSet};
-use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
+use crate::process::monitor::MONITORS;
 use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::Thread;
 use crate::process::thread::tid::TidTracker;
@@ -53,7 +53,7 @@ pub struct ProcessInner {
     /// 子进程
     pub children: Vec<Arc<Process>>,
     /// 进程组
-    pub pgid: Gid,
+    pub pgid: Arc<TidTracker>,
     /// 进程的线程组
     pub threads: BTreeMap<Tid, Weak<Thread>>,
     /// 地址空间
@@ -89,7 +89,7 @@ impl Process {
             inner: IrqReMutex::new(ProcessInner {
                 parent: Weak::new(),
                 children: Vec::new(),
-                pgid: pid.0,
+                pgid: pid.clone(),
                 threads: BTreeMap::new(),
                 addr_space,
                 mnt_ns,
@@ -107,7 +107,9 @@ impl Process {
         let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()), SignalController::new(), CpuSet::new(1));
         process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
 
-        PROCESS_MONITOR.lock().add(pid.0, Arc::downgrade(&process));
+        let mut monitors = MONITORS.lock();
+        monitors.process.add(pid.0, Arc::downgrade(&process));
+        monitors.group.create_group(pid.0);
         spawn_user_thread(thread);
         info!("Init process created, pid: {}", pid.0);
         Ok(process.clone())
@@ -234,16 +236,16 @@ impl Process {
     }
 
     pub fn fork_process(self: &Arc<Self>, flags: CloneFlags, stack: usize) -> SyscallResult<Pid> {
-        let mut monitor = PROCESS_MONITOR.lock();
+        let mut monitors = MONITORS.lock();
 
         let new_pid = Arc::new(TidTracker::new());
-        let new_thread = self.inner.lock().pipe_ref_mut(|proc_inner| {
+        let (new_thread, pgid) = self.inner.lock().pipe_ref_mut(|proc_inner| {
             let new_process = Arc::new(Process {
                 pid: new_pid.clone(),
                 inner: IrqReMutex::new(ProcessInner {
                     parent: Arc::downgrade(self),
                     children: Vec::new(),
-                    pgid: new_pid.0,
+                    pgid: proc_inner.pgid.clone(),
                     threads: BTreeMap::new(),
                     addr_space: proc_inner.addr_space.fork(),
                     mnt_ns: proc_inner.mnt_ns.clone(),
@@ -274,11 +276,12 @@ impl Process {
             new_process.inner.lock().threads.insert(new_pid.0, Arc::downgrade(&new_thread));
             proc_inner.children.push(new_process.clone());
 
-            new_thread
+            (new_thread, proc_inner.pgid.0)
         });
 
-        monitor.add(new_pid.0, Arc::downgrade(&new_thread.process));
-        THREAD_MONITOR.lock().add(new_thread.tid.0, Arc::downgrade(&new_thread));
+        monitors.process.add(new_pid.0, Arc::downgrade(&new_thread.process));
+        monitors.thread.add(new_thread.tid.0, Arc::downgrade(&new_thread));
+        monitors.group.add_process(pgid, new_pid.0);
         spawn_user_thread(new_thread);
         info!(
             "[fork_process] New process (pid = {}) created, flags {:?}",
@@ -338,7 +341,7 @@ impl Process {
         })?;
         let new_tid = new_thread.tid.0;
 
-        THREAD_MONITOR.lock().add(new_tid, Arc::downgrade(&new_thread));
+        MONITORS.lock().thread.add(new_tid, Arc::downgrade(&new_thread));
         spawn_user_thread(new_thread);
         info!(
             "[clone_thread] New thread (tid = {}) created, flags {:?}, ptid {:#x}, ctid {:#x}",
@@ -360,7 +363,7 @@ impl Process {
 
     pub fn on_thread_exit(&self, tid: Tid, exit_code: i8) {
         info!("Thread {} exited with code {}", tid, exit_code);
-        let monitor = PROCESS_MONITOR.lock();
+        let init = MONITORS.lock().process.init_proc();
         self.inner.lock().tap_mut(|inner| {
             inner.threads.remove(&tid);
             // 如果没有线程了，通知父进程
@@ -371,7 +374,7 @@ impl Process {
                 }
                 // 将子进程的父进程设置为 init
                 inner.children.iter_mut().for_each(|child| {
-                    child.inner.lock().parent = monitor.init_proc();
+                    child.inner.lock().parent = init.clone();
                 })
             }
         });

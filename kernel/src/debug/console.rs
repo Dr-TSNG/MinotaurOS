@@ -6,7 +6,7 @@ use core::fmt::Arguments;
 use lazy_static::lazy_static;
 use tap::Tap;
 use crate::fs::devfs::tty::DEFAULT_TTY;
-
+use crate::fs::file::File;
 use crate::sync::block_on;
 use crate::sync::mutex::Mutex;
 
