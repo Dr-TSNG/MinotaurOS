@@ -216,23 +216,16 @@ impl Process {
         thread.signals.reset();
         thread.event_bus.reset();
         thread.inner().tap_mut(|it| {
+            it.trap_ctx = TrapContext::new(entry, user_sp);
             it.tid_address = Default::default();
             it.rusage = ResourceUsage::new();
         });
-
-        // a0 -> argc, a1 -> argv, a2 -> envp, a3 -> auxv
-        let trap_ctx = current_trap_ctx();
-        *trap_ctx = TrapContext::new(entry, user_sp);
-        trap_ctx.user_x[10] = args.len();
-        trap_ctx.user_x[11] = argv_base;
-        trap_ctx.user_x[12] = envp_base;
-        trap_ctx.user_x[13] = auxv_base;
 
         info!(
             "[execve] Execve process (pid: {}): args {:?}, env {:?}",
             current_process().pid.0, args, envs,
         );
-        Ok(args.len())
+        Ok(0)
     }
 
     pub fn fork_process(self: &Arc<Self>, flags: CloneFlags, stack: usize) -> SyscallResult<Pid> {
