@@ -679,7 +679,7 @@ pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize
 
     // TODO: This hack is for lmbench
     if path == "/proc/self/exe" {
-        let target = "/lmbench_all";
+        let target = &proc_inner.exe;
         let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), target.len())?;
         user_buf.copy_from_slice(target.as_bytes());
         return Ok(target.len());

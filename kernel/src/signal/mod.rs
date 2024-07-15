@@ -6,6 +6,7 @@ use log::{debug, info};
 use crate::processor::current_thread;
 use crate::signal::ffi::{SIG_MAX, SigAction, Signal, SigSet};
 use crate::sync::mutex::Mutex;
+use crate::trap::user::dump_tombstone;
 
 pub mod ffi;
 
@@ -30,6 +31,7 @@ impl SignalHandler {
 
     pub fn k_terminate(signal: Signal) {
         info!("Default signal handler for {:?}: terminate", signal);
+        dump_tombstone(signal);
         current_thread().terminate(-1);
     }
 }

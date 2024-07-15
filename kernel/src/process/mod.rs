@@ -70,6 +70,8 @@ pub struct ProcessInner {
     pub timers: [ITimerVal; 3],
     /// 工作目录
     pub cwd: String,
+    /// 可执行文件路径
+    pub exe: String,
     /// 退出状态
     pub exit_code: Option<i8>,
 }
@@ -96,6 +98,7 @@ impl Process {
                 futex_queue: Default::default(),
                 timers: Default::default(),
                 cwd: String::from("/"),
+                exe: String::from("/init"),
                 exit_code: None,
             }),
         });
@@ -112,6 +115,7 @@ impl Process {
 
     pub async fn execve(
         &self,
+        exe: String,
         elf_data: &[u8],
         args: &[CString],
         envs: &[CString],
@@ -141,6 +145,7 @@ impl Process {
             hart.ctx.user_task.as_mut().unwrap().root_pt = addr_space.root_pt;
             proc_inner.addr_space = addr_space;
             proc_inner.fd_table.cloexec();
+            proc_inner.exe = exe;
         });
 
         let mut user_sp = USER_STACK_TOP.0;
@@ -247,6 +252,7 @@ impl Process {
                     futex_queue: Default::default(),
                     timers: Default::default(),
                     cwd: proc_inner.cwd.clone(),
+                    exe: proc_inner.exe.clone(),
                     exit_code: None,
                 }),
             });
