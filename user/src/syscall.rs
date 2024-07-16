@@ -271,6 +271,11 @@ pub fn sys_exit_group(exit_code: i32) -> ! {
     unreachable!()
 }
 
+pub fn sys_access(path: &str, mode: u32) -> isize {
+    let path = CString::new(path).unwrap();
+    syscall!(Faccessat, AT_FDCWD as usize, path.as_ptr() as usize, mode, 0)
+}
+
 pub fn sys_open(path: &str, flags: OpenFlags) -> i32 {
     let path = CString::new(path).unwrap();
     syscall!(Openat, AT_FDCWD as usize, path.as_ptr() as usize, flags.bits, 0) as i32
@@ -329,6 +334,10 @@ pub fn sys_kill(pid: usize, signal: i32) -> isize {
 
 pub fn sys_pipe(pipe: &mut [i32; 2]) -> isize {
     syscall!(Pipe2, pipe.as_mut_ptr() as usize, 0)
+}
+
+pub fn sys_dup2(oldfd: i32, newfd: i32) -> isize {
+    syscall!(Dup3, oldfd as usize, newfd as usize, 0)
 }
 
 pub fn sigaction(sig: i32, new: Option<&SigAction>, old: Option<&mut SigAction>) -> isize {

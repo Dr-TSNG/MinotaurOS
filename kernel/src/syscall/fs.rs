@@ -291,12 +291,14 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
         }
         Err(e) => return Err(e),
     };
-    let file = inode.open(flags - OpenFlags::O_CLOEXEC)?;
-    if flags.contains(OpenFlags::O_TRUNC) {
-        file.truncate(0).await?;
-    }
-    if flags.contains(OpenFlags::O_APPEND) {
-        file.seek(Seek::End(0)).await?;
+    let file = inode.clone().open(flags - OpenFlags::O_CLOEXEC)?;
+    if inode.metadata().mode == InodeMode::IFREG {
+        if flags.contains(OpenFlags::O_TRUNC) {
+            file.truncate(0).await?;
+        }
+        if flags.contains(OpenFlags::O_APPEND) {
+            file.seek(Seek::End(0)).await?;
+        }
     }
     let fd_impl = FileDescriptor::new(file, flags.contains(OpenFlags::O_CLOEXEC));
     let fd = proc_inner.fd_table.put(fd_impl, 0)?;
