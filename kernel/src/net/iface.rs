@@ -8,7 +8,7 @@ use smoltcp::phy::{Device, Loopback, Medium};
 use smoltcp::socket::{tcp, udp, AnySocket};
 use smoltcp::time::Instant;
 use smoltcp::wire::{EthernetAddress, IpCidr, Ipv4Address};
-use crate::driver::{DEVICES, NetDevice};
+use crate::driver::{DEVICES, NET_DEVICE, NetDevice};
 
 use crate::driver::Device as DriverDevice;
 use crate::driver::virtnet::VirtIONetDevice;
@@ -19,6 +19,10 @@ use crate::sync::mutex::Mutex;
 
 const IP: &str = "10.0.2.15"; // QEMU user networking default IP
 const GATEWAY: &str = "10.0.2.2"; // QEMU user networking gateway
+
+pub fn init() {
+    NET_INTERFACE.init();
+}
 
 pub static NET_INTERFACE: NetInterface = NetInterface::new();
 
@@ -31,7 +35,7 @@ pub struct NetInterface<'a> {
 
 pub struct OSNetDevice {
     pub iface: Interface,
-    pub device: VirtIONetDevice,
+    // pub device: VirtIONetDevice,
 }
 
 pub struct LoopBackDev{
@@ -76,10 +80,45 @@ impl LoopBackDev {
 
 impl OSNetDevice {
 
-    /// 这里是 os net dev的初始化， 我们需要在注册的DEVICES中，找到我们需要
-    /// 的Net(device)，初始化 iface ，将这个os dev保存起来 ， 保存到
-    /// OSNetDevice的device字段，以便之后poll调用时使用。
+    /// 这里是 os net dev的配置初始化
     fn new() -> Self {
+        let mut device_lock = NET_DEVICE.lock();
+        let device = device_lock.as_mut().unwrap();
+        let iface = {
+            let config = match device.capabilities().medium {
+                Medium::Ethernet => {
+                    Config::new(EthernetAddress([0x03, 0x00, 0x00, 0x00, 0x00, 0x01]).into())
+                }
+                Medium::Ip => Config::new(smoltcp::wire::HardwareAddress::Ip),
+                _ => {
+                    panic!("Not Impl Net Medium Type!")
+                }
+            };
+
+            let mut iface = Interface::new(
+                config,
+                device,
+                Instant::from_millis(cpu_time().as_millis() as i64),
+            );
+
+            iface.update_ip_addrs(|ip_addrs| {
+                ip_addrs
+                    .push(IpCidr::new(IpAddr::from_str(IP).unwrap(), 24))
+                    .unwrap();
+            });
+
+            iface
+                .routes_mut()
+                .add_default_ipv4_route(Ipv4Address::from_str(GATEWAY).unwrap())
+                .unwrap();
+
+            iface
+        };
+        Self{
+            iface,
+        }
+
+        /*
         for device in DEVICES.read().values() {
             if let DriverDevice::Net(device) = device {
                 let iface = {
@@ -115,11 +154,12 @@ impl OSNetDevice {
                 info!("find one net device , now quit search");
                 return Self {
                     iface,
-                    device: device as VirtIONetDevice,
+                    // device: device as VirtIONetDevice,
                 }
             }
         }
         panic!("cannot find NetDevice , add NetDevice in DEVICES , ERROR!!!");
+         */
     }
 }
 
@@ -224,10 +264,20 @@ impl<'a> NetInterface<'a>{
         self.device(|inner|{
             inner.iface.poll(
                 Instant::from_millis(cpu_time().as_millis() as i64),
-                &mut inner.device,
+                NET_DEVICE.lock().as_mut().unwrap(),
                 &mut self.sockets_dev.lock().as_mut().unwrap(),
             )
         });
+        /*
+
+        self.device(|inner|{
+            inner.iface.poll(
+                Instant::from_millis(cpu_time().as_millis() as i64),
+                // &mut inner.device,
+                &mut self.sockets_dev.lock().as_mut().unwrap(),
+            )
+        });
+         */
     }
 
     pub fn poll(&self, is_local: bool) {

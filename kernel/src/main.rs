@@ -94,7 +94,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     driver::init_driver()?;
     builtin::init();
     dmesg_flush_tty();
-    // net::init();
+    net::init();
 
     let data = builtin::builtin_app("shell").unwrap();
     let mnt_ns = fs::init()?;

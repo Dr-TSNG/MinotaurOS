@@ -93,6 +93,7 @@ pub async fn sys_sendto(
     dest_addr: usize,
     addrlen: u32,
 ) -> SyscallResult<usize> {
+
     let fd_impl = current_process().inner.lock().fd_table.get(sockfd)?;
     // 在此检查buf开始到len长度的内存是不是用户可读的
     let buf = unsafe { core::slice::from_raw_parts(buf as *const u8, len) };
@@ -121,7 +122,6 @@ pub async fn sys_sendto(
     };
     Ok(len as usize)
 }
-
 pub async fn sys_recvfrom(
     sockfd: FdNum,
     buf: usize,

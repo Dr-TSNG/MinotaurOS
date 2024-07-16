@@ -97,33 +97,41 @@ impl File for UdpSocket {
         match select(future1,future2).await {
             Either::Left(ret1) => {
                 match ret1 {
-                    Ok(len) => {
-                        if len > MAX_BUFFER_SIZE / 2 {
-                            // need to be slow
-                            sleep_for(Duration::from_millis(1)).await.expect("TODO: panic message");
-                        } else {
-                            yield_now().await;
+                    (len,future) => {
+                        match len {
+                            Ok(len) => {
+                                if len > MAX_BUFFER_SIZE / 2 {
+                                    // need to be slow
+                                    sleep_for(Duration::from_millis(1)).await.expect("TODO: panic message");
+                                } else {
+                                    yield_now().await;
+                                }
+                                Ok(len as isize)
+                            }
+                            Err(e) => {
+                                Err(e)
+                            }
                         }
-                        Ok(len as isize)
-                    }
-                    Err(e) => {
-                        Err(e)
                     }
                 }
             }
             Either::Right(ret2) => {
                 match ret2 {
-                    Ok(len) => {
-                        if len > MAX_BUFFER_SIZE / 2 {
-                            // need to be slow
-                            sleep_for(Duration::from_millis(1)).await.expect("TODO: panic message");
-                        } else {
-                            yield_now().await;
+                    (len,future) => {
+                        match len {
+                            Ok(len) => {
+                                if len > MAX_BUFFER_SIZE / 2 {
+                                    // need to be slow
+                                    sleep_for(Duration::from_millis(1)).await.expect("TODO: panic message");
+                                } else {
+                                    yield_now().await;
+                                }
+                                Ok(len as isize)
+                            }
+                            Err(e) => {
+                                Err(e)
+                            }
                         }
-                        Ok(len as isize)
-                    }
-                    Err(e) => {
-                        Err(e)
                     }
                 }
             }
@@ -211,9 +219,11 @@ impl Socket for UdpSocket {
         NET_INTERFACE.handle_udp_socket_loop(self.inner.lock().handle_loop, |socket| {
             socket.bind(addr).ok().ok_or(Errno::EINVAL)
         })?;
+        info!("right?");
         NET_INTERFACE.handle_udp_socket_dev(self.inner.lock().handle_dev, |socket| {
             socket.bind(addr).ok().ok_or(Errno::EINVAL)
         })?;
+        info!("right??");
         Ok(())
     }
 
@@ -249,11 +259,18 @@ impl Socket for UdpSocket {
                 Ok(())
             }
         };
+        info!("udp connect");
+        info!("is_local: {}",is_local);
+
+        // you can see lots of this dead lock , handle this one by one
+        drop(inner);
+        info!("self.inner is locked?: {}",self.inner.is_locked());
         if is_local{
             NET_INTERFACE.handle_udp_socket_loop(self.inner.lock().handle_loop,poll_func)?;
         }else {
             NET_INTERFACE.handle_udp_socket_dev(self.inner.lock().handle_dev,poll_func)?;
         }
+        info!("OK");
         Ok(())
     }
 

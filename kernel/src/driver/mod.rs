@@ -20,7 +20,7 @@ use crate::fs::ffi::OpenFlags;
 use crate::fs::file::FileMeta;
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::IdAllocator;
-use crate::println;
+use crate::{panic, println};
 use crate::result::SyscallResult;
 use crate::sync::mutex::{Mutex, RwLock};
 use crate::sync::once::LateInit;
@@ -36,6 +36,23 @@ pub static GLOBAL_MAPPINGS: LateInit<Vec<GlobalMapping>> = LateInit::new();
 pub static DEVICES: RwLock<BTreeMap<usize, Device>> = RwLock::new(BTreeMap::new());
 
 static DEV_ID_ALLOCATOR: Mutex<IdAllocator> = Mutex::new(IdAllocator::new(1));
+
+pub static NET_DEVICE: Mutex<Option<VirtIONetDevice>> = Mutex::new(None);
+
+// virt-net vrit address
+pub static mut VIRTIO_NET_ADDR:Option<usize> = None;
+/// 暂时不将net dev加入设备树。
+pub fn temp_init_net_device(){
+    unsafe {
+        if VIRTIO_NET_ADDR == None {
+            panic!("not registered virt-io-net dev when init");
+        }
+    }
+    let virt: VirtAddr = VirtAddr(unsafe { VIRTIO_NET_ADDR }.unwrap());
+    unsafe { *NET_DEVICE.lock() = Some(VirtIONetDevice::new(virt)); }
+    // 需要找到 qemu net device 的 base_addr
+    // *NET_DEVICE.lock() = Some(VirtIONetDevice::new());
+}
 
 pub struct BoardInfo {
     pub smp: usize,
@@ -178,6 +195,8 @@ pub fn init_driver() -> SyscallResult<()> {
         }
     }
     BOARD_INFO.plic.init(BOARD_INFO.smp);
+    // for virt net temp init ， if have real net dev driver , delete it
+    temp_init_net_device();
     Ok(())
 }
 
@@ -263,7 +282,22 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     DEVICES.write().insert(dev.metadata().dev_id, Device::Block(dev));
                     println!("[kernel] Register virtio device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
-                } else if name.starts_with("plic@") {
+                }else if name == "virtio_mmio@10008000"{
+                    let reg = parse_reg(&node, addr_cells, size_cells);
+                    let mapping = GlobalMapping::new(
+                        "[virtio_net]".to_string(),
+                        PhysAddr(reg[0].0),
+                        KERNEL_MMIO_BASE + mmio_offset,
+                        reg[0].1,
+                        ASPerms::R | ASPerms::W,
+                    );
+                    mmio_offset += reg[0].1;
+                    // not init here
+                    println!("[kernel] Register virtio-net device at {:?}", mapping.virt_start);
+                    unsafe { VIRTIO_NET_ADDR.replace(mapping.virt_start.0); }
+                    g_mappings.push(mapping);
+                }
+                else if name.starts_with("plic@") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     if mmio_offset % reg[0].1 != 0 {
                         mmio_offset += reg[0].1 - mmio_offset % reg[0].1;
