@@ -1,7 +1,6 @@
 use alloc::string::ToString;
 use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicUsize, Ordering};
-use tap::Tap;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};

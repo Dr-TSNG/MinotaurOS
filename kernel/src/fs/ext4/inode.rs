@@ -5,7 +5,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use core::time::Duration;
 use async_trait::async_trait;
-use log::{debug, error, trace};
+use log::{debug, trace};
 use lwext4_rust::Ext4File;
 use lwext4_rust::bindings::{EXT4_INODE_ROOT_INDEX, O_CREAT, O_RDWR, SEEK_SET};
 use lwext4_rust::dir::Ext4Dir;

@@ -6,6 +6,7 @@ use core::pin::Pin;
 use core::task::Context;
 use log::{debug, warn};
 use pin_project::pin_project;
+use zerocopy::FromBytes;
 use crate::arch::VirtAddr;
 use crate::fs::ffi::{FdSet, PollEvents, PollFd};
 use crate::processor::current_process;
@@ -140,7 +141,7 @@ impl Future for IOMultiplexFuture {
                 IOFormat::PollFds(pollfd) => {
                     let slice = current_process().inner.lock()
                         .addr_space.user_slice_w(VirtAddr(*pollfd), size_of::<PollFd>() * this.fds.len())?;
-                    bytemuck::cast_slice_mut(slice).copy_from_slice(&this.fds);
+                    PollFd::mut_slice_from(slice).unwrap().copy_from_slice(&this.fds);
                 }
                 IOFormat::FdSets(fdset) => {
                     fdset.update(&this.fds);

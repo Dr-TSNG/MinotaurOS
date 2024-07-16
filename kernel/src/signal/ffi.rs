@@ -1,5 +1,6 @@
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
+use zerocopy::{FromBytes, FromZeroes};
 use crate::trap::context::TrapContext;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, TryFromPrimitive)]
@@ -53,7 +54,7 @@ impl Signal {
 }
 
 bitflags! {
-    #[derive(Default)]
+    #[derive(Default, FromBytes, FromZeroes)]
     pub struct SigSet: u64 {
         const SIGHUP    = Signal::SIGHUP.sigset_val();
         const SIGINT    = Signal::SIGINT.sigset_val();
