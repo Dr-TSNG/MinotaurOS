@@ -47,7 +47,7 @@ use crate::config::{KERNEL_PADDR_BASE, KERNEL_STACK_SIZE, LINKAGE_EBSS, LINKAGE_
 use crate::debug::console::dmesg_flush_tty;
 use crate::driver::BOARD_INFO;
 use crate::fs::page_cache::PageCache;
-use crate::process::monitor::PROCESS_MONITOR;
+use crate::process::monitor::MONITORS;
 use crate::process::Process;
 use crate::processor::hart;
 use crate::processor::hart::{KERNEL_STACK, local_hart};
@@ -173,7 +173,7 @@ fn monitor() -> Duration {
     let pc_alloc = PageCache::allocated();
     println!(
         "[monitor] procs {}, pc_holder {}, pc_alloc {}",
-        PROCESS_MONITOR.lock().count(), pc_holder, pc_alloc,
+        MONITORS.lock().process.count(), pc_holder, pc_alloc,
     );
     cpu_time() + Duration::from_secs(1)
 }

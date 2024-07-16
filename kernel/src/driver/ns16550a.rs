@@ -7,7 +7,10 @@ use async_trait::async_trait;
 use futures::task::AtomicWaker;
 use crate::arch::VirtAddr;
 use crate::driver::{CharacterDevice, DeviceMeta, IrqDevice};
+use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::result::SyscallResult;
+
+const CTRL_C: u8 = 3;
 
 pub struct UartDevice {
     metadata: DeviceMeta,
@@ -111,6 +114,9 @@ impl CharacterDevice for UartDevice {
 impl IrqDevice for UartDevice {
     fn handle_irq(&self) {
         let ch = unsafe { self.rxdata_ptr().read_volatile() };
+        if ch == CTRL_C {
+            DEFAULT_TTY.handle_ctrl_c();
+        }
         self.buf.store(ch, Ordering::Relaxed);
         self.waker.wake();
     }

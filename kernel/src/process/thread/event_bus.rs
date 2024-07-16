@@ -8,7 +8,7 @@ use bitflags::bitflags;
 use futures::future::{Either, select};
 use crate::arch::VirtAddr;
 use crate::process::ffi::WaitOptions;
-use crate::process::monitor::PROCESS_MONITOR;
+use crate::process::monitor::MONITORS;
 use crate::process::Pid;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
@@ -131,7 +131,7 @@ impl Future for WaitPidFuture {
     type Output = SyscallResult<Pid>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let _monitor = PROCESS_MONITOR.lock();
+        let _monitors = MONITORS.lock();
         let mut proc_inner = current_process().inner.lock();
         if !proc_inner.children.iter()
             .any(|p| self.pid as isize == -1 || self.pid == p.pid.0) {

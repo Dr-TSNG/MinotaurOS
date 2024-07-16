@@ -8,7 +8,7 @@ use crate::debug::console::DMESG;
 use crate::driver::total_memory;
 use crate::fs::ffi::UTS_NAME;
 use crate::mm::allocator::free_user_memory;
-use crate::process::monitor::PROCESS_MONITOR;
+use crate::process::monitor::MONITORS;
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::time::cpu_time;
@@ -118,7 +118,7 @@ pub fn sys_sysinfo(buf: usize) -> SyscallResult<usize> {
     sys_info.uptime = cpu_time().as_secs() as isize;
     sys_info.totalram = total_memory();
     sys_info.freeram = free_user_memory();
-    sys_info.procs = PROCESS_MONITOR.lock().count() as u16;
+    sys_info.procs = MONITORS.lock().process.count() as u16;
     user_buf.copy_from_slice(sys_info.as_bytes());
     Ok(0)
 }

@@ -118,3 +118,15 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
         }
     }
 }
+
+pub fn dump_tombstone(signal: Signal) {
+    error!("═════ Thread {} terminated with signal {:?} ═════", current_thread().tid.0, signal);
+    error!("Registers:");
+    let ctx = current_trap_ctx();
+    error!("  pc: {:#x}", ctx.get_pc());
+    error!("  sp: {:#x}", ctx.get_sp());
+    error!("  ra: {:#x}", ctx.user_x[1]);
+    error!("Backtrace:");
+    error!("todo");
+    error!("═════ End of stack trace ═════");
+}
