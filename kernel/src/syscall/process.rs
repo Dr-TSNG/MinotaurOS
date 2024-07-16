@@ -200,8 +200,7 @@ pub fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize)
 
 pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let mut path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
-
+    let mut path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let mut args_vec: Vec<CString> = Vec::new();
     let mut envs_vec: Vec<CString> = Vec::new();
     if path.ends_with(".sh") {
@@ -211,11 +210,12 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     }
     let push_args = |args_vec: &mut Vec<CString>, mut arg_ptr: usize| -> SyscallResult {
         loop {
-            proc_inner.addr_space.user_slice_r(VirtAddr(arg_ptr), size_of::<usize>())?;
-            let arg_addr = unsafe { *(arg_ptr as *const usize) };
-            if arg_addr == 0 { break; }
-            let arg = proc_inner.addr_space.user_slice_str(VirtAddr(arg_addr), PATH_MAX)?;
-            if arg.is_empty() { break; }
+            let arg_addr = proc_inner.addr_space.transmute_r::<usize>(arg_ptr)?.ok_or(Errno::EINVAL)?;
+            let arg = match proc_inner.addr_space.transmute_str(*arg_addr, PATH_MAX)? {
+                None => break,
+                Some(s) if s.is_empty() => break,
+                Some(s) => s,
+            };
             args_vec.push(CString::new(arg).unwrap());
             arg_ptr += size_of::<usize>();
         }

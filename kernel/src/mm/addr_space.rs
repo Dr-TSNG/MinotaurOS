@@ -285,18 +285,6 @@ impl AddressSpace {
         Ok(data)
     }
 
-    pub fn user_slice_str(&self, addr: VirtAddr, max_len: usize) -> SyscallResult<&'static str> {
-        let mut cur_len = min(max_len, PAGE_SIZE - addr.page_offset(2));
-        while cur_len <= max_len {
-            let data = self.user_slice_r(addr, cur_len)?;
-            if let Ok(cstr) = CStr::from_bytes_until_nul(data) {
-                return Ok(cstr.to_str().map_err(|_| Errno::EINVAL)?);
-            }
-            cur_len = min(cur_len + PAGE_SIZE, max_len);
-        }
-        Err(Errno::EINVAL)
-    }
-
     pub fn transmute_r<T: FromBytes>(&self, addr: usize) -> SyscallResult<Option<&'static T>> {
         match addr {
             0 => Ok(None),
@@ -317,6 +305,24 @@ impl AddressSpace {
                 self.check_addr_valid(addr, addr + size_of::<T>(), ASPerms::W | ASPerms::U)?;
                 let bytes = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), size_of::<T>()) };
                 Ok(Some(T::mut_from(bytes).unwrap()))
+            }
+        }
+    }
+
+    pub fn transmute_str(&self, addr: usize, max_len: usize) -> SyscallResult<Option<&'static str>> {
+        match addr {
+            0 => Ok(None),
+            _ => {
+                let addr = VirtAddr(addr);
+                let mut cur_len = min(max_len, PAGE_SIZE - addr.page_offset(2));
+                while cur_len <= max_len {
+                    let data = self.user_slice_r(addr, cur_len)?;
+                    if let Ok(cstr) = CStr::from_bytes_until_nul(data) {
+                        return Ok(Some(cstr.to_str().map_err(|_| Errno::EINVAL)?));
+                    }
+                    cur_len = min(cur_len + PAGE_SIZE, max_len);
+                }
+                Err(Errno::EINVAL)
             }
         }
     }
