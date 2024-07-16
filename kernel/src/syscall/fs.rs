@@ -151,6 +151,20 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
     Ok(0)
 }
 
+pub async fn sys_symlinkat(target: usize, dirfd: FdNum, linkpath: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let target = proc_inner.addr_space.transmute_str(target, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let linkpath = proc_inner.addr_space.transmute_str(linkpath, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    debug!("[symlinkat] target: {}, dirfd: {}, linkpath: {}", target, dirfd, linkpath);
+    let (parent, name) = split_last_path(linkpath).ok_or(Errno::EINVAL)?;
+    let inode = resolve_path(&proc_inner, dirfd, &parent, true).await?;
+    if inode.metadata().mode != InodeMode::IFDIR {
+        return Err(Errno::ENOTDIR);
+    }
+    inode.symlink(&name, target).await?;
+    Ok(0)
+}
+
 pub async fn sys_umount2(target: usize, flags: u32) -> SyscallResult<usize> {
     warn!("umount2 is not implemented");
     Ok(0)

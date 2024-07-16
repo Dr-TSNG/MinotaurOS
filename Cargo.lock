@@ -637,7 +637,7 @@ dependencies = [
 [[package]]
 name = "lwext4_rust"
 version = "0.2.0"
-source = "git+https://github.com/Dr-TSNG/lwext4_rust#91693dadedba3f172a557c1dd85bb9c88c8e352b"
+source = "git+https://github.com/Dr-TSNG/lwext4_rust#d8da9f0274a2a2107679f6a673f2ca59946be154"
 dependencies = [
  "bindgen",
  "log",
@@ -882,7 +882,7 @@ checksum = "7a66a03ae7c801facd77a29370b4faec201768915ac14a721ba36f20bc9c209b"
 [[package]]
 name = "riscv"
 version = "0.11.1"
-source = "git+https://github.com/Dr-TSNG/riscv#7884787393fa4f9dfd6c97822c8691a46c9b8800"
+source = "git+https://github.com/Dr-TSNG/riscv#cead237fd9c8f7275a2f8350e1a169a5a950c280"
 dependencies = [
  "critical-section",
  "embedded-hal",

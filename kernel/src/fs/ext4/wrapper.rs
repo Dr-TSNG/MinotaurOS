@@ -5,6 +5,7 @@ use core::ops::Deref;
 use lwext4_rust::{Ext4BlockWrapper, KernelDevOp};
 
 use crate::driver::BlockDevice;
+use crate::result::Errno;
 use crate::sync::block_on;
 
 pub struct Ext4(Ext4BlockWrapper<Ext4Disk>);
@@ -94,4 +95,9 @@ impl KernelDevOp for Ext4Disk {
     {
         Ok(0)
     }
+}
+
+#[inline(always)]
+pub fn i32_to_err(i: i32) -> Errno {
+    i.try_into().unwrap()
 }

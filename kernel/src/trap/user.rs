@@ -67,7 +67,7 @@ pub async fn trap_from_user() {
         }
         _ => {
             error!("Unhandled trap: {:?}", trap);
-            current_thread().terminate(-1);
+            current_thread().recv_signal(Signal::SIGSEGV);
         }
     }
 }
