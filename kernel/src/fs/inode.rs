@@ -143,6 +143,15 @@ pub(super) trait InodeInternal {
         Err(Errno::EPERM)
     }
 
+    /// 在当前目录下创建符号链接
+    async fn do_symlink(
+        self: Arc<Self>,
+        name: &str,
+        target: &str,
+    ) -> SyscallResult {
+        Err(Errno::EPERM)
+    }
+
     /// 将文件移动到当前目录下
     async fn do_movein(
         self: Arc<Self>,
@@ -247,6 +256,13 @@ impl dyn Inode {
             return Err(Errno::ENOTDIR);
         }
         self.do_create(mode, name).await
+    }
+
+    pub async fn symlink(self: Arc<Self>, name: &str, target: &str) -> SyscallResult {
+        if self.metadata().mode != InodeMode::IFDIR {
+            return Err(Errno::ENOTDIR);
+        }
+        self.do_symlink(name, target).await
     }
 
     pub async fn movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>) -> SyscallResult {
