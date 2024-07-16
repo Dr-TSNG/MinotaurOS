@@ -108,7 +108,7 @@ pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4
 
 pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     debug!("[mkdirat] fd: {}, path: {:?}, mode: {:?}", dirfd, path, mode);
     let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
     let inode = resolve_path(&mut proc_inner, dirfd, &parent, true).await?;
@@ -124,10 +124,7 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
         return Err(Errno::EINVAL);
     }
     let proc_inner = current_process().inner.lock();
-    let mut path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let mut path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     debug!("[unlinkat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
 
     // TODO: This hack is just for libctest
@@ -194,7 +191,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
 
 pub async fn sys_statfs(path: usize, buf: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let inode = resolve_path(&mut proc_inner, AT_FDCWD, path, true).await?;
     let fs = inode.file_system().upgrade().ok_or(Errno::ENODEV)?;
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStatfs>())?;
@@ -247,17 +244,14 @@ pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
 
 pub async fn sys_faccessat(fd: FdNum, path: usize, _mode: u32, _flags: u32) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     resolve_path(&proc_inner, fd, path, false).await?;
     Ok(0)
 }
 
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     resolve_path(&mut proc_inner, AT_FDCWD, path, true).await?;
     proc_inner.cwd = path.to_string();
     Ok(0)
@@ -266,10 +260,7 @@ pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
 pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> SyscallResult<usize> {
     let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     let mut proc_inner = current_process().inner.lock();
-    let mut path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let mut path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     debug!("[openat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
 
     // TODO: This hack is just for libctest
@@ -639,11 +630,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
 
 pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
-
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     // TODO: This hack is for lmbench
     if path == "/proc/self/exe" {
         let target = &proc_inner.exe;
@@ -664,10 +651,7 @@ pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize
 
 pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, flags: u32) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
     let inode = resolve_path(&proc_inner, dirfd, path, follow_link).await?;
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStat>())?;
@@ -718,10 +702,7 @@ pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {
 
 pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
     let inode = resolve_path(&proc_inner, dirfd, path, follow_link).await?;
     let now = TimeSpec::from(real_time());
@@ -759,14 +740,8 @@ pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) 
 pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, new_path: usize, flags: u32) -> SyscallResult<usize> {
     let flags = RenameFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     let proc_inner = current_process().inner.lock();
-    let old_path = match old_path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(old_path), PATH_MAX)?,
-    };
-    let new_path = match new_path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(new_path), PATH_MAX)?,
-    };
+    let old_path = proc_inner.addr_space.transmute_str(old_path, PATH_MAX)?.unwrap_or(".");
+    let new_path = proc_inner.addr_space.transmute_str(new_path, PATH_MAX)?.unwrap_or(".");
     debug!(
         "[renameat] old_dirfd: {}, old_path: {:?}, new_dirfd: {}, new_path: {:?}, flags: {:?}",
         old_dirfd, old_path, new_dirfd, new_path, flags,
