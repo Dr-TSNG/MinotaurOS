@@ -76,10 +76,6 @@ impl<F: Future> Future for TimeoutFuture<F> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        if cpu_time() >= *this.expire {
-            return Poll::Ready(TimeoutResult::Timeout);
-        }
-
         match this.fut.poll(cx) {
             Poll::Ready(v) => Poll::Ready(TimeoutResult::Ready(v)),
             Poll::Pending => {
@@ -87,7 +83,11 @@ impl<F: Future> Future for TimeoutFuture<F> {
                     sched_timer(*this.expire, cx.waker().clone());
                     *this.sched = true;
                 }
-                Poll::Pending
+                if cpu_time() >= *this.expire {
+                    Poll::Ready(TimeoutResult::Timeout)
+                } else {
+                    Poll::Pending
+                }
             }
         }
     }

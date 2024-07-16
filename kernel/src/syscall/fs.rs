@@ -19,7 +19,7 @@ use crate::fs::pipe::Pipe;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::{TimeSpec, UTIME_NOW, UTIME_OMIT};
+use crate::sched::ffi::{TimeSpec, TimeVal, UTIME_NOW, UTIME_OMIT};
 use crate::sched::iomultiplex::{FdSetRWE, IOFormat, IOMultiplexFuture};
 use crate::sched::time::{real_time, TimeoutFuture, TimeoutResult};
 use crate::signal::ffi::SigSet;
@@ -486,7 +486,7 @@ pub async fn sys_sendfile(out_fd: FdNum, in_fd: FdNum, offset: usize, count: usi
 pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let slice = proc_inner.addr_space.user_slice_w(VirtAddr(ufds), size_of::<PollFd>() * nfds)?;
-    let fds = bytemuck::cast_slice(slice).to_vec();
+    let fds = PollFd::slice_from(slice).unwrap().to_vec();
     let timeout = match timeout {
         0 => None,
         _ => {
@@ -499,8 +499,8 @@ pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize)
         0 => None,
         _ => {
             let sigmask = proc_inner.addr_space.user_slice_r(VirtAddr(sigmask), size_of::<SigSet>())?;
-            let sigmask = unsafe { sigmask.as_ptr().cast::<SigSet>().read() };
-            Some(sigmask)
+            let sigmask = SigSet::ref_from(sigmask).unwrap();
+            Some(*sigmask)
         }
     };
     drop(proc_inner);
@@ -530,47 +530,14 @@ pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize)
 
 pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfds: usize, timeout: usize, sigmask: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let mut rfds = match readfds {
-        0 => None,
-        _ => {
-            let readfds = proc_inner.addr_space.user_slice_w(VirtAddr(readfds), size_of::<FdSet>())?;
-            Some(unsafe { &mut *(readfds.as_mut_ptr() as *mut FdSet) })
-        }
-    };
-    let mut wfds = match writefds {
-        0 => None,
-        _ => {
-            let writefds = proc_inner.addr_space.user_slice_w(VirtAddr(writefds), size_of::<FdSet>())?;
-            Some(unsafe { &mut *(writefds.as_mut_ptr() as *mut FdSet) })
-        }
-    };
-    let mut efds = match exceptfds {
-        0 => None,
-        _ => {
-            let exceptfds = proc_inner.addr_space.user_slice_w(VirtAddr(readfds), size_of::<FdSet>())?;
-            Some(unsafe { &mut *(exceptfds.as_mut_ptr() as *mut FdSet) })
-        }
-    };
-
-    let timeout = match timeout {
-        0 => None,
-        _ => {
-            let timeout = proc_inner.addr_space.user_slice_r(VirtAddr(timeout), size_of::<TimeSpec>())?;
-            let timeout = TimeSpec::ref_from(timeout).unwrap();
-            Some(Duration::from(*timeout))
-        }
-    };
-    let sigmask = match sigmask {
-        0 => None,
-        _ => {
-            let sigmask = proc_inner.addr_space.user_slice_r(VirtAddr(sigmask), size_of::<SigSet>())?;
-            let sigmask = unsafe { sigmask.as_ptr().cast::<SigSet>().read() };
-            Some(sigmask)
-        }
-    };
+    let rfds = proc_inner.addr_space.transmute_w::<FdSet>(readfds)?;
+    let wfds = proc_inner.addr_space.transmute_w::<FdSet>(writefds)?;
+    let efds = proc_inner.addr_space.transmute_w::<FdSet>(exceptfds)?;
+    let timeout = proc_inner.addr_space.transmute_r::<TimeVal>(timeout)?.cloned().map(Duration::from);
+    let sigmask = proc_inner.addr_space.transmute_r::<SigSet>(sigmask)?.cloned();
     debug!(
         "[sys_pselect]: readfds {:?}, writefds {:?}, exceptfds {:?}, timeout {:?}",
-        rfds, wfds, efds, timeout
+        rfds, wfds, efds, timeout,
     );
     let fd_slot_bits = 8 * size_of::<usize>();
     let mut fds: Vec<PollFd> = Vec::new();
@@ -583,7 +550,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
             if let Some(readfds) = rfds.as_ref() {
                 if readfds.fds_bits[fd_slot] & (1 << offset) != 0 {
                     if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
-                        log::warn!("[sys_pselect] bad fd {}", fd);
+                        warn!("[sys_pselect] bad fd {}", fd);
                         return Err(Errno::EBADF);
                     }
 
@@ -604,7 +571,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
                         }
                     } else {
                         if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
-                            log::warn!("[sys_pselect] bad fd {}", fd);
+                            warn!("[sys_pselect] bad fd {}", fd);
                             return Err(Errno::EBADF);
                         }
                         fds.push(PollFd {
@@ -625,7 +592,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
                         }
                     } else {
                         if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
-                            log::warn!("[sys_pselect] bad fd {}", fd);
+                            warn!("[sys_pselect] bad fd {}", fd);
                             return Err(Errno::EBADF);
                         }
                         fds.push(PollFd {
@@ -638,13 +605,13 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
             }
         }
     }
-    if let Some(fds) = rfds.as_mut() {
+    if let Some(fds) = rfds {
         fds.fds_bits.fill(0);
     }
-    if let Some(fds) = wfds.as_mut() {
+    if let Some(fds) = wfds {
         fds.fds_bits.fill(0);
     }
-    if let Some(fds) = efds.as_mut() {
+    if let Some(fds) = efds {
         fds.fds_bits.fill(0);
     }
     drop(proc_inner);

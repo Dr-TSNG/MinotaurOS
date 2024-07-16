@@ -7,10 +7,12 @@ use alloc::vec::Vec;
 use core::arch::asm;
 use core::cmp::{max, min};
 use core::ffi::CStr;
+use core::mem::size_of;
 use bitflags::bitflags;
 use log::{debug, info};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
+use zerocopy::{AsBytes, FromBytes};
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::driver::GLOBAL_MAPPINGS;
@@ -293,6 +295,30 @@ impl AddressSpace {
             cur_len = min(cur_len + PAGE_SIZE, max_len);
         }
         Err(Errno::EINVAL)
+    }
+
+    pub fn transmute_r<T: FromBytes>(&self, addr: usize) -> SyscallResult<Option<&'static T>> {
+        match addr {
+            0 => Ok(None),
+            _ => {
+                let addr = VirtAddr(addr);
+                self.check_addr_valid(addr, addr + size_of::<T>(), ASPerms::R | ASPerms::U)?;
+                let bytes = unsafe { core::slice::from_raw_parts(addr.as_ptr(), size_of::<T>()) };
+                Ok(Some(T::ref_from(bytes).unwrap()))
+            }
+        }
+    }
+
+    pub fn transmute_w<T: AsBytes + FromBytes>(&self, addr: usize) -> SyscallResult<Option<&'static mut T>> {
+        match addr {
+            0 => Ok(None),
+            _ => {
+                let addr = VirtAddr(addr);
+                self.check_addr_valid(addr, addr + size_of::<T>(), ASPerms::W | ASPerms::U)?;
+                let bytes = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), size_of::<T>()) };
+                Ok(Some(T::mut_from(bytes).unwrap()))
+            }
+        }
     }
 
     pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult<usize> {

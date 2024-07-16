@@ -186,7 +186,7 @@ impl Process {
         user_sp -= user_sp % 16;
 
         // 写入向量表
-        fn write_vector<T>(vec: Vec<T>, add_zero: bool, sp: &mut usize) -> usize {
+        fn write_vector<T>(vec: Vec<T>, add_zero: bool, sp: &mut usize) {
             *sp -= vec.len() * size_of::<T>();
             if add_zero {
                 *sp -= size_of::<T>();
@@ -198,11 +198,10 @@ impl Process {
                     ptr.write(val);
                 }
             }
-            base
         }
-        let auxv_base = write_vector(auxv, false, &mut user_sp);
-        let envp_base = write_vector(envp, true, &mut user_sp);
-        let argv_base = write_vector(argv, true, &mut user_sp);
+        write_vector(auxv, false, &mut user_sp);
+        write_vector(envp, true, &mut user_sp);
+        write_vector(argv, true, &mut user_sp);
 
         // 写入 `argc`
         user_sp -= size_of::<usize>();
