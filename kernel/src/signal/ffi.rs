@@ -110,9 +110,23 @@ pub enum SigSetOp {
 #[repr(C)]
 pub struct SigAction {
     pub sa_handler: usize,
-    pub sa_flags: u32,
+    pub sa_flags: SigActionFlags,
     pub sa_restorer: usize,
     pub sa_mask: SigSet,
+}
+
+bitflags! {
+    #[derive(Default)]
+    pub struct SigActionFlags: u32 {
+        const SA_NOCLDSTOP = 1;
+        const SA_NOCLDWAIT = 2;
+        const SA_SIGINFO   = 4;
+        const SA_RESTORER  = 0x04000000;
+        const SA_ONSTACK   = 0x08000000;
+        const SA_RESTART   = 0x10000000;
+        const SA_NODEFER   = 0x40000000;
+        const SA_RESETHAND = 0x80000000;
+    }
 }
 
 #[repr(C)]
