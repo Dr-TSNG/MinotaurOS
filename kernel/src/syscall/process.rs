@@ -81,8 +81,10 @@ pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
         }
         _ => vec![pid],
     };
+    let mut handled = false;
     for pid in procs {
         if let Some(process) = monitors.process.get(pid).upgrade() {
+            handled = true;
             if signal != Signal::None {
                 for thread in process.inner.lock().threads.values() {
                     if let Some(thread) = thread.upgrade() {
@@ -91,10 +93,9 @@ pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
                     }
                 }
             }
-            return Ok(0);
         }
     }
-    Err(Errno::EINVAL)
+    handled.then_some(0).ok_or(Errno::EINVAL)
 }
 
 pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
@@ -241,9 +242,10 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     }
 
     drop(proc_inner);
-    let file = inode.open(OpenFlags::O_RDONLY)?;
+    let file = inode.clone().open(OpenFlags::O_RDONLY)?;
     let elf_data = file.read_all().await?;
-    current_process().execve(path.to_string(), &elf_data, &args_vec, &envs_vec).await
+    // TODO: Here path is incorrect, we should update resolve_path
+    current_process().execve(inode.metadata().path.clone(), &elf_data, &args_vec, &envs_vec).await
 }
 
 pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
