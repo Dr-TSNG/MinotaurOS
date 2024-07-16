@@ -120,6 +120,9 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
 }
 
 pub fn dump_tombstone(signal: Signal) {
+    if signal != Signal::SIGSEGV {
+        return;
+    }
     error!("═════ Thread {} terminated with signal {:?} ═════", current_thread().tid.0, signal);
     error!("Registers:");
     let ctx = current_trap_ctx();
