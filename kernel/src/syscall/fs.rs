@@ -563,8 +563,8 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
 
                     fds.push(PollFd {
                         fd: fd as i32,
-                        events: PollEvents::POLLIN.bits(),
-                        revents: PollEvents::empty().bits(),
+                        events: PollEvents::POLLIN,
+                        revents: PollEvents::empty(),
                     })
                 }
             }
@@ -572,9 +572,8 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
                 if writefds.fds_bits[fd_slot] & (1 << offset) != 0 {
                     if let Some(old_fd) = fds.last() {
                         if old_fd.fd == fd as i32 {
-                            let events = PollEvents::from_bits(old_fd.events).unwrap()
-                                | PollEvents::POLLOUT;
-                            fds.last_mut().unwrap().events = events.bits();
+                            let events = old_fd.events | PollEvents::POLLOUT;
+                            fds.last_mut().unwrap().events = events;
                         }
                     } else {
                         if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
@@ -583,8 +582,8 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
                         }
                         fds.push(PollFd {
                             fd: fd as i32,
-                            events: PollEvents::POLLOUT.bits(),
-                            revents: PollEvents::empty().bits(),
+                            events: PollEvents::POLLOUT,
+                            revents: PollEvents::empty(),
                         })
                     }
                 }
@@ -593,9 +592,8 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
                 if exceptfds.fds_bits[fd_slot] & (1 << offset) != 0 {
                     if let Some(old_fd) = fds.last() {
                         if old_fd.fd == fd as i32 {
-                            let events = PollEvents::from_bits(old_fd.events).unwrap()
-                                | PollEvents::POLLPRI;
-                            fds.last_mut().unwrap().events = events.bits();
+                            let events = old_fd.events | PollEvents::POLLPRI;
+                            fds.last_mut().unwrap().events = events;
                         }
                     } else {
                         if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
@@ -604,8 +602,8 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
                         }
                         fds.push(PollFd {
                             fd: fd as i32,
-                            events: PollEvents::POLLPRI.bits(),
-                            revents: PollEvents::empty().bits(),
+                            events: PollEvents::POLLPRI,
+                            revents: PollEvents::empty(),
                         })
                     }
                 }

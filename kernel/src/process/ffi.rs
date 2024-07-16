@@ -63,11 +63,17 @@ pub enum RlimitCmd {
     RLIMIT_RTTIME = 15,
 }
 
-#[derive(Copy, Clone, AsBytes)]
+#[derive(Clone, AsBytes, FromZeroes, FromBytes)]
 #[repr(C)]
 pub struct Rlimit {
     pub rlim_cur: usize,
     pub rlim_max: usize,
+}
+
+impl Rlimit {
+    pub const fn new(cur: usize, max: usize) -> Self {
+        Self { rlim_cur: cur, rlim_max: max }
+    }
 }
 
 pub const RUSAGE_SELF: i32 = 0;
