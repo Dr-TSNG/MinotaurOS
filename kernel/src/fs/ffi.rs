@@ -3,6 +3,7 @@ use bitflags::bitflags;
 use lazy_static::lazy_static;
 use num_enum::TryFromPrimitive;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use crate::fs::fd::FdNum;
 use crate::sched::ffi::TimeSpec;
 
 bitflags! {
@@ -251,15 +252,17 @@ pub struct KernelStatfs {
 #[derive(Debug, Copy, Clone, AsBytes, FromZeroes, FromBytes)]
 pub struct PollFd {
     /// Fd
-    pub fd: i32,
+    pub fd: FdNum,
     /// Requested events
-    pub events: i16,
+    pub events: PollEvents,
     /// Returned events
-    pub revents: i16,
+    pub revents: PollEvents,
 }
 
 bitflags! {
     /// Poll events
+    #[repr(C)]
+    #[derive(AsBytes, FromZeroes, FromBytes)]
     pub struct PollEvents: i16 {
         /// There is data to read
         const POLLIN = 1 << 0;

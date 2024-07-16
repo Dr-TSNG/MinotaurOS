@@ -260,30 +260,22 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
     let mut proc_inner = current_process().inner.lock();
     debug!("[prlimit] pid: {}, cmd: {:?}, nrlim: {}, orlim :{}", pid, cmd, new_rlim, old_rlim);
     if old_rlim != 0 {
-        let old_rlim = current_process().inner.lock().addr_space
-            .user_slice_w(VirtAddr(old_rlim), size_of::<Rlimit>())?;
-        let orlim = unsafe { &mut *(old_rlim.as_mut_ptr() as *mut Rlimit) };
-        let (cur, max) = match cmd {
-            RlimitCmd::RLIMIT_STACK => (USER_STACK_SIZE, USER_STACK_TOP.0),
-            RlimitCmd::RLIMIT_NOFILE => (orlim.rlim_cur, orlim.rlim_max),
-            _ => (0, 0),
+        let limit = match cmd {
+            RlimitCmd::RLIMIT_STACK => Rlimit::new(USER_STACK_SIZE, USER_STACK_TOP.0),
+            RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit.clone(),
+            _ => return Err(Errno::EINVAL),
         };
-        let limit = Rlimit { rlim_cur: cur, rlim_max: max };
-        old_rlim.copy_from_slice(limit.as_bytes());
+        *proc_inner.addr_space.transmute_w::<Rlimit>(old_rlim)?.unwrap() = limit;
     }
     if new_rlim != 0 {
-        let new_rlim = current_process().inner.lock().addr_space
-            .user_slice_w(VirtAddr(new_rlim), size_of::<Rlimit>())?;
-        let nrlim = unsafe { &mut *(new_rlim.as_mut_ptr() as *mut Rlimit) };
-        let (cur, max) = match cmd {
-            RlimitCmd::RLIMIT_NOFILE => (nrlim.rlim_cur, nrlim.rlim_max),
-            _ => (MAX_FD_NUM, MAX_FD_NUM)
-        };
-        if cur > max {
+        let limit = proc_inner.addr_space.transmute_r::<Rlimit>(new_rlim)?.unwrap();
+        if limit.rlim_cur > limit.rlim_max {
             return Err(Errno::EINVAL);
         }
-        let limit = Rlimit { rlim_cur: cur, rlim_max: max };
-        proc_inner.fd_table.rlimit = limit;
+        match cmd {
+            RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit = limit.clone(),
+            _ => return Err(Errno::EINVAL),
+        };
     }
     Ok(0)
 }
