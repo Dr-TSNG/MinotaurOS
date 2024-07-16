@@ -70,7 +70,7 @@ pub fn sys_setitimer(which: i32, new_value: usize, old_value: usize) -> SyscallR
                 interval: new_value.interval,
                 value: next_exp.into(),
             };
-            if next_int != now {
+            if next_int != Duration::ZERO {
                 spawn_kernel_thread(TimerFuture::new(next_exp, callback));
             }
         }
