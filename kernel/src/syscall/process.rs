@@ -83,10 +83,12 @@ pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
     };
     for pid in procs {
         if let Some(process) = monitors.process.get(pid).upgrade() {
-            for thread in process.inner.lock().threads.values() {
-                if let Some(thread) = thread.upgrade() {
-                    thread.recv_signal(signal);
-                    break;
+            if signal != Signal::None {
+                for thread in process.inner.lock().threads.values() {
+                    if let Some(thread) = thread.upgrade() {
+                        thread.recv_signal(signal);
+                        break;
+                    }
                 }
             }
             return Ok(0);

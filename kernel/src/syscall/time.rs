@@ -66,11 +66,13 @@ pub fn sys_setitimer(which: i32, new_value: usize, old_value: usize) -> SyscallR
                 }
                 Duration::ZERO
             };
-            proc_inner.timers[which as usize] = ITimerVal {
-                interval: new_value.interval,
-                value: next_exp.into(),
-            };
-            if next_int != now {
+            if next_int.is_zero() {
+                proc_inner.timers[which as usize] = ITimerVal::default();
+            } else {
+                proc_inner.timers[which as usize] = ITimerVal {
+                    interval: new_value.interval,
+                    value: next_exp.into(),
+                };
                 spawn_kernel_thread(TimerFuture::new(next_exp, callback));
             }
         }
