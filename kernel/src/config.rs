@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use crate::arch::{PhysAddr, VirtAddr};
+use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 
 pub const MAX_HARTS: usize = 4;
 
@@ -25,6 +25,8 @@ pub const USER_STACK_SIZE: usize = 8 * MB;
 pub const USER_HEAP_SIZE: usize = 8 * MB;
 
 pub const MAX_FD_NUM: usize = 1024;
+pub const PIPE_BUF_CAP: usize = 16 * PAGE_SIZE;
+
 
 extern {
     fn sbss();
