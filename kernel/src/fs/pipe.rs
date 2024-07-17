@@ -77,6 +77,9 @@ impl File for Pipe {
         if !self.is_reader {
             return Err(Errno::EBADF);
         }
+        if buf.len() == 0 {
+            return Ok(0);
+        }
         let fut = PipeReadFuture {
             pipe: self,
             buf,
@@ -88,6 +91,9 @@ impl File for Pipe {
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         if self.is_reader {
             return Err(Errno::EBADF);
+        }
+        if buf.len() == 0 {
+            return Ok(0);
         }
         let fut = PipeWriteFuture {
             pipe: self,

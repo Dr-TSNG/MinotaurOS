@@ -30,10 +30,6 @@ impl<T, S: MutexStrategy> SpinMutex<T, S> {
         }
     }
 
-    pub fn is_locked(&self) -> bool {
-        self.lock.load(Ordering::Relaxed)
-    }
-
     pub fn try_lock(&self) -> Option<SpinMutexGuard<T, S>> {
         let guard = S::new_guard();
         if self

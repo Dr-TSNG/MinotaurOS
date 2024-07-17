@@ -187,7 +187,6 @@ pub fn sys_getsockopt(
             }
         }
         (SOL_SOCKET, SO_SNDBUF | SO_RCVBUF) => {
-            let len = size_of::<u32>();
             // 在此处检查用户是否有写入optval_ptr和optlen的权限
             /*
             let socket = current_process()

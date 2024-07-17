@@ -43,7 +43,6 @@ pub enum Signal {
 }
 
 pub const SIG_MAX: usize = 34;
-pub const SIG_ERR: usize = usize::MAX;
 pub const SIG_DFL: usize = 0;
 pub const SIG_IGN: usize = 1;
 

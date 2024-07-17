@@ -9,7 +9,6 @@ use log::{debug, trace};
 use lwext4_rust::Ext4File;
 use lwext4_rust::bindings::{EXT4_INODE_ROOT_INDEX, O_CREAT, O_RDWR, SEEK_SET};
 use lwext4_rust::dir::Ext4Dir;
-use lwext4_rust::inode::Ext4InodeRef;
 use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::ext4::wrapper::i32_to_err;
 use crate::fs::ffi::InodeMode;
@@ -27,15 +26,13 @@ pub struct Ext4Inode {
 }
 
 struct Ext4InodeInner {
-    inode_ref: Ext4InodeRef,
     children_loaded: bool,
     children: BTreeMap<String, Arc<Ext4Inode>>,
 }
 
 impl Ext4InodeInner {
-    fn new(inode_ref: Ext4InodeRef) -> Arc<AsyncMutex<Self>> {
+    fn new() -> Arc<AsyncMutex<Self>> {
         Arc::new(AsyncMutex::new(Self {
-            inode_ref,
             children_loaded: false,
             children: Default::default(),
         }))
@@ -60,7 +57,7 @@ impl Ext4Inode {
                 fs.ext4.ext4_get_inode_size(&inode_ref) as isize,
             ),
             fs: Arc::downgrade(fs),
-            inner: Ext4InodeInner::new(inode_ref),
+            inner: Ext4InodeInner::new(),
         })
     }
 
@@ -94,7 +91,7 @@ impl Ext4Inode {
                     fs.ext4.ext4_get_inode_size(&inode_ref) as isize,
                 ),
                 fs: self.fs.clone(),
-                inner: Ext4InodeInner::new(inode_ref),
+                inner: Ext4InodeInner::new(),
             });
             inner.children.insert(dirent.name, inode);
         }
@@ -210,7 +207,7 @@ impl InodeInternal for Ext4Inode {
                 0,
             ),
             fs: self.fs.clone(),
-            inner: Ext4InodeInner::new(inode_ref),
+            inner: Ext4InodeInner::new(),
         });
         inner.children.insert(name.to_string(), inode.clone());
         Ok(inode)
@@ -241,7 +238,7 @@ impl InodeInternal for Ext4Inode {
                 0,
             ),
             fs: self.fs.clone(),
-            inner: Ext4InodeInner::new(inode_ref),
+            inner: Ext4InodeInner::new(),
         });
         inner.children.insert(name.to_string(), inode);
         Ok(())

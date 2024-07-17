@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Aux {
