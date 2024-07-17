@@ -763,20 +763,20 @@ pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, 
             if new_inode.is_ok() {
                 new_parent.clone().unlink(&new_name).await?;
             }
-            old_parent.unlink(&old_name).await?;
+            // old_parent.unlink(&old_name).await?;
             new_parent.movein(&new_name, old_inode).await?;
         }
         RenameFlags::RENAME_NOREPLACE => {
             if new_inode.is_ok() {
                 return Err(Errno::EEXIST);
             }
-            old_parent.unlink(&old_name).await?;
+            // old_parent.unlink(&old_name).await?;
             new_parent.movein(&new_name, old_inode).await?;
         }
         RenameFlags::RENAME_EXCHANGE => {
             let new_inode = new_inode?;
-            old_parent.clone().unlink(&old_name).await?;
-            new_parent.clone().unlink(&new_name).await?;
+            // old_parent.clone().unlink(&old_name).await?;
+            // new_parent.clone().unlink(&new_name).await?;
             old_parent.movein(&new_name, new_inode).await?;
             new_parent.movein(&old_name, old_inode).await?;
         }

@@ -249,7 +249,7 @@ impl InodeInternal for Ext4Inode {
         self.clone().check_exists(&mut inner, name, false)?;
 
         if let Ok(inode) = inode.downcast_arc::<Ext4Inode>() {
-            let old_path = append_path(&inode.metadata().path, &name);
+            let old_path = inode.metadata().path.as_str();
             let new_path = append_path(&self.metadata.path, &name);
             if self.metadata.mode == InodeMode::IFDIR {
                 Ext4Dir::movedir(&old_path, &new_path).map_err(i32_to_err)?;
