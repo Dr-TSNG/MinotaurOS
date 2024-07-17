@@ -2,11 +2,12 @@ use alloc::string::ToString;
 use alloc::sync::Arc;
 
 use async_trait::async_trait;
-use log::info;
+use log::{info, log};
 use smoltcp::{
     phy::{self, DeviceCapabilities},
     time::Instant,
 };
+use smoltcp::phy::Device;
 use spin::mutex::SpinMutex;
 use virtio_drivers::{
     device::net::{RxBuffer, VirtIONet},
@@ -15,7 +16,7 @@ use virtio_drivers::{
 };
 
 use crate::arch::VirtAddr;
-use crate::driver::{DeviceMeta};
+use crate::driver::{DeviceMeta, NET_DEVICE};
 use crate::driver::virtio::VirtioHal;
 use crate::sync::once::LateInit;
 
@@ -41,16 +42,12 @@ impl super::NetDevice for VirtIONetDevice{
     }
 
     fn init(&self) {
-        let ret  = unsafe {
-            // do not edit this init process , or the console will be blocked in NetDevice::new
-            let vaddr = self.base_addr;
-            let header = &mut *(vaddr.0 as *mut VirtIOHeader);
-            let net = NetDevice::new(MmioTransport::new(header.into()).unwrap(), BUF_LEN)
-                .expect("failed to create net driver");
-            info!("VirtIONetDevice net header init");
-            self.dev.init(Arc::new(Mutex::new(net)))
-        };
-        ret
+        unsafe {
+            let header = self.base_addr.as_ptr().cast::<VirtIOHeader>().as_mut().unwrap();
+            let transport = MmioTransport::new(header.into()).unwrap();
+            let net = NetDevice::new(transport,QUEUE_SIZE).unwrap();
+            self.dev.init(Arc::new(Mutex::new(net)));
+        }
     }
 }
 
