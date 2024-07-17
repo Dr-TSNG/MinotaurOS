@@ -113,10 +113,13 @@ pub async fn sys_sendto(
                 let endpoint = IpListenEndpoint::from(addr);
                 socket.bind(endpoint)?;
             }
+            debug!("[sys_sendto] udp socket's local_endpoint.port {}",socket.local_endpoint().port);
             let dest_addr =
                 unsafe { core::slice::from_raw_parts(dest_addr as *const u8, addrlen as usize) };
             socket.connect(dest_addr).await?;
-            fd_impl.file.write(buf).await?
+            let ret = fd_impl.file.write(buf).await?;
+            info!("[sys_sendto ::write] last write OK");
+            ret
         }
         _ => todo!(),
     };
@@ -148,6 +151,7 @@ pub async fn sys_recvfrom(
             Ok(len as usize)
         }
         SocketType::SOCK_DGRAM => {
+            debug!("[sys_recvfrom] udp read begin...");
             let len = fd_impl.file.read(buf).await?;
             if src_addr != 0 {
                 socket.peer_addr(src_addr, addrlen)?;

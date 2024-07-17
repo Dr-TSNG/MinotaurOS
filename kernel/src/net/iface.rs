@@ -268,16 +268,6 @@ impl<'a> NetInterface<'a>{
                 &mut self.sockets_dev.lock().as_mut().unwrap(),
             )
         });
-        /*
-
-        self.device(|inner|{
-            inner.iface.poll(
-                Instant::from_millis(cpu_time().as_millis() as i64),
-                // &mut inner.device,
-                &mut self.sockets_dev.lock().as_mut().unwrap(),
-            )
-        });
-         */
     }
 
     pub fn poll(&self, is_local: bool) {

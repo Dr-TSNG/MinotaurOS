@@ -374,11 +374,14 @@ impl Socket for TcpSocket {
     }
 
     fn dis_connect(&self, how: u32) -> SyscallResult {
-        NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, |socket| match how {
+        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
+            (it.handle_dev, it.handle_loop)
+        });
+        NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| match how {
             SHUT_WR => socket.close(),
             _ => socket.abort(),
         });
-        NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, |socket| match how {
+        NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| match how {
             SHUT_WR => socket.close(),
             _ => socket.abort(),
         });
@@ -394,10 +397,13 @@ impl Socket for TcpSocket {
         self.inner.lock().local_endpoint.clone()
     }
     fn remote_endpoint(&self) -> Option<IpEndpoint> {
+        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
+            (it.handle_dev, it.handle_loop)
+        });
         let loop_remote =
-            NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, |socket| socket.remote_endpoint());
+            NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| socket.remote_endpoint());
         let dev_remote =
-            NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, |socket| socket.remote_endpoint());
+            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| socket.remote_endpoint());
         match loop_remote {
             None => match dev_remote {
                 Some(_) => dev_remote,
@@ -409,11 +415,14 @@ impl Socket for TcpSocket {
 
     fn shutdown(&self, how: u32) -> SyscallResult<()> {
         info!("[TcpSocket::shutdown] how {}", how);
-        NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, |socket| match how {
+        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
+            (it.handle_dev, it.handle_loop)
+        });
+        NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| match how {
             SHUT_WR => socket.close(),
             _ => socket.abort(),
         });
-        NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, |socket| match how {
+        NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| match how {
             SHUT_WR => socket.close(),
             _ => socket.abort(),
         });
@@ -430,19 +439,25 @@ impl Socket for TcpSocket {
     }
 
     fn set_nagle_enabled(&self, enabled: bool) -> SyscallResult<usize> {
-        NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, |socket| {
+        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
+            (it.handle_dev, it.handle_loop)
+        });
+        NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
             socket.set_nagle_enabled(enabled)
         });
-        NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, |socket| socket.set_nagle_enabled(enabled));
+        NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| socket.set_nagle_enabled(enabled));
         Ok(0)
     }
 
     fn set_keep_alive(&self, enabled: bool) -> SyscallResult<usize> {
+        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
+            (it.handle_dev, it.handle_loop)
+        });
         if enabled {
-            NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, |socket| {
+            NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
                 socket.set_keep_alive(Some(Duration::from_secs(1).into()))
             });
-            NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, |socket| {
+            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
                 socket.set_keep_alive(Some(Duration::from_secs(1).into()))
             });
         }
@@ -452,20 +467,25 @@ impl Socket for TcpSocket {
 impl Drop for TcpSocket {
     // 在 TcpSocket 被清除时，我们将它的端口号放回分配器中
     fn drop(&mut self) {
+        /*
         info!(
             "[TcpSocket::drop] drop socket (handle_loop {}, handle_dev {}), localep {:?}",
             self.inner.lock().handle_loop,
             self.inner.lock().handle_dev,
             self.inner.lock().local_endpoint
         );
-        NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, |socket| {
+         */
+        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
+            (it.handle_dev, it.handle_loop)
+        });
+        NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
             info!("[TcpSocket::drop] before state is {:?}", socket.state());
             if socket.is_open() {
                 socket.close();
             }
             info!("[TcpSocket::drop] after state is {:?}", socket.state());
         });
-        NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, |socket| {
+        NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
             info!("[TcpSocket::drop] before state is {:?}", socket.state());
             if socket.is_open() {
                 socket.close();
@@ -473,7 +493,7 @@ impl Drop for TcpSocket {
             info!("[TcpSocket::drop] after state is {:?}", socket.state());
         });
         NET_INTERFACE.poll_all();
-        NET_INTERFACE.remove(self.inner.lock().handle_loop, self.inner.lock().handle_dev);
+        NET_INTERFACE.remove(handle_loop, handle_dev);
         NET_INTERFACE.poll_all();
     }
 }
@@ -515,12 +535,15 @@ impl<'a> Future for TcpAcceptFuture<'a> {
             Poll::Pending
         };
         loop {
+            let (handle_dev, handle_loop) = self.socket.inner.lock().pipe_ref_mut(|it| {
+                (it.handle_dev, it.handle_loop)
+            });
             NET_INTERFACE.poll_all();
-            let ret1 = NET_INTERFACE.handle_tcp_socket_loop(self.socket.inner.lock().handle_loop, poll_func);
+            let ret1 = NET_INTERFACE.handle_tcp_socket_loop(handle_loop, poll_func);
             if ret1.is_ready() {
                 return ret1;
             }
-            let ret2 = NET_INTERFACE.handle_tcp_socket_dev(self.socket.inner.lock().handle_dev, poll_func);
+            let ret2 = NET_INTERFACE.handle_tcp_socket_dev(handle_dev, poll_func);
             if ret2.is_ready() {
                 return ret2;
             }
@@ -550,8 +573,11 @@ impl<'a> Future for TcpRecvFuture<'a> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let is_local = is_local(self.socket.remote_endpoint().unwrap());
         NET_INTERFACE.poll(is_local);
+        let (handle_dev, handle_loop) = self.socket.inner.lock().pipe_ref_mut(|it| {
+            (it.handle_dev, it.handle_loop)
+        });
         let ret = if is_local{
-            NET_INTERFACE.handle_tcp_socket_loop(self.socket.inner.lock().handle_loop,|socket|{
+            NET_INTERFACE.handle_tcp_socket_loop(handle_loop,|socket|{
                 if socket.state() == tcp::State::CloseWait || socket.state() == tcp::State::TimeWait
                 {
                     log::info!("[TcpRecvFuture::poll] state become {:?}", socket.state());
@@ -593,7 +619,7 @@ impl<'a> Future for TcpRecvFuture<'a> {
                 })
             })
         }else{
-            NET_INTERFACE.handle_tcp_socket_dev(self.socket.inner.lock().handle_dev, |socket| {
+            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
                 if socket.state() == tcp::State::CloseWait || socket.state() == tcp::State::TimeWait
                 {
                     log::info!("[TcpRecvFuture::poll] state become {:?}", socket.state());
@@ -655,9 +681,11 @@ impl<'a> Future for TcpSendFuture<'a> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let is_local = is_local(self.socket.remote_endpoint().unwrap());
         NET_INTERFACE.poll(is_local);
-
+        let (handle_dev, handle_loop) = self.socket.inner.lock().pipe_ref_mut(|it| {
+            (it.handle_dev, it.handle_loop)
+        });
         let ret = if is_local {
-            NET_INTERFACE.handle_tcp_socket_loop(self.socket.inner.lock().handle_loop, |socket| {
+            NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
                 if !socket.may_send() {
                     log::info!("[TcpSendFuture::poll] err when send");
                     return Poll::Ready(Err(Errno::ENOTCONN));
@@ -687,7 +715,7 @@ impl<'a> Future for TcpSendFuture<'a> {
                 })
             })
         }else{
-            NET_INTERFACE.handle_tcp_socket_dev(self.socket.inner.lock().handle_dev, |socket| {
+            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
                 if !socket.may_send() {
                     log::info!("[TcpSendFuture::poll] err when send");
                     return Poll::Ready(Err(Errno::ENOTCONN));

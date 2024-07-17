@@ -2,6 +2,7 @@ use alloc::string::ToString;
 use alloc::sync::Arc;
 
 use async_trait::async_trait;
+use log::info;
 use smoltcp::{
     phy::{self, DeviceCapabilities},
     time::Instant,
@@ -14,7 +15,7 @@ use virtio_drivers::{
 };
 
 use crate::arch::VirtAddr;
-use crate::driver::DeviceMeta;
+use crate::driver::{DeviceMeta};
 use crate::driver::virtio::VirtioHal;
 use crate::sync::once::LateInit;
 
@@ -40,12 +41,16 @@ impl super::NetDevice for VirtIONetDevice{
     }
 
     fn init(&self) {
-        unsafe {
-            let header = self.base_addr.as_ptr().cast::<VirtIOHeader>().as_mut().unwrap();
-            let transport = MmioTransport::new(header.into()).unwrap();
-            let netdev = NetDevice::new(transport,BUF_LEN).unwrap();
-            self.dev.init(Arc::new(Mutex::new(netdev)))
-        }
+        let ret  = unsafe {
+            // do not edit this init process , or the console will be blocked in NetDevice::new
+            let vaddr = self.base_addr;
+            let header = &mut *(vaddr.0 as *mut VirtIOHeader);
+            let net = NetDevice::new(MmioTransport::new(header.into()).unwrap(), BUF_LEN)
+                .expect("failed to create net driver");
+            info!("VirtIONetDevice net header init");
+            self.dev.init(Arc::new(Mutex::new(net)))
+        };
+        ret
     }
 }
 
@@ -113,10 +118,11 @@ impl phy::TxToken for VirtioTxToken {
 
 impl VirtIONetDevice {
     pub fn new(base_addr: VirtAddr) -> Self {
-        Self{
+        let ret = Self{
             base_addr,
             metadata: DeviceMeta::new("virtio-net".to_string()),
             dev: LateInit::new(),
-        }
+        };
+        ret
     }
 }

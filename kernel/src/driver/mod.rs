@@ -10,6 +10,7 @@ use fdt_rs::base::DevTree;
 use fdt_rs::error::DevTreeError;
 use fdt_rs::index::{DevTreeIndex, DevTreeIndexNode};
 use fdt_rs::prelude::PropReader;
+use log::info;
 use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 use crate::config::{KERNEL_ADDR_OFFSET, KERNEL_MMIO_BASE};
 use crate::driver::plic::PLIC;
@@ -49,9 +50,11 @@ pub fn temp_init_net_device(){
         }
     }
     let virt: VirtAddr = VirtAddr(unsafe { VIRTIO_NET_ADDR }.unwrap());
-    unsafe { *NET_DEVICE.lock() = Some(VirtIONetDevice::new(virt)); }
-    // 需要找到 qemu net device 的 base_addr
-    // *NET_DEVICE.lock() = Some(VirtIONetDevice::new());
+    let virt_io_dev = VirtIONetDevice::new(virt);
+    // init here , not in init_driver
+    virt_io_dev.init();
+    unsafe { *NET_DEVICE.lock() = Some(virt_io_dev); }
+    info!("ready!!");
 }
 
 pub struct BoardInfo {
