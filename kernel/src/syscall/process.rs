@@ -266,7 +266,7 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
         let limit = match cmd {
             RlimitCmd::RLIMIT_STACK => Rlimit::new(USER_STACK_SIZE, USER_STACK_SIZE),
             RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit.clone(),
-            _ => return Err(Errno::EINVAL),
+            _ => return Ok(0),
         };
         *proc_inner.addr_space.transmute_w::<Rlimit>(old_rlim)?.unwrap() = limit;
     }
@@ -277,7 +277,7 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
         }
         match cmd {
             RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit = limit.clone(),
-            _ => return Err(Errno::EINVAL),
+            _ => return Ok(0),
         };
     }
     Ok(0)
