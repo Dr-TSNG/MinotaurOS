@@ -15,7 +15,6 @@ pub struct DefaultStrategy;
 pub struct IrqStrategy;
 
 pub type Mutex<T> = spin::SpinMutex<T, DefaultStrategy>;
-pub type MutexGuard<'a, T> = spin::SpinMutexGuard<'a, T, DefaultStrategy>;
 pub type IrqMutex<T> = spin::SpinMutex<T, IrqStrategy>;
 pub type ReMutex<T> = reentrant::ReMutex<T, DefaultStrategy>;
 pub type IrqReMutex<T> = reentrant::ReMutex<T, IrqStrategy>;

@@ -1,14 +1,8 @@
-#![allow(unused)]
-
-use alloc::boxed::Box;
-use alloc::string::String;
-use core::future::Future;
-use core::pin::Pin;
 use num_enum::TryFromPrimitive;
-use crate::arch::{PhysPageNum, VirtAddr, VirtPageNum};
 
 pub type SyscallResult<T = ()> = Result<T, Errno>;
 
+#[allow(unused)]
 #[repr(i32)]
 #[derive(TryFromPrimitive, Debug, PartialEq, Copy, Clone)]
 pub enum Errno {

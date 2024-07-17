@@ -2,8 +2,7 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::task::Wake;
 use core::future::Future;
-use core::pin::Pin;
-use core::task::{Context, Poll, Waker};
+use core::task::{Context, Poll};
 
 pub mod ffi;
 pub mod futex;
@@ -14,16 +13,6 @@ struct BlockWaker;
 
 impl Wake for BlockWaker {
     fn wake(self: Arc<Self>) {}
-}
-
-struct TakeWakerFuture;
-
-impl Future for TakeWakerFuture {
-    type Output = Waker;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(cx.waker().clone())
-    }
 }
 
 /// 阻塞当前线程直到 future 执行完成
@@ -41,9 +30,4 @@ pub fn block_on<T>(fut: impl Future<Output=T>) -> T {
             Poll::Pending => continue,
         }
     }
-}
-
-/// 获取当前 async 上下文的 waker
-pub async fn take_waker() -> Waker {
-    TakeWakerFuture.await
 }

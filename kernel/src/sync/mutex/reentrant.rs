@@ -36,11 +36,6 @@ impl<T, S: MutexStrategy> ReMutex<T, S> {
         }
     }
 
-    pub fn is_locked(&self) -> Option<usize> {
-        let owner = self.owner.load(Ordering::Relaxed);
-        (owner != NOBODY).then(|| owner)
-    }
-
     pub fn try_lock(&self) -> Option<ReMutexGuard<T, S>> {
         if self.owner.load(Ordering::Relaxed) == local_hart().id {
             self.lock.set(self.lock.get() + 1);

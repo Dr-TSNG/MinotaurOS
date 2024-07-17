@@ -1,6 +1,5 @@
-use core::{future::Future, task::Poll};
-
 use alloc::vec::Vec;
+use core::{future::Future, task::Poll};
 use core::mem::size_of;
 use core::pin::Pin;
 use core::task::Context;
@@ -10,7 +9,7 @@ use zerocopy::FromBytes;
 use crate::arch::VirtAddr;
 use crate::fs::ffi::{FdSet, PollEvents, PollFd};
 use crate::processor::current_process;
-use crate::result::{Errno, SyscallResult};
+use crate::result::SyscallResult;
 
 #[pin_project]
 pub struct IOMultiplexFuture {
