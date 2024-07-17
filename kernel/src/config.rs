@@ -20,7 +20,7 @@ pub const KERNEL_STACK_SIZE: usize = 1 * MB;
 #[cfg(not(debug_assertions))]
 pub const KERNEL_STACK_SIZE: usize = 256 * KB;
 
-pub const KERNEL_HEAP_SIZE: usize = 32 * MB;
+pub const KERNEL_HEAP_SIZE: usize = 48 * MB;
 pub const USER_STACK_SIZE: usize = 8 * MB;
 pub const USER_HEAP_SIZE: usize = 8 * MB;
 
