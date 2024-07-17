@@ -171,16 +171,20 @@ impl File for UdpSocket {
     }
 
     fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
         info!(
             "[Udp::pollin] (handle_loop {}, handle_dev {}) enter",
-            self.inner.lock().handle_loop, self.inner.lock().handle_dev
+            handle_loop, handle_dev
         );
         let poll_func = |socket: &mut udp::Socket<'_>|{
             if socket.can_recv() {
                 info!(
                     "[Udp::pollin] (handle_loop {}, handle_dev {}) recv buf have item",
-                    self.inner.lock().handle_loop,
-                    self.inner.lock().handle_dev,
+                    handle_loop,
+                    handle_dev,
                 );
                 Ok(true)
             } else {
@@ -191,22 +195,26 @@ impl File for UdpSocket {
             }
         };
         NET_INTERFACE.poll_all();
-        Ok(NET_INTERFACE.handle_udp_socket_loop(self.inner.lock().handle_loop,poll_func)?
-            || NET_INTERFACE.handle_udp_socket_dev(self.inner.lock().handle_dev,poll_func)?)
+        Ok(NET_INTERFACE.handle_udp_socket_loop(handle_loop,poll_func)?
+            || NET_INTERFACE.handle_udp_socket_dev(handle_dev,poll_func)?)
     }
 
     fn pollout(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
         info!(
             "[Udp::pollout] (handle_loop {}, handle_dev {}) enter",
-            self.inner.lock().handle_loop, self.inner.lock().handle_dev
+            handle_loop, handle_dev
         );
         let is_local = is_local(self.remote_endpoint().unwrap());
         let poll_func = |socket: &mut udp::Socket<'_>| {
             if socket.can_send() {
                 info!(
                     "[Udp::pollout] (handle_loop {}, handle_dev {}) tx buf have slots",
-                    self.inner.lock().handle_loop,
-                    self.inner.lock().handle_dev,
+                    handle_loop,
+                    handle_dev,
                 );
                 Ok(true)
             } else {
@@ -218,9 +226,9 @@ impl File for UdpSocket {
         };
         NET_INTERFACE.poll(is_local);
         if is_local {
-            NET_INTERFACE.handle_udp_socket_loop(self.inner.lock().handle_loop, poll_func)
+            NET_INTERFACE.handle_udp_socket_loop(handle_loop, poll_func)
         } else {
-            NET_INTERFACE.handle_udp_socket_dev(self.inner.lock().handle_dev, poll_func)
+            NET_INTERFACE.handle_udp_socket_dev(handle_dev, poll_func)
         }
     }
 }
@@ -228,11 +236,15 @@ impl File for UdpSocket {
 #[async_trait]
 impl Socket for UdpSocket {
     fn bind(&self, addr: IpListenEndpoint) -> SyscallResult {
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
         info!("[Udp::bind] bind to {:?}", addr);
-        NET_INTERFACE.handle_udp_socket_loop(self.inner.lock().handle_loop, |socket| {
+        NET_INTERFACE.handle_udp_socket_loop(handle_loop, |socket| {
             socket.bind(addr).ok().ok_or(Errno::EINVAL)
         })?;
-        NET_INTERFACE.handle_udp_socket_dev(self.inner.lock().handle_dev, |socket| {
+        NET_INTERFACE.handle_udp_socket_dev(handle_dev, |socket| {
             socket.bind(addr).ok().ok_or(Errno::EINVAL)
         })?;
         self.inner.lock().local_endpoint = addr;
@@ -243,6 +255,7 @@ impl Socket for UdpSocket {
         let remote_endpoint = endpoint(addr)?;
         let mut inner = self.inner.lock();
         inner.remote_endpoint = Some(remote_endpoint);
+        drop(inner);
         let is_local = is_local(remote_endpoint);
 
         let poll_func = |socket: &mut udp::Socket<'_>| {
@@ -273,10 +286,6 @@ impl Socket for UdpSocket {
         };
         info!("udp connect");
         info!("is_local: {}",is_local);
-
-        // you can see lots of this dead lock , handle this one by one
-        drop(inner);
-        info!("self.inner is locked?: {}",self.inner.is_locked());
         if is_local{
             NET_INTERFACE.handle_udp_socket_loop(self.inner.lock().handle_loop,poll_func)?;
         }else {
@@ -339,23 +348,30 @@ impl Socket for UdpSocket {
 }
 impl Drop for UdpSocket {
     fn drop(&mut self) {
+        /*
         info!(
             "[UdpSocket::drop] drop socket (handle_loop {}, handle_dev {}), remoteep {:?}",
             self.inner.lock().handle_loop,
             self.inner.lock().handle_dev,
             self.inner.lock().remote_endpoint
         );
-        NET_INTERFACE.handle_udp_socket_loop(self.inner.lock().handle_loop, |socket| {
+         */
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
+        NET_INTERFACE.handle_udp_socket_loop(handle_loop, |socket| {
             if socket.is_open() {
                 socket.close();
             }
         });
-        NET_INTERFACE.handle_udp_socket_dev(self.inner.lock().handle_dev, |socket| {
+        NET_INTERFACE.handle_udp_socket_dev(handle_dev, |socket| {
             if socket.is_open() {
                 socket.close();
             }
         });
-        NET_INTERFACE.remove(self.inner.lock().handle_loop,self.inner.lock().handle_dev);
+        NET_INTERFACE.remove(handle_loop,handle_dev);
+        info!("[udp::drop] ok");
         NET_INTERFACE.poll_all();
     }
 }
@@ -530,6 +546,9 @@ impl<'a> Future for UdpSendFuture<'a> {
                 })
             })
         }else{
+            let inner = self.socket.inner.lock();
+            let remote_endpoint = inner.remote_endpoint;
+            drop(inner);
             NET_INTERFACE.handle_udp_socket_dev(self.socket.inner.lock().handle_dev, |socket| {
                 if !socket.can_send() {
                     info!("[UdpSendFuture::poll] cannot send yet");
@@ -541,7 +560,7 @@ impl<'a> Future for UdpSendFuture<'a> {
                     return Poll::Pending;
                 }
                 info!("[UdpSendFuture::poll] start to send...");
-                let remote = self.socket.inner.lock().remote_endpoint;
+                let remote = remote_endpoint;
                 let this = self.get_mut();
                 let meta = UdpMetadata {
                     endpoint: remote.unwrap(),

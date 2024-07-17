@@ -42,6 +42,21 @@ pub static NET_DEVICE: Mutex<Option<VirtIONetDevice>> = Mutex::new(None);
 // virt-net vrit address , 在设备树识别时更新
 pub static mut VIRTIO_NET_ADDR:Option<usize> = None;
 
+/// 暂时不将net dev加入设备树。
+pub fn temp_init_net_device(){
+    unsafe {
+        if VIRTIO_NET_ADDR == None {
+            panic!("not registered virt-io-net dev when init");
+        }
+    }
+    let virt: VirtAddr = VirtAddr(unsafe { VIRTIO_NET_ADDR }.unwrap());
+    let virt_io_dev = VirtIONetDevice::new(virt);
+    // init here , not in init_driver
+    virt_io_dev.init();
+    unsafe { *NET_DEVICE.lock() = Some(virt_io_dev); }
+    info!("ready!!");
+}
+
 pub struct BoardInfo {
     pub smp: usize,
     pub freq: usize,
@@ -183,6 +198,7 @@ pub fn init_driver() -> SyscallResult<()> {
         }
     }
     BOARD_INFO.plic.init(BOARD_INFO.smp);
+    temp_init_net_device();
     Ok(())
 }
 
@@ -270,6 +286,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     g_mappings.push(mapping);
                 }else if name == "virtio_mmio@10008000"{
                     let reg = parse_reg(&node, addr_cells, size_cells);
+                    mmio_offset = mmio_offset.div_ceil(0x1000)*0x1000;
                     let mapping = GlobalMapping::new(
                         "[virtio_net]".to_string(),
                         PhysAddr(reg[0].0),
@@ -279,7 +296,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     );
                     mmio_offset += reg[0].1;
                     let dev = Arc::new(VirtIONetDevice::new(mapping.virt_start));
-                    DEVICES.write().insert(dev.metadata().dev_id, Device::Net(dev));
+                    // DEVICES.write().insert(dev.metadata().dev_id, Device::Net(dev));
                     println!("[kernel] Register virtio-net device at {:?}", mapping.virt_start);
                     unsafe { VIRTIO_NET_ADDR.replace(mapping.virt_start.0); }
                     g_mappings.push(mapping);

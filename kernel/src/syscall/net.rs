@@ -59,9 +59,11 @@ pub fn sys_listen(sockfd: FdNum, _backlog: u32) -> SyscallResult<usize> {
 
 pub async fn sys_accept(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallResult<usize> {
     info!("[accept] sockfd: {}", sockfd);
-    current_process().inner.lock()
+    let ret = current_process().inner.lock()
         .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?
-        .accept(addr, addrlen).await
+        .accept(addr, addrlen).await;
+    info!("here??");
+    ret
 }
 
 pub async fn sys_connect(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallResult<usize> {
@@ -133,14 +135,14 @@ pub async fn sys_recvfrom(
     src_addr: usize,
     addrlen: usize,
 ) -> SyscallResult<usize> {
+    debug!("[sys_recvfrom] get socket sockfd: {}", sockfd);
+
     let fd_impl = current_process().inner.lock().fd_table.get(sockfd)?;
     // 在此检查buf开始到len长度的内存是不是用户可写的
     let buf = unsafe { core::slice::from_raw_parts_mut(buf as *mut u8, len as usize) };
 
     let proc_inner = current_process().inner.lock();
     let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
-
-    debug!("[sys_recvfrom] get socket sockfd: {}", sockfd);
     drop(proc_inner);
     match socket.socket_type() {
         SocketType::SOCK_STREAM => {

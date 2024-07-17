@@ -130,10 +130,14 @@ impl TcpSocket {
             })
         };
         if ret.is_err() {
+            let inner = self.inner.lock();
+            let handle_loop = inner.handle_loop;
+            let handle_dev = inner.handle_dev;
+            drop(inner);
             log::info!(
                 "[Tcp::connect] (handle_loop {}, handle_dev {}) connect error occur",
-                self.inner.lock().handle_loop,
-                self.inner.lock().handle_dev,
+                handle_loop,
+                handle_dev,
             );
             match ret.err().unwrap() {
                 tcp::ConnectError::Unaddressable => return Err(Errno::EINVAL),
@@ -155,10 +159,14 @@ impl File for TcpSocket {
     }
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
         info!(
             "[Tcp::read] (handle_loop {}, handle_dev {}) enter",
-            self.inner.lock().handle_loop,
-            self.inner.lock().handle_dev,
+            handle_loop,
+            handle_dev,
         );
         let flags = self.metadata.flags.lock();
         match TcpRecvFuture::new(self, buf, *flags).await {
@@ -175,10 +183,14 @@ impl File for TcpSocket {
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
         info!(
             "[Tcp::write] (handle_loop {}, handle_dev {}) enter",
-            self.inner.lock().handle_loop,
-            self.inner.lock().handle_dev
+            handle_loop,
+            handle_dev
         );
         let flags = self.metadata().flags.lock();
         match TcpSendFuture::new(self, buf, *flags).await {
@@ -195,17 +207,21 @@ impl File for TcpSocket {
     }
 
     fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
         info!(
             "[Tcp::pollin] (handle_loop {}, handle_dev {}) enter",
-            self.inner.lock().handle_loop,
-            self.inner.lock().handle_dev
+            handle_loop,
+            handle_dev
         );
         let pool_func = |socket: &mut smoltcp::socket::tcp::Socket<'_>, last_state|{
             if socket.can_recv(){
                 info!(
                     "[Tcp::pollin] (handle_loop {}, handle_dev {}) recv buf have item",
-                    self.inner.lock().handle_loop,
-                    self.inner.lock().handle_dev
+                    handle_loop,
+                    handle_dev
                 );
                 Ok(true)
             }else if socket.state() == tcp::State::CloseWait
@@ -222,12 +238,16 @@ impl File for TcpSocket {
             }
         };
         loop{
+            let inner = self.inner.lock();
+            let last_state_loop = inner.last_state_loop;
+            let last_state_dev = inner.last_state_dev;
+            drop(inner);
             NET_INTERFACE.poll_all();
-            let loop_ret = NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, |socket| {
-                pool_func(socket, self.inner.lock().last_state_loop)
+            let loop_ret = NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
+                pool_func(socket, last_state_loop)
             })?;
-            let dev_ret = NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, |socket| {
-                pool_func(socket, self.inner.lock().last_state_dev)
+            let dev_ret = NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
+                pool_func(socket, last_state_dev)
             })?;
             if loop_ret || dev_ret {
                 return Ok(true);
@@ -236,16 +256,20 @@ impl File for TcpSocket {
     }
 
     fn pollout(&self, waker: Option<Waker>) -> SyscallResult<bool> {
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
         info!(
             "[Tcp::pollout] (handle_loop {}, handle_dev {}) enter",
-            self.inner.lock().handle_loop, self.inner.lock().handle_dev
+            handle_loop, handle_dev
         );
         let is_local = is_local(self.remote_endpoint().unwrap());
         let poll_func = |socket: &mut smoltcp::socket::tcp::Socket<'_>| {
             if socket.can_send() {
                 log::info!(
                     "[Tcp::pollout] (handle_loop {}, handle_dev {}) tx buf have slots",
-                    self.inner.lock().handle_loop, self.inner.lock().handle_dev
+                    handle_loop, handle_dev
                 );
                 Ok(true)
             } else {
@@ -257,9 +281,9 @@ impl File for TcpSocket {
         };
         NET_INTERFACE.poll(is_local);
         if is_local {
-            NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, poll_func)
+            NET_INTERFACE.handle_tcp_socket_loop(handle_loop, poll_func)
         } else {
-            NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, poll_func)
+            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, poll_func)
         }
     }
 }
@@ -333,7 +357,11 @@ impl Socket for TcpSocket {
     }
 
     async fn accept(&self, addr: usize, addrlen: usize) -> SyscallResult<usize> {
-        info!("[tcp] Accept on handle_loop {} handle_dev {}", self.inner.lock().handle_loop,self.inner.lock().handle_dev);
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
+        info!("[tcp] Accept on handle_loop {} handle_dev {}", handle_loop,handle_dev);
         let peer_addr = self.tcp_accept(*self.metadata.flags.lock()).await?;
         debug!("[tcp] Peer address: {:?}", peer_addr);
         let local = self.local_endpoint();
@@ -362,11 +390,14 @@ impl Socket for TcpSocket {
     }
 
     fn set_keep_live(&self, enabled: bool) -> SyscallResult {
+        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
+            (it.handle_dev, it.handle_loop)
+        });
         if enabled {
-            NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, |socket| {
+            NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
                 socket.set_keep_alive(Some(Duration::from_secs(1).into()))
             });
-            NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, |socket| {
+            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
                 socket.set_keep_alive(Some(Duration::from_secs(1).into()))
             });
         }

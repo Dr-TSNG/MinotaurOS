@@ -22,7 +22,7 @@ use crate::sync::once::LateInit;
 
 type Mutex<T> = SpinMutex<T>;
 
-const QUEUE_SIZE: usize = 1 << 10;
+const QUEUE_SIZE: usize = 16;
 const BUF_LEN: usize = 1 << 12;
 
 // Virt-NetIO的驱动
@@ -45,7 +45,7 @@ impl super::NetDevice for VirtIONetDevice{
         unsafe {
             let header = self.base_addr.as_ptr().cast::<VirtIOHeader>().as_mut().unwrap();
             let transport = MmioTransport::new(header.into()).unwrap();
-            let net = NetDevice::new(transport,QUEUE_SIZE).unwrap();
+            let net = NetDevice::new(transport,BUF_LEN).unwrap();
             self.dev.init(Arc::new(Mutex::new(net)));
         }
     }
