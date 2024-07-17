@@ -1,5 +1,4 @@
 use alloc::ffi::CString;
-use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
@@ -7,7 +6,7 @@ use core::time::Duration;
 use log::{debug, info, warn};
 use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
-use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::config::USER_STACK_SIZE;
 use crate::fs::ffi::{AT_FDCWD, InodeMode, OpenFlags, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
@@ -265,7 +264,7 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
     debug!("[prlimit] pid: {}, cmd: {:?}, nrlim: {}, orlim :{}", pid, cmd, new_rlim, old_rlim);
     if old_rlim != 0 {
         let limit = match cmd {
-            RlimitCmd::RLIMIT_STACK => Rlimit::new(USER_STACK_SIZE, USER_STACK_TOP.0),
+            RlimitCmd::RLIMIT_STACK => Rlimit::new(USER_STACK_SIZE, USER_STACK_SIZE),
             RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit.clone(),
             _ => return Err(Errno::EINVAL),
         };

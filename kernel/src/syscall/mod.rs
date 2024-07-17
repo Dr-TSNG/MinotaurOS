@@ -151,6 +151,7 @@ pub enum SyscallCode {
     Execve = 221,
     Mmap = 222,
     Mprotect = 226,
+    Msync = 227,
     Madvise = 233,
     Wait4 = 260,
     Prlimit = 261,
@@ -235,7 +236,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Getrlimit => syscall!(sys_getrlimit, args[0] as u32, args[1]),
         SyscallCode::Setrlimit => syscall!(sys_setrlimit, args[0] as u32, args[1]),
         SyscallCode::Getrusage => syscall!(sys_getrusage, args[0] as i32, args[1]),
-        // SyscallCode::Umask
+        SyscallCode::Umask => syscall!(dummy),
         SyscallCode::GetTimeOfDay => syscall!(sys_gettimeofday, args[0], args[1]),
         SyscallCode::Getpid => syscall!(sys_getpid),
         SyscallCode::Getppid => syscall!(sys_getppid),
@@ -265,6 +266,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Execve => async_syscall!(sys_execve, args[0], args[1], args[2]),
         SyscallCode::Mmap => syscall!(sys_mmap, args[0], args[1], args[2] as u32, args[3] as u32, args[4] as FdNum, args[5]),
         SyscallCode::Mprotect => syscall!(sys_mprotect, args[0], args[1], args[2] as u32),
+        SyscallCode::Msync => syscall!(dummy),
         // SyscallCode::Madvise
         SyscallCode::Wait4 => async_syscall!(sys_wait4, args[0], args[1], args[2] as u32, args[3]),
         SyscallCode::Prlimit => syscall!(sys_prlimit, args[0], args[1] as u32, args[2], args[3]),
