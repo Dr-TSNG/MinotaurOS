@@ -645,14 +645,6 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
 pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
-    // TODO: This hack is for lmbench
-    if path == "/proc/self/exe" {
-        let target = &proc_inner.exe;
-        let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), target.len())?;
-        user_buf.copy_from_slice(target.as_bytes());
-        return Ok(target.len());
-    }
-
     let inode = resolve_path(&proc_inner, dirfd, path, false).await?;
     if inode.metadata().mode != InodeMode::IFLNK {
         return Err(Errno::EINVAL);

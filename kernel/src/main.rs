@@ -81,12 +81,12 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     debug::logger::init();
 
     println!("{}", LOGO);
-    println!("========================================");
-    println!("| boot hart id         | {:13} |", hart_id);
-    println!("| smp                  | {:13} |", BOARD_INFO.smp);
-    println!("| cpu frequency        | {:13} |", BOARD_INFO.freq);
-    println!("| dtb physical address | {:#13x} |", dtb_paddr);
-    println!("----------------------------------------");
+    println!("╔══════════════════════╦═══════════════╗");
+    println!("║ boot hart id         ║ {:13} ║", hart_id);
+    println!("║ smp                  ║ {:13} ║", BOARD_INFO.smp);
+    println!("║ cpu frequency        ║ {:13} ║", BOARD_INFO.freq);
+    println!("║ dtb physical address ║ {:#13x} ║", dtb_paddr);
+    println!("╚══════════════════════╩═══════════════╝");
 
     sched::init();
     trap::init();

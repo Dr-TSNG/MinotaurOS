@@ -1,5 +1,4 @@
 use alloc::ffi::CString;
-use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
@@ -7,7 +6,7 @@ use core::time::Duration;
 use log::{debug, info, warn};
 use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
-use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::config::USER_STACK_SIZE;
 use crate::fs::ffi::{AT_FDCWD, InodeMode, OpenFlags, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
@@ -81,18 +80,21 @@ pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
         }
         _ => vec![pid],
     };
+    let mut handled = false;
     for pid in procs {
         if let Some(process) = monitors.process.get(pid).upgrade() {
-            for thread in process.inner.lock().threads.values() {
-                if let Some(thread) = thread.upgrade() {
-                    thread.recv_signal(signal);
-                    break;
+            handled = true;
+            if signal != Signal::None {
+                for thread in process.inner.lock().threads.values() {
+                    if let Some(thread) = thread.upgrade() {
+                        thread.recv_signal(signal);
+                        break;
+                    }
                 }
             }
-            return Ok(0);
         }
     }
-    Err(Errno::EINVAL)
+    handled.then_some(0).ok_or(Errno::EINVAL)
 }
 
 pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
@@ -239,9 +241,10 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     }
 
     drop(proc_inner);
-    let file = inode.open(OpenFlags::O_RDONLY)?;
+    let file = inode.clone().open(OpenFlags::O_RDONLY)?;
     let elf_data = file.read_all().await?;
-    current_process().execve(path.to_string(), &elf_data, &args_vec, &envs_vec).await
+    // TODO: Here path is incorrect, we should update resolve_path
+    current_process().execve(inode.metadata().path.clone(), &elf_data, &args_vec, &envs_vec).await
 }
 
 pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
@@ -261,7 +264,7 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
     debug!("[prlimit] pid: {}, cmd: {:?}, nrlim: {}, orlim :{}", pid, cmd, new_rlim, old_rlim);
     if old_rlim != 0 {
         let limit = match cmd {
-            RlimitCmd::RLIMIT_STACK => Rlimit::new(USER_STACK_SIZE, USER_STACK_TOP.0),
+            RlimitCmd::RLIMIT_STACK => Rlimit::new(USER_STACK_SIZE, USER_STACK_SIZE),
             RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit.clone(),
             _ => return Err(Errno::EINVAL),
         };
