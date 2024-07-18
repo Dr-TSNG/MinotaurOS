@@ -124,6 +124,7 @@ impl Inode for Ext4Inode {
 #[async_trait]
 impl InodeInternal for Ext4Inode {
     async fn read_direct(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
+        let _guard = self.inner.lock().await;
         let mut file = Ext4File::open(&self.metadata.path, O_RDWR).map_err(i32_to_err)?;
         file.seek(offset as i64, SEEK_SET).map_err(i32_to_err)?;
         let read = file.read(buf).map_err(i32_to_err)?;
@@ -131,6 +132,7 @@ impl InodeInternal for Ext4Inode {
     }
 
     async fn write_direct(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
+        let _guard = self.inner.lock().await;
         let mut file = Ext4File::open(&self.metadata.path, O_RDWR).map_err(i32_to_err)?;
         file.seek(offset as i64, SEEK_SET).map_err(i32_to_err)?;
         let written = file.write(buf).map_err(i32_to_err)?;
@@ -145,6 +147,7 @@ impl InodeInternal for Ext4Inode {
             let buf = vec![0u8; (size - old_size) as usize];
             self.write_direct(&buf, old_size).await?;
         } else {
+            let _guard = self.inner.lock().await;
             let mut file = Ext4File::open(&self.metadata.path, O_RDWR).map_err(i32_to_err)?;
             file.truncate(size as u64).map_err(i32_to_err)?;
         }
@@ -287,6 +290,7 @@ impl InodeInternal for Ext4Inode {
     }
 
     async fn do_readlink(self: Arc<Self>) -> SyscallResult<String> {
+        let _guard = self.inner.lock().await;
         Ext4Dir::readlink(&self.metadata.path).map_err(i32_to_err)
     }
 }

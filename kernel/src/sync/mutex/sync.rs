@@ -4,7 +4,10 @@ use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll};
+use core::time::Duration;
 use futures::task::AtomicWaker;
+use crate::sched::time::cpu_time;
+use crate::sched::timer::sched_timer;
 use crate::sync::mutex::MutexStrategy;
 
 pub struct AsyncMutex<T: ?Sized, S: MutexStrategy> {
@@ -38,10 +41,11 @@ impl<T, S: MutexStrategy> AsyncMutex<T, S> {
     }
 
     pub async fn lock(&self) -> AsyncMutexGuard<T, S> {
-        poll_fn(|cx| self.poll_lock(cx)).await
+        let start_time = cpu_time();
+        poll_fn(|cx| self.poll_lock(cx, start_time)).await
     }
 
-    fn poll_lock(&self, cx: &Context<'_>) -> Poll<AsyncMutexGuard<T, S>> {
+    fn poll_lock(&self, cx: &Context<'_>, start_time: Duration) -> Poll<AsyncMutexGuard<T, S>> {
         let guard = S::new_guard();
         if self.lock.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
             return Poll::Ready(AsyncMutexGuard {
@@ -59,10 +63,13 @@ impl<T, S: MutexStrategy> AsyncMutex<T, S> {
             });
         }
 
+        if cpu_time() - start_time > Duration::from_secs(5) {
+            panic!("AsyncMutex deadlock");
+        }
+        sched_timer(start_time + Duration::from_secs(5), cx.waker().clone());
         Poll::Pending
     }
 }
-
 
 impl<T: ?Sized + Default, S: MutexStrategy> Default for AsyncMutex<T, S> {
     fn default() -> Self {

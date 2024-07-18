@@ -234,13 +234,13 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     if !envs_vec.iter().any(|s| s.to_str().unwrap().contains("LD_LIBRARY_PATH=")) {
         envs_vec.push(CString::new("LD_LIBRARY_PATH=/:/lib").unwrap());
     }
+    drop(proc_inner);
 
-    let inode = resolve_path(&proc_inner, AT_FDCWD, path, true).await?;
+    let inode = resolve_path(AT_FDCWD, path, true).await?;
     if inode.metadata().mode == InodeMode::IFDIR {
         return Err(Errno::EISDIR);
     }
 
-    drop(proc_inner);
     let file = inode.clone().open(OpenFlags::O_RDONLY)?;
     let elf_data = file.read_all().await?;
     // TODO: Here path is incorrect, we should update resolve_path
