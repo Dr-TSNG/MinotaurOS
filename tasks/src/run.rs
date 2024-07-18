@@ -14,7 +14,7 @@ pub struct RunConfig {
     pub mem: String,
     #[clap(long, default_value = "prebuilts/rustsbi-qemu.bin")]
     pub bios: String,
-    #[clap(long, default_value = "prebuilts/disk.img")]
+    #[clap(long, default_value = "prebuilts/sdcard.img")]
     pub disk: String,
     #[clap(long)]
     pub features: Vec<String>,
@@ -39,6 +39,8 @@ pub fn run(config: &RunConfig) -> Result<()> {
         .arg("-m").arg(&config.mem)
         .arg("-drive").arg(format!("file={},if=none,format=raw,id=x0", &config.disk))
         .arg("-device").arg("virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0")
+        .arg("-device").arg("virtio-net-device,netdev=net")
+        .arg("-netdev").arg("user,id=net")
         .spawn()?.wait()?
         .exit_ok()?;
     Ok(())

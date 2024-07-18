@@ -249,7 +249,7 @@ impl<'a> NetInterface<'a>{
     }
 
     fn poll_loopback(&self) {
-        info!("[NetInterface::poll] poll loopback...");
+        // info!("[NetInterface::poll] poll loopback...");
         self.loopback(|inner| {
             inner.iface.poll(
                 Instant::from_millis(cpu_time().as_millis() as i64),
@@ -260,7 +260,7 @@ impl<'a> NetInterface<'a>{
     }
 
     fn poll_device(&self) {
-        info!("[NetInterface::poll] poll device...");
+        // info!("[NetInterface::poll] poll device...");
         self.device(|inner|{
             inner.iface.poll(
                 Instant::from_millis(cpu_time().as_millis() as i64),
@@ -282,6 +282,7 @@ impl<'a> NetInterface<'a>{
         self.poll_loopback();
         self.poll_device();
     }
+
 
     pub fn remove(&self, handler_loop: SocketHandle, handler_dev: SocketHandle) {
         self.sockets_loop_back

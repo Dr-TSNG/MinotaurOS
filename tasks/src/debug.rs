@@ -45,6 +45,8 @@ fn debug_server(config: &RunConfig) -> Result<()> {
         .arg("-m").arg(&config.mem)
         .arg("-drive").arg(format!("file={},if=none,format=raw,id=x0", &config.disk))
         .arg("-device").arg("virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0")
+        .arg("-device").arg("virtio-net-device,netdev=net")
+        .arg("-netdev").arg("user,id=net")
         .arg("-s").arg("-S")
         .spawn()?.wait()?;
     Ok(())

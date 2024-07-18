@@ -144,7 +144,7 @@ impl File for UdpSocket {
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         info!("Entry udp write");
-        info!("[Udp::inner locked? {}]",self.inner.is_locked());
+        // info!("[Udp::inner locked? {}]",self.inner.is_locked());
         {
             /*
             info!(
@@ -286,6 +286,7 @@ impl Socket for UdpSocket {
         };
         info!("udp connect");
         info!("is_local: {}",is_local);
+        info!("udp connect to : {} ... ", remote_endpoint);
         if is_local{
             NET_INTERFACE.handle_udp_socket_loop(self.inner.lock().handle_loop,poll_func)?;
         }else {

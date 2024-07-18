@@ -25,7 +25,7 @@ const SO_KEEPALIVE: u32 = 9;
 
 pub fn sys_socket(domain: u32, socket_type: u32, protocol: u32) -> SyscallResult<usize> {
     let sockfd = <dyn Socket>::alloc(domain, socket_type)?;
-    info!("[socket] new sockfd: {}", sockfd);
+    info!("[sys_socket] new sockfd: {}", sockfd);
     Ok(sockfd)
 }
 
@@ -34,7 +34,7 @@ pub fn sys_bind(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallResult<usize
     let addr_buf = proc_inner.addr_space.user_slice_r(VirtAddr(addr), addrlen as usize)?;
     let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
     let endpoint = listen_endpoint(addr_buf)?;
-    info!("[bind] sockfd: {}, ep: {}", sockfd, endpoint);
+    info!("[sys_bind] sockfd: {}, ep: {}", sockfd, endpoint);
     match socket.socket_type() {
         SocketType::SOCK_STREAM => socket.bind(endpoint)?,
         SocketType::SOCK_DGRAM => {
@@ -50,7 +50,7 @@ pub fn sys_bind(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallResult<usize
 }
 
 pub fn sys_listen(sockfd: FdNum, _backlog: u32) -> SyscallResult<usize> {
-    info!("[listen] sockfd: {}", sockfd);
+    info!("[sys_listen] sockfd: {}", sockfd);
     current_process().inner.lock()
         .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?
         .listen()?;
@@ -58,7 +58,7 @@ pub fn sys_listen(sockfd: FdNum, _backlog: u32) -> SyscallResult<usize> {
 }
 
 pub async fn sys_accept(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallResult<usize> {
-    info!("[accept] sockfd: {}", sockfd);
+    info!("[sys_accept] sockfd: {}", sockfd);
     let ret = current_process().inner.lock()
         .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?
         .accept(addr, addrlen).await;
@@ -67,7 +67,7 @@ pub async fn sys_accept(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallRe
 }
 
 pub async fn sys_connect(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallResult<usize> {
-    // 需要检查一下addr到addr+addrlen是不是用户可读
+    info!("[sys_connect] sockfd: {}",sockfd);
     let addr_buf = unsafe { core::slice::from_raw_parts(addr as *const u8, addrlen as usize) };
     let socket = current_process().inner.lock()
         .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
@@ -95,14 +95,14 @@ pub async fn sys_sendto(
     dest_addr: usize,
     addrlen: u32,
 ) -> SyscallResult<usize> {
-
+    info!("[sys_sendto] get socket sockfd: {}", sockfd);
     let fd_impl = current_process().inner.lock().fd_table.get(sockfd)?;
     // 在此检查buf开始到len长度的内存是不是用户可读的
     let buf = unsafe { core::slice::from_raw_parts(buf as *const u8, len) };
 
     let proc_inner = current_process().inner.lock();
     let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
-    debug!("[sys_sendto] get socket sockfd: {}", sockfd);
+    // debug!("[sys_sendto] get socket sockfd: {}", sockfd);
     drop(proc_inner);
 
     let len = match socket.socket_type() {
@@ -135,7 +135,7 @@ pub async fn sys_recvfrom(
     src_addr: usize,
     addrlen: usize,
 ) -> SyscallResult<usize> {
-    debug!("[sys_recvfrom] get socket sockfd: {}", sockfd);
+    info!("[sys_recvfrom] get socket sockfd: {}", sockfd);
 
     let fd_impl = current_process().inner.lock().fd_table.get(sockfd)?;
     // 在此检查buf开始到len长度的内存是不是用户可写的
@@ -171,6 +171,7 @@ pub fn sys_getsockopt(
     optval_ptr: usize,
     optlen: usize,
 ) -> SyscallResult<usize> {
+    info!("[sys_getsocket] sockfd: {}",sockfd);
     match (level, optname) {
         (SOL_TCP, TCP_MAXSEG) => {
             let len = size_of::<u32>();
@@ -234,6 +235,7 @@ pub fn sys_setsockopt(
     optval_ptr: usize,
     optlen: u32,
 ) -> SyscallResult<usize> {
+    info!("[sys_setsocket] socketfd: {}",sockfd);
     /*
     let socket = current_process()
         .inner_handler(move |proc| proc.socket_table.get_ref(sockfd).cloned())

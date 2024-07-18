@@ -233,7 +233,7 @@ impl File for TcpSocket {
                 info!("[Tcp::pollin] state become {:?}", socket.state());
                 Ok(true)
             }else {
-                log::info!("[Tcp::pollin] nothing to read, state {:?}", socket.state());
+                // log::info!("[Tcp::pollin] nothing to read, state {:?}", socket.state());
                 Ok(false)
             }
         };
@@ -242,6 +242,7 @@ impl File for TcpSocket {
             let last_state_loop = inner.last_state_loop;
             let last_state_dev = inner.last_state_dev;
             drop(inner);
+            // info!("[Tcp::pollin] poll all...");
             NET_INTERFACE.poll_all();
             let loop_ret = NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
                 pool_func(socket, last_state_loop)
@@ -498,6 +499,7 @@ impl Socket for TcpSocket {
 impl Drop for TcpSocket {
     // 在 TcpSocket 被清除时，我们将它的端口号放回分配器中
     fn drop(&mut self) {
+        info!("[TcpSocket::Drop] ...");
         /*
         info!(
             "[TcpSocket::drop] drop socket (handle_loop {}, handle_dev {}), localep {:?}",
