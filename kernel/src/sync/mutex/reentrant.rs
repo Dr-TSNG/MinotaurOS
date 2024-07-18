@@ -59,12 +59,14 @@ impl<T, S: MutexStrategy> ReMutex<T, S> {
     pub fn lock(&self) -> ReMutexGuard<T, S> {
         let start_time = cpu_time();
         loop {
-            if let Some(guard) = self.try_lock() {
+            let locked = self.locked_by();
+            if locked != NOBODY && locked != local_hart().id {
+                core::hint::spin_loop();
+                if cpu_time() - start_time > Duration::from_secs(15) {
+                    panic!("ReMutex deadlock");
+                }
+            } else if let Some(guard) = self.try_lock() {
                 return guard;
-            }
-            core::hint::spin_loop();
-            if cpu_time() - start_time > Duration::from_secs(5) {
-                panic!("ReMutex deadlock");
             }
         }
     }

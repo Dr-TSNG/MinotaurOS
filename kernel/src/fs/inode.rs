@@ -232,8 +232,10 @@ impl dyn Inode {
         if self.metadata().mode != InodeMode::IFDIR {
             return Err(Errno::ENOTDIR);
         }
-        match self.metadata().inner.lock().mounts.get(name) {
-            Some(inode) => Ok(inode.clone()),
+        // 这里不能放到 match 里面，否则锁会被延后释放
+        let inode = self.metadata().inner.lock().mounts.get(name).cloned();
+        match inode {
+            Some(inode) => Ok(inode),
             None => self.clone().do_lookup_name(name).await,
         }
     }
@@ -244,10 +246,7 @@ impl dyn Inode {
         }
         self.clone().do_lookup_idx(idx).await.map(|inode| {
             let name = &self.metadata().name;
-            match self.metadata().inner.lock().mounts.get(name) {
-                Some(mount) => mount.clone(),
-                None => inode,
-            }
+            self.metadata().inner.lock().mounts.get(name).cloned().unwrap_or(inode)
         })
     }
 
