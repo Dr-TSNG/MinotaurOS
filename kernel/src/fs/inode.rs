@@ -1,8 +1,7 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::sync::{Arc, Weak};
-use core::any::Any;
 use async_trait::async_trait;
 use downcast_rs::{DowncastSync, impl_downcast};
 use crate::fs::ffi::{InodeMode, OpenFlags};
@@ -47,23 +46,8 @@ pub struct InodeMetaInner {
     pub ctime: TimeSpec,
     /// 文件大小
     pub size: isize,
-    /// 是否加载了子目录
-    pub children_loaded: bool,
-    /// 子目录
-    pub children: BTreeMap<String, InodeChild>,
     /// 挂载点
     pub mounts: BTreeMap<String, Arc<dyn Inode>>,
-}
-
-pub struct InodeChild {
-    pub inode: Arc<dyn Inode>,
-    pub ext: Box<dyn Any + Send + Sync>,
-}
-
-impl InodeChild {
-    pub(crate) fn new(inode: Arc<dyn Inode>, ext: Box<dyn Any + Send + Sync>) -> Self {
-        Self { inode, ext }
-    }
 }
 
 impl InodeMeta {
@@ -91,8 +75,6 @@ impl InodeMeta {
             mtime,
             ctime,
             size,
-            children_loaded: false,
-            children: BTreeMap::new(),
             mounts: BTreeMap::new(),
         };
         let parent = parent.map(|parent| Arc::downgrade(&parent));
@@ -136,11 +118,19 @@ pub(super) trait InodeInternal {
         Err(Errno::EPERM)
     }
 
-    /// 加载子目录
-    async fn load_children(
+    /// 查询目录项
+    async fn do_lookup_name(
         self: Arc<Self>,
-        inner: &mut InodeMetaInner,
-    ) -> SyscallResult {
+        name: &str,
+    ) -> SyscallResult<Arc<dyn Inode>> {
+        Err(Errno::EPERM)
+    }
+
+    /// 查询目录项
+    async fn do_lookup_idx(
+        self: Arc<Self>,
+        idx: usize,
+    ) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
 
@@ -149,7 +139,16 @@ pub(super) trait InodeInternal {
         self: Arc<Self>,
         mode: InodeMode,
         name: &str,
-    ) -> SyscallResult<InodeChild> {
+    ) -> SyscallResult<Arc<dyn Inode>> {
+        Err(Errno::EPERM)
+    }
+
+    /// 在当前目录下创建符号链接
+    async fn do_symlink(
+        self: Arc<Self>,
+        name: &str,
+        target: &str,
+    ) -> SyscallResult {
         Err(Errno::EPERM)
     }
 
@@ -158,14 +157,14 @@ pub(super) trait InodeInternal {
         self: Arc<Self>,
         name: &str,
         inode: Arc<dyn Inode>,
-    ) -> SyscallResult<InodeChild> {
+    ) -> SyscallResult {
         Err(Errno::EPERM)
     }
 
     /// 在当前目录下删除文件
     async fn do_unlink(
         self: Arc<Self>,
-        target: &InodeChild,
+        target: Arc<dyn Inode>,
     ) -> SyscallResult {
         Err(Errno::EPERM)
     }
@@ -233,64 +232,55 @@ impl dyn Inode {
         if self.metadata().mode != InodeMode::IFDIR {
             return Err(Errno::ENOTDIR);
         }
-        let mut inner = self.metadata().inner.lock();
-        if !inner.children_loaded {
-            self.clone().load_children(&mut inner).await?;
-        }
-        let mount = inner.mounts.get(name).map(Arc::clone);
-        match mount {
-            Some(inode) => Ok(inode),
-            None => inner.children.get(name).map(|child| child.inode.clone()).ok_or(Errno::ENOENT),
+        match self.metadata().inner.lock().mounts.get(name) {
+            Some(inode) => Ok(inode.clone()),
+            None => self.clone().do_lookup_name(name).await,
         }
     }
 
     pub async fn lookup_idx(self: Arc<Self>, idx: usize) -> SyscallResult<Arc<dyn Inode>> {
-        let mut inner = self.metadata().inner.lock();
-        if !inner.children_loaded {
-            self.clone().load_children(&mut inner).await?;
+        if self.metadata().mode != InodeMode::IFDIR {
+            return Err(Errno::ENOTDIR);
         }
-        inner.children.values().nth(idx).map(|child| child.inode.clone()).ok_or(Errno::ENOENT)
+        self.clone().do_lookup_idx(idx).await.map(|inode| {
+            let name = &self.metadata().name;
+            match self.metadata().inner.lock().mounts.get(name) {
+                Some(mount) => mount.clone(),
+                None => inode,
+            }
+        })
     }
 
     pub async fn create(self: Arc<Self>, mode: InodeMode, name: &str) -> SyscallResult<Arc<dyn Inode>> {
-        let mut inner = self.metadata().inner.lock();
-        if !inner.children_loaded {
-            self.clone().load_children(&mut inner).await?;
+        if self.metadata().mode != InodeMode::IFDIR {
+            return Err(Errno::ENOTDIR);
         }
-        if inner.children.contains_key(name) {
-            return Err(Errno::EEXIST);
+        self.do_create(mode, name).await
+    }
+
+    pub async fn symlink(self: Arc<Self>, name: &str, target: &str) -> SyscallResult {
+        if self.metadata().mode != InodeMode::IFDIR {
+            return Err(Errno::ENOTDIR);
         }
-        let child = self.clone().do_create(mode, name).await?;
-        let inode = child.inode.clone();
-        inner.children.insert(name.to_string(), child);
-        Ok(inode)
+        self.do_symlink(name, target).await
     }
 
     pub async fn movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>) -> SyscallResult {
-        let mut inner = self.metadata().inner.lock();
-        if !inner.children_loaded {
-            self.clone().load_children(&mut inner).await?;
+        if self.metadata().mode != InodeMode::IFDIR {
+            return Err(Errno::ENOTDIR);
         }
-        if inner.children.contains_key(name) {
-            return Err(Errno::EEXIST);
-        }
-        let child = self.clone().do_movein(name, inode).await?;
-        inner.children.insert(child.inode.metadata().name.clone(), child);
-        Ok(())
+        self.do_movein(name, inode).await
     }
 
-    pub async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult<()> {
-        let mut inner = self.metadata().inner.lock();
-        if !inner.children_loaded {
-            self.clone().load_children(&mut inner).await?;
+    pub async fn unlink(self: Arc<Self>, name: &str) -> SyscallResult {
+        if self.metadata().inner.lock().mounts.get(name).is_some() {
+            return Err(Errno::EBUSY);
         }
-        let child = inner.children.get(name).ok_or(Errno::ENOENT)?;
-        if let Some(page_cache) = &child.inode.metadata().page_cache {
+        let inode = self.clone().lookup_name(name).await?;
+        if let Some(page_cache) = &inode.metadata().page_cache {
             page_cache.set_deleted();
         }
-        self.clone().do_unlink(child).await?;
-        inner.children.remove(name);
-        Ok(())
+        self.do_unlink(inode).await
     }
 
     pub async fn readlink(self: Arc<Self>) -> SyscallResult<String> {

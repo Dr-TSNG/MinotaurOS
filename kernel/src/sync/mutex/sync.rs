@@ -37,10 +37,6 @@ impl<T, S: MutexStrategy> AsyncMutex<T, S> {
         }
     }
 
-    pub fn is_locked(&self) -> bool {
-        self.lock.load(Ordering::Relaxed)
-    }
-
     pub async fn lock(&self) -> AsyncMutexGuard<T, S> {
         poll_fn(|cx| self.poll_lock(cx)).await
     }

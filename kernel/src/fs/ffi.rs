@@ -1,9 +1,9 @@
 use core::mem::size_of;
 use bitflags::bitflags;
-use bytemuck::{Pod, Zeroable};
 use lazy_static::lazy_static;
 use num_enum::TryFromPrimitive;
-use zerocopy::{AsBytes, FromZeroes};
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use crate::fs::fd::FdNum;
 use crate::sched::ffi::TimeSpec;
 
 bitflags! {
@@ -249,18 +249,20 @@ pub struct KernelStatfs {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+#[derive(Debug, Copy, Clone, AsBytes, FromZeroes, FromBytes)]
 pub struct PollFd {
     /// Fd
-    pub fd: i32,
+    pub fd: FdNum,
     /// Requested events
-    pub events: i16,
+    pub events: PollEvents,
     /// Returned events
-    pub revents: i16,
+    pub revents: PollEvents,
 }
 
 bitflags! {
     /// Poll events
+    #[repr(C)]
+    #[derive(AsBytes, FromZeroes, FromBytes)]
     pub struct PollEvents: i16 {
         /// There is data to read
         const POLLIN = 1 << 0;
@@ -282,7 +284,7 @@ pub const FD_SET_SIZE: usize = 1024;
 pub const FD_SET_LEN: usize = FD_SET_SIZE / (8 * size_of::<usize>());
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+#[derive(Debug, Copy, Clone, AsBytes, FromZeroes, FromBytes)]
 pub struct FdSet {
     pub fds_bits: [usize; FD_SET_LEN],
 }

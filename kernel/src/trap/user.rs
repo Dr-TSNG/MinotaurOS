@@ -9,7 +9,7 @@ use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::result::Errno;
 use crate::sched::time::set_next_trigger;
 use crate::sched::yield_now;
-use crate::signal::ffi::{Signal, UContext};
+use crate::signal::ffi::{SigActionFlags, Signal, UContext};
 use crate::signal::SignalHandler;
 use crate::syscall::syscall;
 use crate::trap::{__restore_to_user, set_kernel_trap_entry, set_user_trap_entry};
@@ -67,7 +67,7 @@ pub async fn trap_from_user() {
         }
         _ => {
             error!("Unhandled trap: {:?}", trap);
-            current_thread().terminate(-1);
+            current_thread().recv_signal(Signal::SIGSEGV);
         }
     }
 }
@@ -94,10 +94,10 @@ pub fn check_signal() {
                 trap_ctx.set_sp(user_sp.0);
                 trap_ctx.user_x[10] = poll.signal as usize;
                 trap_ctx.user_x[12] = user_sp.0;
-                trap_ctx.user_x[1] = match sig_action.sa_restorer {
-                    0 => TRAMPOLINE_BASE.0,
-                    _ => sig_action.sa_restorer,
-                }
+                trap_ctx.user_x[1] = match sig_action.sa_flags.contains(SigActionFlags::SA_RESTORER) {
+                    true => sig_action.sa_restorer,
+                    false => TRAMPOLINE_BASE.0,
+                };
             }
         }
     }
@@ -117,4 +117,19 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
             current_thread().recv_signal(Signal::SIGSEGV);
         }
     }
+}
+
+pub fn dump_tombstone(signal: Signal) {
+    if signal != Signal::SIGSEGV {
+        return;
+    }
+    error!("═════ Thread {} terminated with signal {:?} ═════", current_thread().tid.0, signal);
+    error!("Registers:");
+    let ctx = current_trap_ctx();
+    error!("  pc: {:#x}", ctx.get_pc());
+    error!("  sp: {:#x}", ctx.get_sp());
+    error!("  ra: {:#x}", ctx.user_x[1]);
+    error!("Backtrace:");
+    error!("todo");
+    error!("═════ End of stack trace ═════");
 }

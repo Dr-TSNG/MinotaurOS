@@ -47,7 +47,7 @@ use crate::config::{KERNEL_PADDR_BASE, KERNEL_STACK_SIZE, LINKAGE_EBSS, LINKAGE_
 use crate::debug::console::dmesg_flush_tty;
 use crate::driver::BOARD_INFO;
 use crate::fs::page_cache::PageCache;
-use crate::process::monitor::PROCESS_MONITOR;
+use crate::process::monitor::MONITORS;
 use crate::process::Process;
 use crate::processor::hart;
 use crate::processor::hart::{KERNEL_STACK, local_hart};
@@ -81,12 +81,12 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     debug::logger::init();
 
     println!("{}", LOGO);
-    println!("========================================");
-    println!("| boot hart id         | {:13} |", hart_id);
-    println!("| smp                  | {:13} |", BOARD_INFO.smp);
-    println!("| cpu frequency        | {:13} |", BOARD_INFO.freq);
-    println!("| dtb physical address | {:#13x} |", dtb_paddr);
-    println!("----------------------------------------");
+    println!("╔══════════════════════╦═══════════════╗");
+    println!("║ boot hart id         ║ {:13} ║", hart_id);
+    println!("║ smp                  ║ {:13} ║", BOARD_INFO.smp);
+    println!("║ cpu frequency        ║ {:13} ║", BOARD_INFO.freq);
+    println!("║ dtb physical address ║ {:#13x} ║", dtb_paddr);
+    println!("╚══════════════════════╩═══════════════╝");
 
     sched::init();
     trap::init();
@@ -173,7 +173,7 @@ fn monitor() -> Duration {
     let pc_alloc = PageCache::allocated();
     println!(
         "[monitor] procs {}, pc_holder {}, pc_alloc {}",
-        PROCESS_MONITOR.lock().count(), pc_holder, pc_alloc,
+        MONITORS.lock().process.count(), pc_holder, pc_alloc,
     );
     cpu_time() + Duration::from_secs(1)
 }

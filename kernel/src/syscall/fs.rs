@@ -19,7 +19,7 @@ use crate::fs::pipe::Pipe;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::{TimeSpec, UTIME_NOW, UTIME_OMIT};
+use crate::sched::ffi::{TimeSpec, TimeVal, UTIME_NOW, UTIME_OMIT};
 use crate::sched::iomultiplex::{FdSetRWE, IOFormat, IOMultiplexFuture};
 use crate::sched::time::{real_time, TimeoutFuture, TimeoutResult};
 use crate::signal::ffi::SigSet;
@@ -108,7 +108,7 @@ pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4
 
 pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     debug!("[mkdirat] fd: {}, path: {:?}, mode: {:?}", dirfd, path, mode);
     let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
     let inode = resolve_path(&mut proc_inner, dirfd, &parent, true).await?;
@@ -124,10 +124,7 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
         return Err(Errno::EINVAL);
     }
     let proc_inner = current_process().inner.lock();
-    let mut path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let mut path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     debug!("[unlinkat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
 
     // TODO: This hack is just for libctest
@@ -151,6 +148,20 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
         }
     }
     parent.unlink(&name).await?;
+    Ok(0)
+}
+
+pub async fn sys_symlinkat(target: usize, dirfd: FdNum, linkpath: usize) -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    let target = proc_inner.addr_space.transmute_str(target, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let linkpath = proc_inner.addr_space.transmute_str(linkpath, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    debug!("[symlinkat] target: {}, dirfd: {}, linkpath: {}", target, dirfd, linkpath);
+    let (parent, name) = split_last_path(linkpath).ok_or(Errno::EINVAL)?;
+    let inode = resolve_path(&proc_inner, dirfd, &parent, true).await?;
+    if inode.metadata().mode != InodeMode::IFDIR {
+        return Err(Errno::ENOTDIR);
+    }
+    inode.symlink(&name, target).await?;
     Ok(0)
 }
 
@@ -194,7 +205,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
 
 pub async fn sys_statfs(path: usize, buf: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let inode = resolve_path(&mut proc_inner, AT_FDCWD, path, true).await?;
     let fs = inode.file_system().upgrade().ok_or(Errno::ENODEV)?;
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStatfs>())?;
@@ -247,17 +258,14 @@ pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
 
 pub async fn sys_faccessat(fd: FdNum, path: usize, _mode: u32, _flags: u32) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     resolve_path(&proc_inner, fd, path, false).await?;
     Ok(0)
 }
 
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     resolve_path(&mut proc_inner, AT_FDCWD, path, true).await?;
     proc_inner.cwd = path.to_string();
     Ok(0)
@@ -266,10 +274,7 @@ pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
 pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> SyscallResult<usize> {
     let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     let mut proc_inner = current_process().inner.lock();
-    let mut path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let mut path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     debug!("[openat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
 
     // TODO: This hack is just for libctest
@@ -286,12 +291,14 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
         }
         Err(e) => return Err(e),
     };
-    let file = inode.open(flags - OpenFlags::O_CLOEXEC)?;
-    if flags.contains(OpenFlags::O_TRUNC) {
-        file.truncate(0).await?;
-    }
-    if flags.contains(OpenFlags::O_APPEND) {
-        file.seek(Seek::End(0)).await?;
+    let file = inode.clone().open(flags - OpenFlags::O_CLOEXEC)?;
+    if inode.metadata().mode == InodeMode::IFREG {
+        if flags.contains(OpenFlags::O_TRUNC) {
+            file.truncate(0).await?;
+        }
+        if flags.contains(OpenFlags::O_APPEND) {
+            file.seek(Seek::End(0)).await?;
+        }
     }
     let fd_impl = FileDescriptor::new(file, flags.contains(OpenFlags::O_CLOEXEC));
     let fd = proc_inner.fd_table.put(fd_impl, 0)?;
@@ -486,7 +493,7 @@ pub async fn sys_sendfile(out_fd: FdNum, in_fd: FdNum, offset: usize, count: usi
 pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let slice = proc_inner.addr_space.user_slice_w(VirtAddr(ufds), size_of::<PollFd>() * nfds)?;
-    let fds = bytemuck::cast_slice(slice).to_vec();
+    let fds = PollFd::slice_from(slice).unwrap().to_vec();
     let timeout = match timeout {
         0 => None,
         _ => {
@@ -499,8 +506,8 @@ pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize)
         0 => None,
         _ => {
             let sigmask = proc_inner.addr_space.user_slice_r(VirtAddr(sigmask), size_of::<SigSet>())?;
-            let sigmask = unsafe { sigmask.as_ptr().cast::<SigSet>().read() };
-            Some(sigmask)
+            let sigmask = SigSet::ref_from(sigmask).unwrap();
+            Some(*sigmask)
         }
     };
     drop(proc_inner);
@@ -530,47 +537,14 @@ pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize)
 
 pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfds: usize, timeout: usize, sigmask: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let mut rfds = match readfds {
-        0 => None,
-        _ => {
-            let readfds = proc_inner.addr_space.user_slice_w(VirtAddr(readfds), size_of::<FdSet>())?;
-            Some(unsafe { &mut *(readfds.as_mut_ptr() as *mut FdSet) })
-        }
-    };
-    let mut wfds = match writefds {
-        0 => None,
-        _ => {
-            let writefds = proc_inner.addr_space.user_slice_w(VirtAddr(writefds), size_of::<FdSet>())?;
-            Some(unsafe { &mut *(writefds.as_mut_ptr() as *mut FdSet) })
-        }
-    };
-    let mut efds = match exceptfds {
-        0 => None,
-        _ => {
-            let exceptfds = proc_inner.addr_space.user_slice_w(VirtAddr(readfds), size_of::<FdSet>())?;
-            Some(unsafe { &mut *(exceptfds.as_mut_ptr() as *mut FdSet) })
-        }
-    };
-
-    let timeout = match timeout {
-        0 => None,
-        _ => {
-            let timeout = proc_inner.addr_space.user_slice_r(VirtAddr(timeout), size_of::<TimeSpec>())?;
-            let timeout = TimeSpec::ref_from(timeout).unwrap();
-            Some(Duration::from(*timeout))
-        }
-    };
-    let sigmask = match sigmask {
-        0 => None,
-        _ => {
-            let sigmask = proc_inner.addr_space.user_slice_r(VirtAddr(sigmask), size_of::<SigSet>())?;
-            let sigmask = unsafe { sigmask.as_ptr().cast::<SigSet>().read() };
-            Some(sigmask)
-        }
-    };
+    let rfds = proc_inner.addr_space.transmute_w::<FdSet>(readfds)?;
+    let wfds = proc_inner.addr_space.transmute_w::<FdSet>(writefds)?;
+    let efds = proc_inner.addr_space.transmute_w::<FdSet>(exceptfds)?;
+    let timeout = proc_inner.addr_space.transmute_r::<TimeVal>(timeout)?.cloned().map(Duration::from);
+    let sigmask = proc_inner.addr_space.transmute_r::<SigSet>(sigmask)?.cloned();
     debug!(
         "[sys_pselect]: readfds {:?}, writefds {:?}, exceptfds {:?}, timeout {:?}",
-        rfds, wfds, efds, timeout
+        rfds, wfds, efds, timeout,
     );
     let fd_slot_bits = 8 * size_of::<usize>();
     let mut fds: Vec<PollFd> = Vec::new();
@@ -583,14 +557,14 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
             if let Some(readfds) = rfds.as_ref() {
                 if readfds.fds_bits[fd_slot] & (1 << offset) != 0 {
                     if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
-                        log::warn!("[sys_pselect] bad fd {}", fd);
+                        warn!("[sys_pselect] bad fd {}", fd);
                         return Err(Errno::EBADF);
                     }
 
                     fds.push(PollFd {
                         fd: fd as i32,
-                        events: PollEvents::POLLIN.bits(),
-                        revents: PollEvents::empty().bits(),
+                        events: PollEvents::POLLIN,
+                        revents: PollEvents::empty(),
                     })
                 }
             }
@@ -598,19 +572,18 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
                 if writefds.fds_bits[fd_slot] & (1 << offset) != 0 {
                     if let Some(old_fd) = fds.last() {
                         if old_fd.fd == fd as i32 {
-                            let events = PollEvents::from_bits(old_fd.events).unwrap()
-                                | PollEvents::POLLOUT;
-                            fds.last_mut().unwrap().events = events.bits();
+                            let events = old_fd.events | PollEvents::POLLOUT;
+                            fds.last_mut().unwrap().events = events;
                         }
                     } else {
                         if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
-                            log::warn!("[sys_pselect] bad fd {}", fd);
+                            warn!("[sys_pselect] bad fd {}", fd);
                             return Err(Errno::EBADF);
                         }
                         fds.push(PollFd {
                             fd: fd as i32,
-                            events: PollEvents::POLLOUT.bits(),
-                            revents: PollEvents::empty().bits(),
+                            events: PollEvents::POLLOUT,
+                            revents: PollEvents::empty(),
                         })
                     }
                 }
@@ -619,32 +592,31 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
                 if exceptfds.fds_bits[fd_slot] & (1 << offset) != 0 {
                     if let Some(old_fd) = fds.last() {
                         if old_fd.fd == fd as i32 {
-                            let events = PollEvents::from_bits(old_fd.events).unwrap()
-                                | PollEvents::POLLPRI;
-                            fds.last_mut().unwrap().events = events.bits();
+                            let events = old_fd.events | PollEvents::POLLPRI;
+                            fds.last_mut().unwrap().events = events;
                         }
                     } else {
                         if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
-                            log::warn!("[sys_pselect] bad fd {}", fd);
+                            warn!("[sys_pselect] bad fd {}", fd);
                             return Err(Errno::EBADF);
                         }
                         fds.push(PollFd {
                             fd: fd as i32,
-                            events: PollEvents::POLLPRI.bits(),
-                            revents: PollEvents::empty().bits(),
+                            events: PollEvents::POLLPRI,
+                            revents: PollEvents::empty(),
                         })
                     }
                 }
             }
         }
     }
-    if let Some(fds) = rfds.as_mut() {
+    if let Some(fds) = rfds {
         fds.fds_bits.fill(0);
     }
-    if let Some(fds) = wfds.as_mut() {
+    if let Some(fds) = wfds {
         fds.fds_bits.fill(0);
     }
-    if let Some(fds) = efds.as_mut() {
+    if let Some(fds) = efds {
         fds.fds_bits.fill(0);
     }
     drop(proc_inner);
@@ -672,10 +644,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
 
 pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let inode = resolve_path(&proc_inner, dirfd, path, false).await?;
     if inode.metadata().mode != InodeMode::IFLNK {
         return Err(Errno::EINVAL);
@@ -688,10 +657,7 @@ pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize
 
 pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, flags: u32) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
     let inode = resolve_path(&proc_inner, dirfd, path, follow_link).await?;
     let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStat>())?;
@@ -727,6 +693,8 @@ pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
         stat.st_atim = inner.atime;
         stat.st_mtim = inner.mtime;
         stat.st_ctim = inner.ctime;
+    } else {
+        stat.st_mode = InodeMode::IFCHR as u32;
     }
     user_buf.copy_from_slice(stat.as_bytes());
     Ok(0)
@@ -740,10 +708,7 @@ pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {
 
 pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let path = match path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?,
-    };
+    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
     let inode = resolve_path(&proc_inner, dirfd, path, follow_link).await?;
     let now = TimeSpec::from(real_time());
@@ -781,14 +746,8 @@ pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) 
 pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, new_path: usize, flags: u32) -> SyscallResult<usize> {
     let flags = RenameFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     let proc_inner = current_process().inner.lock();
-    let old_path = match old_path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(old_path), PATH_MAX)?,
-    };
-    let new_path = match new_path {
-        0 => ".",
-        _ => proc_inner.addr_space.user_slice_str(VirtAddr(new_path), PATH_MAX)?,
-    };
+    let old_path = proc_inner.addr_space.transmute_str(old_path, PATH_MAX)?.unwrap_or(".");
+    let new_path = proc_inner.addr_space.transmute_str(new_path, PATH_MAX)?.unwrap_or(".");
     debug!(
         "[renameat] old_dirfd: {}, old_path: {:?}, new_dirfd: {}, new_path: {:?}, flags: {:?}",
         old_dirfd, old_path, new_dirfd, new_path, flags,
@@ -804,20 +763,20 @@ pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, 
             if new_inode.is_ok() {
                 new_parent.clone().unlink(&new_name).await?;
             }
-            old_parent.unlink(&old_name).await?;
+            // old_parent.unlink(&old_name).await?;
             new_parent.movein(&new_name, old_inode).await?;
         }
         RenameFlags::RENAME_NOREPLACE => {
             if new_inode.is_ok() {
                 return Err(Errno::EEXIST);
             }
-            old_parent.unlink(&old_name).await?;
+            // old_parent.unlink(&old_name).await?;
             new_parent.movein(&new_name, old_inode).await?;
         }
         RenameFlags::RENAME_EXCHANGE => {
             let new_inode = new_inode?;
-            old_parent.clone().unlink(&old_name).await?;
-            new_parent.clone().unlink(&new_name).await?;
+            // old_parent.clone().unlink(&old_name).await?;
+            // new_parent.clone().unlink(&new_name).await?;
             old_parent.movein(&new_name, new_inode).await?;
             new_parent.movein(&old_name, old_inode).await?;
         }

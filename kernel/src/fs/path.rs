@@ -22,8 +22,14 @@ pub async fn resolve_path(
     follow_link: bool,
 ) -> SyscallResult<Arc<dyn Inode>> {
     let path = normalize_path(path);
-    let path = path.as_ref();
+    let mut path = path.as_str();
     debug!("[resolve_path] dirfd: {}, path: {:?}", dirfd, path);
+
+    // TODO: Remove the hack
+    if path == "/proc/self/exe" {
+        path = &proc_inner.exe;
+    }
+
     if is_absolute_path(path) {
         proc_inner.mnt_ns.lookup_absolute(path, follow_link).await
     } else if dirfd == AT_FDCWD {

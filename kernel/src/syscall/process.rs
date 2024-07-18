@@ -1,16 +1,17 @@
 use alloc::ffi::CString;
+use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
 use core::time::Duration;
 use log::{debug, info, warn};
 use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
-use crate::config::{MAX_FD_NUM, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::config::USER_STACK_SIZE;
 use crate::fs::ffi::{AT_FDCWD, InodeMode, OpenFlags, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
-use crate::process::monitor::{PROCESS_MONITOR, THREAD_MONITOR};
 use crate::process::{Pid, Tid};
+use crate::process::monitor::MONITORS;
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
@@ -44,7 +45,7 @@ pub fn sys_sched_setaffinity(pid: usize, cpusetsize: usize, mask: usize) -> Sysc
         .addr_space.user_slice_r(VirtAddr(mask), size_of::<CpuSet>())?;
     let thread = match pid {
         0 => current_thread().clone(),
-        _ => THREAD_MONITOR.lock().get(pid).upgrade().ok_or(Errno::ESRCH)?,
+        _ => MONITORS.lock().thread.get(pid).upgrade().ok_or(Errno::ESRCH)?,
     };
     *thread.cpu_set.lock() = *CpuSet::ref_from(mask).unwrap();
     Ok(0)
@@ -58,7 +59,7 @@ pub fn sys_sched_getaffinity(pid: usize, cpusetsize: usize, mask: usize) -> Sysc
         .addr_space.user_slice_w(VirtAddr(mask), size_of::<CpuSet>())?;
     let thread = match pid {
         0 => current_thread().clone(),
-        _ => THREAD_MONITOR.lock().get(pid).upgrade().ok_or(Errno::ESRCH)?,
+        _ => MONITORS.lock().thread.get(pid).upgrade().ok_or(Errno::ESRCH)?,
     };
     mask.copy_from_slice(thread.cpu_set.lock().as_bytes());
     Ok(0)
@@ -71,27 +72,65 @@ pub async fn sys_sched_yield() -> SyscallResult<usize> {
 
 pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
     let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
-    let monitor = PROCESS_MONITOR.lock();
-    if let Some(process) = monitor.get(pid).upgrade() {
-        for thread in process.inner.lock().threads.values() {
-            if let Some(thread) = thread.upgrade() {
-                thread.recv_signal(signal);
-                break;
+    let monitors = MONITORS.lock();
+    let procs = match pid {
+        0 => {
+            let pgid = current_process().inner.lock().pgid.0;
+            monitors.group.get_group(pgid).unwrap()
+        }
+        _ => vec![pid],
+    };
+    let mut handled = false;
+    for pid in procs {
+        if let Some(process) = monitors.process.get(pid).upgrade() {
+            handled = true;
+            if signal != Signal::None {
+                for thread in process.inner.lock().threads.values() {
+                    if let Some(thread) = thread.upgrade() {
+                        thread.recv_signal(signal);
+                        break;
+                    }
+                }
             }
         }
+    }
+    handled.then_some(0).ok_or(Errno::EINVAL)
+}
+
+pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
+    let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
+    if let Some(thread) = MONITORS.lock().thread.get(tid).upgrade() {
+        thread.recv_signal(signal);
         return Ok(0);
     }
     Err(Errno::EINVAL)
 }
 
-pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
-    let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
-    let monitor = THREAD_MONITOR.lock();
-    if let Some(thread) = monitor.get(tid).upgrade() {
-        thread.recv_signal(signal);
-        return Ok(0);
-    }
-    Err(Errno::EINVAL)
+pub fn sys_setpgid(pid: usize, pgid: usize) -> SyscallResult<usize> {
+    let mut monitors = MONITORS.lock();
+    let proc = match pid {
+        0 => current_process().clone(),
+        _ => monitors.process.get(pid).upgrade().ok_or(Errno::ESRCH)?,
+    };
+    let new_pgid = match pgid {
+        0 => proc.inner.lock().pgid.0,
+        _ => pgid,
+    };
+
+    let mut proc_inner = proc.inner.lock();
+    let delegate = monitors.process.get(new_pgid).upgrade().ok_or(Errno::EPERM)?;
+    monitors.group.move_to_group(proc_inner.pgid.0, proc.pid.0, delegate.pid.0)?;
+    proc_inner.pgid = delegate.pid.clone();
+    Ok(0)
+}
+
+pub fn sys_getpgid(pid: usize) -> SyscallResult<usize> {
+    let proc = match pid {
+        0 => current_process().clone(),
+        _ => MONITORS.lock().process.get(pid).upgrade().ok_or(Errno::ESRCH)?,
+    };
+    let pgid = proc.inner.lock().pgid.0;
+    Ok(pgid)
 }
 
 pub fn sys_getrlimit(resource: u32, rlim: usize) -> SyscallResult<usize> {
@@ -163,8 +202,7 @@ pub fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize)
 
 pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let mut path = proc_inner.addr_space.user_slice_str(VirtAddr(path), PATH_MAX)?;
-
+    let mut path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let mut args_vec: Vec<CString> = Vec::new();
     let mut envs_vec: Vec<CString> = Vec::new();
     if path.ends_with(".sh") {
@@ -174,11 +212,12 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     }
     let push_args = |args_vec: &mut Vec<CString>, mut arg_ptr: usize| -> SyscallResult {
         loop {
-            proc_inner.addr_space.user_slice_r(VirtAddr(arg_ptr), size_of::<usize>())?;
-            let arg_addr = unsafe { *(arg_ptr as *const usize) };
-            if arg_addr == 0 { break; }
-            let arg = proc_inner.addr_space.user_slice_str(VirtAddr(arg_addr), PATH_MAX)?;
-            if arg.is_empty() { break; }
+            let arg_addr = proc_inner.addr_space.transmute_r::<usize>(arg_ptr)?.ok_or(Errno::EINVAL)?;
+            let arg = match proc_inner.addr_space.transmute_str(*arg_addr, PATH_MAX)? {
+                None => break,
+                Some(s) if s.is_empty() => break,
+                Some(s) => s,
+            };
             args_vec.push(CString::new(arg).unwrap());
             arg_ptr += size_of::<usize>();
         }
@@ -202,9 +241,10 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     }
 
     drop(proc_inner);
-    let file = inode.open(OpenFlags::O_RDONLY)?;
+    let file = inode.clone().open(OpenFlags::O_RDONLY)?;
     let elf_data = file.read_all().await?;
-    current_process().execve(&elf_data, &args_vec, &envs_vec).await
+    // TODO: Here path is incorrect, we should update resolve_path
+    current_process().execve(inode.metadata().path.clone(), &elf_data, &args_vec, &envs_vec).await
 }
 
 pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
@@ -223,30 +263,22 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
     let mut proc_inner = current_process().inner.lock();
     debug!("[prlimit] pid: {}, cmd: {:?}, nrlim: {}, orlim :{}", pid, cmd, new_rlim, old_rlim);
     if old_rlim != 0 {
-        let old_rlim = current_process().inner.lock().addr_space
-            .user_slice_w(VirtAddr(old_rlim), size_of::<Rlimit>())?;
-        let orlim = unsafe { &mut *(old_rlim.as_mut_ptr() as *mut Rlimit) };
-        let (cur, max) = match cmd {
-            RlimitCmd::RLIMIT_STACK => (USER_STACK_SIZE, USER_STACK_TOP.0),
-            RlimitCmd::RLIMIT_NOFILE => (orlim.rlim_cur, orlim.rlim_max),
-            _ => (0, 0),
+        let limit = match cmd {
+            RlimitCmd::RLIMIT_STACK => Rlimit::new(USER_STACK_SIZE, USER_STACK_SIZE),
+            RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit.clone(),
+            _ => return Ok(0),
         };
-        let limit = Rlimit { rlim_cur: cur, rlim_max: max };
-        old_rlim.copy_from_slice(limit.as_bytes());
+        *proc_inner.addr_space.transmute_w::<Rlimit>(old_rlim)?.unwrap() = limit;
     }
     if new_rlim != 0 {
-        let new_rlim = current_process().inner.lock().addr_space
-            .user_slice_w(VirtAddr(new_rlim), size_of::<Rlimit>())?;
-        let nrlim = unsafe { &mut *(new_rlim.as_mut_ptr() as *mut Rlimit) };
-        let (cur, max) = match cmd {
-            RlimitCmd::RLIMIT_NOFILE => (nrlim.rlim_cur, nrlim.rlim_max),
-            _ => (MAX_FD_NUM, MAX_FD_NUM)
-        };
-        if cur > max {
+        let limit = proc_inner.addr_space.transmute_r::<Rlimit>(new_rlim)?.unwrap();
+        if limit.rlim_cur > limit.rlim_max {
             return Err(Errno::EINVAL);
         }
-        let limit = Rlimit { rlim_cur: cur, rlim_max: max };
-        proc_inner.fd_table.rlimit = limit;
+        match cmd {
+            RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit = limit.clone(),
+            _ => return Ok(0),
+        };
     }
     Ok(0)
 }

@@ -1,19 +1,49 @@
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::sync::Weak;
-use crate::process::{Pid, Process, Tid};
+use alloc::vec::Vec;
+use core::cell::RefCell;
+use crate::process::{Gid, Pid, Process, Tid};
 use crate::process::thread::Thread;
-use crate::sync::mutex::IrqMutex;
+use crate::result::{Errno, SyscallResult};
+use crate::sync::mutex::ReMutex;
 
-pub static PROCESS_MONITOR: ProcessMonitor = IrqMutex::new(ProcessMonitorInner(BTreeMap::new()));
-pub static THREAD_MONITOR: ThreadMonitor = IrqMutex::new(ThreadMonitorInner(BTreeMap::new()));
+pub static MONITORS: ReMutex<Monitors> = ReMutex::new(Monitors::new());
 
-pub type ProcessMonitor = IrqMutex<ProcessMonitorInner>;
-pub type ThreadMonitor = IrqMutex<ThreadMonitorInner>;
+pub struct Monitors {
+    pub thread: ThreadMonitor,
+    pub process: ProcessMonitor,
+    pub group: ProcessGroupMonitor,
+}
 
-pub struct ProcessMonitorInner(BTreeMap<Pid, Weak<Process>>);
-pub struct ThreadMonitorInner(BTreeMap<Tid, Weak<Thread>>);
+pub struct ThreadMonitor(BTreeMap<Tid, Weak<Thread>>);
+pub struct ProcessMonitor(BTreeMap<Pid, Weak<Process>>);
+pub struct ProcessGroupMonitor(BTreeMap<Gid, RefCell<BTreeSet<Pid>>>);
 
-impl ProcessMonitorInner {
+impl Monitors {
+    const fn new() -> Self {
+        Self {
+            thread: ThreadMonitor(BTreeMap::new()),
+            process: ProcessMonitor(BTreeMap::new()),
+            group: ProcessGroupMonitor(BTreeMap::new()),
+        }
+    }
+}
+
+impl ThreadMonitor {
+    pub fn add(&mut self, tid: Tid, thread: Weak<Thread>) {
+        self.0.insert(tid, thread);
+    }
+
+    pub fn remove(&mut self, tid: Tid) {
+        self.0.remove(&tid);
+    }
+
+    pub fn get(&self, tid: Tid) -> Weak<Thread> {
+        self.0.get(&tid).cloned().unwrap_or(Weak::new())
+    }
+}
+
+impl ProcessMonitor {
     pub fn add(&mut self, pid: Pid, process: Weak<Process>) {
         self.0.insert(pid, process);
     }
@@ -37,16 +67,31 @@ impl ProcessMonitorInner {
     }
 }
 
-impl ThreadMonitorInner {
-    pub fn add(&mut self, tid: Tid, thread: Weak<Thread>) {
-        self.0.insert(tid, thread);
+impl ProcessGroupMonitor {
+    pub fn create_group(&mut self, pid: Pid) {
+        let mut set = BTreeSet::new();
+        set.insert(pid);
+        self.0.insert(pid, RefCell::new(set));
     }
 
-    pub fn remove(&mut self, tid: Tid) {
-        self.0.remove(&tid);
+    pub fn remove_group(&mut self, pgid: Gid) {
+        self.0.remove(&pgid);
     }
 
-    pub fn get(&self, tid: Tid) -> Weak<Thread> {
-        self.0.get(&tid).cloned().unwrap_or(Weak::new())
+    pub fn add_process(&mut self, pgid: Gid, pid: Pid) {
+        let group = self.0.get(&pgid).unwrap();
+        group.borrow_mut().insert(pid);
+    }
+
+    pub fn move_to_group(&mut self, old_pgid: Gid, pid: Pid, new_pgid: Gid) -> SyscallResult {
+        let old_group = self.0.get(&old_pgid).ok_or(Errno::ESRCH)?;
+        let new_group = self.0.get(&new_pgid).ok_or(Errno::EPERM)?;
+        old_group.borrow_mut().remove(&pid);
+        new_group.borrow_mut().insert(pid);
+        Ok(())
+    }
+
+    pub fn get_group(&self, pgid: Gid) -> Option<Vec<Pid>> {
+        self.0.get(&pgid).map(|group| group.borrow_mut().iter().cloned().collect())
     }
 }

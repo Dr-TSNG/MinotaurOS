@@ -7,6 +7,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use async_trait::async_trait;
 use log::debug;
+use crate::config::PIPE_BUF_CAP;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::{File, FileMeta};
 use crate::process::thread::event_bus::Event;
@@ -76,6 +77,9 @@ impl File for Pipe {
         if !self.is_reader {
             return Err(Errno::EBADF);
         }
+        if buf.len() == 0 {
+            return Ok(0);
+        }
         let fut = PipeReadFuture {
             pipe: self,
             buf,
@@ -88,9 +92,13 @@ impl File for Pipe {
         if self.is_reader {
             return Err(Errno::EBADF);
         }
+        if buf.len() == 0 {
+            return Ok(0);
+        }
         let fut = PipeWriteFuture {
             pipe: self,
             buf,
+            pos: 0,
         };
         current_thread().event_bus.suspend_with(Event::KILL_THREAD, fut).await
     }
@@ -110,6 +118,8 @@ impl File for Pipe {
     fn pollout(&self, waker: Option<Waker>) -> SyscallResult<bool> {
         let mut inner = self.inner.lock();
         if self.other.strong_count() == 0 {
+            Err(Errno::EPIPE)
+        } else if inner.buf.len() < PIPE_BUF_CAP {
             Ok(true)
         } else {
             if let Some(waker) = waker {
@@ -129,6 +139,7 @@ struct PipeReadFuture<'a> {
 struct PipeWriteFuture<'a> {
     pipe: &'a Pipe,
     buf: &'a [u8],
+    pos: usize,
 }
 
 impl Future for PipeReadFuture<'_> {
@@ -164,7 +175,7 @@ impl Future for PipeReadFuture<'_> {
 impl Future for PipeWriteFuture<'_> {
     type Output = SyscallResult<isize>;
 
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut inner = self.pipe.inner.lock();
         debug!(
             "[pipe] write poll len: {}, buf.len: {}",
@@ -173,10 +184,17 @@ impl Future for PipeWriteFuture<'_> {
         if self.pipe.other.strong_count() == 0 {
             return Poll::Ready(Err(Errno::EPIPE));
         }
-        inner.buf.extend(self.buf);
-        while let Some(waker) = inner.readers.pop_front() {
-            waker.wake();
+        let write = min(self.buf.len() - self.pos, PIPE_BUF_CAP - inner.buf.len());
+        if write > 0 {
+            inner.buf.extend(&self.buf[self.pos..self.pos + write]);
+            self.pos += write;
+            while let Some(waker) = inner.readers.pop_front() {
+                waker.wake();
+            }
+            Poll::Ready(Ok(write as isize))
+        } else {
+            inner.writers.push_back(cx.waker().clone());
+            Poll::Pending
         }
-        Poll::Ready(Ok(self.buf.len() as isize))
     }
 }
