@@ -3,7 +3,6 @@ use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
-
 use crate::processor::hart::local_hart;
 use crate::sched::time::cpu_time;
 use crate::sync::mutex::MutexStrategy;
@@ -34,6 +33,10 @@ impl<T, S: MutexStrategy> ReMutex<T, S> {
             owner: AtomicUsize::new(NOBODY),
             data: UnsafeCell::new(data),
         }
+    }
+
+    pub fn locked_by(&self) -> usize {
+        self.owner.load(Ordering::Relaxed)
     }
 
     pub fn try_lock(&self) -> Option<ReMutexGuard<T, S>> {

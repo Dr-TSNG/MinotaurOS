@@ -107,11 +107,11 @@ pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4
 }
 
 pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
-    let mut proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let path = current_process().inner.lock()
+        .addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     debug!("[mkdirat] fd: {}, path: {:?}, mode: {:?}", dirfd, path, mode);
     let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
-    let inode = resolve_path(&mut proc_inner, dirfd, &parent, true).await?;
+    let inode = resolve_path(dirfd, &parent, true).await?;
     if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
     }
@@ -123,8 +123,8 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
     if flags & !AT_REMOVEDIR != 0 {
         return Err(Errno::EINVAL);
     }
-    let proc_inner = current_process().inner.lock();
-    let mut path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let mut path = current_process().inner.lock()
+        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     debug!("[unlinkat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
 
     // TODO: This hack is just for libctest
@@ -133,7 +133,7 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
     }
 
     let (parent, name) = split_last_path(path).ok_or(Errno::EINVAL)?;
-    let parent = resolve_path(&proc_inner, dirfd, &parent, true).await?;
+    let parent = resolve_path(dirfd, &parent, true).await?;
     let inode = parent.clone().lookup_name(&name).await?;
     if inode.metadata().mode == InodeMode::IFDIR {
         if flags & AT_REMOVEDIR == 0 {
@@ -155,9 +155,10 @@ pub async fn sys_symlinkat(target: usize, dirfd: FdNum, linkpath: usize) -> Sysc
     let proc_inner = current_process().inner.lock();
     let target = proc_inner.addr_space.transmute_str(target, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let linkpath = proc_inner.addr_space.transmute_str(linkpath, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    drop(proc_inner);
     debug!("[symlinkat] target: {}, dirfd: {}, linkpath: {}", target, dirfd, linkpath);
     let (parent, name) = split_last_path(linkpath).ok_or(Errno::EINVAL)?;
-    let inode = resolve_path(&proc_inner, dirfd, &parent, true).await?;
+    let inode = resolve_path(dirfd, &parent, true).await?;
     if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
     }
@@ -204,11 +205,11 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
 }
 
 pub async fn sys_statfs(path: usize, buf: usize) -> SyscallResult<usize> {
-    let mut proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
-    let inode = resolve_path(&mut proc_inner, AT_FDCWD, path, true).await?;
+    let path = current_process().inner.lock()
+        .addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let inode = resolve_path(AT_FDCWD, path, true).await?;
+
     let fs = inode.file_system().upgrade().ok_or(Errno::ENODEV)?;
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStatfs>())?;
     let mut stat = KernelStatfs::default();
     stat.f_type = fs.metadata().fstype as u64;
     stat.f_bsize = 512; // TODO: real data
@@ -221,6 +222,9 @@ pub async fn sys_statfs(path: usize, buf: usize) -> SyscallResult<usize> {
     stat.f_namelen = MAX_NAME_LEN as u64;
     stat.f_frsize = 512;
     stat.f_flags = fs.metadata().flags.bits() as u64;
+
+    let user_buf = current_process().inner.lock()
+        .addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStatfs>())?;
     user_buf.copy_from_slice(&stat.as_bytes());
     Ok(0)
 }
@@ -257,24 +261,24 @@ pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
 }
 
 pub async fn sys_faccessat(fd: FdNum, path: usize, _mode: u32, _flags: u32) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
-    resolve_path(&proc_inner, fd, path, false).await?;
+    let path = current_process().inner.lock()
+        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    resolve_path(fd, path, false).await?;
     Ok(0)
 }
 
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
-    let mut proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
-    resolve_path(&mut proc_inner, AT_FDCWD, path, true).await?;
-    proc_inner.cwd = path.to_string();
+    let path = current_process().inner.lock()
+        .addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    resolve_path(AT_FDCWD, path, true).await?;
+    current_process().inner.lock().cwd = path.to_string();
     Ok(0)
 }
 
 pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> SyscallResult<usize> {
     let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
-    let mut proc_inner = current_process().inner.lock();
-    let mut path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let mut path = current_process().inner.lock()
+        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     debug!("[openat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
 
     // TODO: This hack is just for libctest
@@ -282,11 +286,11 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
         path = "/tmp/testshm";
     }
 
-    let inode = match resolve_path(&mut proc_inner, dirfd, path, true).await {
+    let inode = match resolve_path(dirfd, path, true).await {
         Ok(inode) => inode,
         Err(Errno::ENOENT) if flags.contains(OpenFlags::O_CREAT) => {
             let (parent, name) = split_last_path(path).ok_or(Errno::EISDIR)?;
-            let parent_inode = resolve_path(&mut proc_inner, dirfd, &parent, true).await?;
+            let parent_inode = resolve_path(dirfd, &parent, true).await?;
             parent_inode.create(InodeMode::IFREG, &name).await?
         }
         Err(e) => return Err(e),
@@ -301,7 +305,7 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
         }
     }
     let fd_impl = FileDescriptor::new(file, flags.contains(OpenFlags::O_CLOEXEC));
-    let fd = proc_inner.fd_table.put(fd_impl, 0)?;
+    let fd = current_process().inner.lock().fd_table.put(fd_impl, 0)?;
     Ok(fd as usize)
 }
 
@@ -643,25 +647,26 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
 }
 
 pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
-    let inode = resolve_path(&proc_inner, dirfd, path, false).await?;
+    let path = current_process().inner.lock()
+        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let inode = resolve_path(dirfd, path, false).await?;
     if inode.metadata().mode != InodeMode::IFLNK {
         return Err(Errno::EINVAL);
     }
     let target = inode.readlink().await?.into_bytes();
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), min(target.len(), bufsiz))?;
+    let user_buf = current_process().inner.lock()
+        .addr_space.user_slice_w(VirtAddr(buf), min(target.len(), bufsiz))?;
     user_buf[..target.len()].copy_from_slice(&target);
     Ok(target.len())
 }
 
 pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, flags: u32) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let path = current_process().inner.lock()
+        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
-    let inode = resolve_path(&proc_inner, dirfd, path, follow_link).await?;
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStat>())?;
-    drop(proc_inner);
+    let inode = resolve_path(dirfd, path, follow_link).await?;
+    let user_buf = current_process().inner.lock()
+        .addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStat>())?;
     let mut stat = KernelStat::default();
     stat.st_dev = inode.metadata().dev as u64;
     stat.st_ino = inode.metadata().ino as u64;
@@ -707,15 +712,16 @@ pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {
 }
 
 pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let path = current_process().inner.lock()
+        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
-    let inode = resolve_path(&proc_inner, dirfd, path, follow_link).await?;
+    let inode = resolve_path(dirfd, path, follow_link).await?;
     let now = TimeSpec::from(real_time());
     let (atime, mtime) = match times {
         0 => (Some(now), Some(now)),
         _ => {
-            let times = proc_inner.addr_space.user_slice_r(VirtAddr(times), 2 * size_of::<TimeSpec>())?;
+            let times = current_process().inner.lock()
+                .addr_space.user_slice_r(VirtAddr(times), 2 * size_of::<TimeSpec>())?;
             let atime = TimeSpec::ref_from(&times[0..size_of::<TimeSpec>()]).unwrap();
             let mtime = TimeSpec::ref_from(&times[size_of::<TimeSpec>()..]).unwrap();
             let atime = match atime.nsec {
@@ -748,14 +754,15 @@ pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, 
     let proc_inner = current_process().inner.lock();
     let old_path = proc_inner.addr_space.transmute_str(old_path, PATH_MAX)?.unwrap_or(".");
     let new_path = proc_inner.addr_space.transmute_str(new_path, PATH_MAX)?.unwrap_or(".");
+    drop(proc_inner);
     debug!(
         "[renameat] old_dirfd: {}, old_path: {:?}, new_dirfd: {}, new_path: {:?}, flags: {:?}",
         old_dirfd, old_path, new_dirfd, new_path, flags,
     );
     let (old_parent, old_name) = split_last_path(old_path).ok_or(Errno::EINVAL)?;
     let (new_parent, new_name) = split_last_path(new_path).ok_or(Errno::EINVAL)?;
-    let old_parent = resolve_path(&proc_inner, old_dirfd, &old_parent, true).await?;
-    let new_parent = resolve_path(&proc_inner, new_dirfd, &new_parent, true).await?;
+    let old_parent = resolve_path(old_dirfd, &old_parent, true).await?;
+    let new_parent = resolve_path(new_dirfd, &new_parent, true).await?;
     let old_inode = old_parent.clone().lookup_name(&old_name).await?;
     let new_inode = new_parent.clone().lookup_name(&new_name).await;
     match flags {
