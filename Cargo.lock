@@ -637,12 +637,11 @@ dependencies = [
 [[package]]
 name = "lwext4_rust"
 version = "0.2.0"
-source = "git+https://github.com/Dr-TSNG/lwext4_rust#eec09df405bc17c1dec83087c694fe348a662fd6"
+source = "git+https://github.com/Dr-TSNG/lwext4_rust#1322b54c9a4541e2cdc94579493097ea65d0af2b"
 dependencies = [
  "bindgen",
  "log",
  "printf-compat",
- "spin",
 ]
 
 [[package]]

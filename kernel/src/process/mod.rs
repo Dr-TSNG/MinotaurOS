@@ -355,32 +355,29 @@ impl Process {
 
     pub fn on_thread_exit(&self, tid: Tid, exit_code: i8) {
         info!("Thread {} exited with code {}", tid, exit_code);
-        let init = MONITORS.lock().process.init_proc();
-        self.inner.lock().tap_mut(|inner| {
-            inner.threads.remove(&tid);
-            // 如果没有线程了，通知父进程
-            if inner.threads.is_empty() {
-                inner.exit_code = Some(exit_code);
-                if let Some(parent) = inner.parent.upgrade() {
-                    parent.on_child_exit(self.pid.0, exit_code);
-                }
-                // 将子进程的父进程设置为 init
-                inner.children.iter_mut().for_each(|child| {
-                    child.inner.lock().parent = init.clone();
-                })
+        let monitor = MONITORS.lock();
+        let mut proc_inner = self.inner.lock();
+        proc_inner.threads.remove(&tid);
+        // 如果没有线程了，通知父进程
+        if proc_inner.threads.is_empty() {
+            proc_inner.exit_code = Some(exit_code);
+            if let Some(parent) = proc_inner.parent.upgrade() {
+                parent.on_child_exit(self.pid.0, exit_code);
             }
-        });
+            // 将子进程的父进程设置为 init
+            proc_inner.children.iter_mut().for_each(|child| {
+                child.inner.lock().parent = monitor.process.init_proc();
+            })
+        }
     }
 
-    pub fn on_child_exit(&self, pid: Pid, exit_code: i8) {
+    fn on_child_exit(&self, pid: Pid, exit_code: i8) {
         info!("Child {} exited with code {}", pid, exit_code);
-        self.inner.lock().tap_mut(|inner| {
-            for thread in inner.threads.values() {
-                if let Some(thread) = thread.upgrade() {
-                    thread.recv_signal(Signal::SIGCHLD);
-                    break;
-                }
+        for thread in self.inner.lock().threads.values() {
+            if let Some(thread) = thread.upgrade() {
+                thread.recv_signal(Signal::SIGCHLD);
+                break;
             }
-        });
+        }
     }
 }

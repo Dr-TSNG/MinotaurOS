@@ -63,7 +63,7 @@ impl<T, S: MutexStrategy> AsyncMutex<T, S> {
             });
         }
 
-        if cpu_time() - start_time > Duration::from_secs(5) {
+        if cpu_time() - start_time > Duration::from_secs(15) {
             panic!("AsyncMutex deadlock");
         }
         sched_timer(start_time + Duration::from_secs(5), cx.waker().clone());
