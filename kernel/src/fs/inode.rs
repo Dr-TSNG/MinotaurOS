@@ -183,6 +183,10 @@ pub trait Inode: DowncastSync + InodeInternal {
 
     /// 获取文件系统
     fn file_system(&self) -> Weak<dyn FileSystem>;
+
+    fn ioctl(&self, request: usize, value: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
+        Err(Errno::ENOTTY)
+    }
 }
 impl_downcast!(sync Inode);
 

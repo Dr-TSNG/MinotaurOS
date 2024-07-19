@@ -7,7 +7,7 @@ use crate::fs::devfs::DevFileSystem;
 use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
-use crate::result::SyscallResult;
+use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 
 pub struct NullInode(InodeMeta, Weak<DevFileSystem>);
@@ -48,5 +48,9 @@ impl Inode for NullInode {
 
     fn file_system(&self) -> Weak<dyn FileSystem> {
         self.1.clone()
+    }
+
+    fn ioctl(&self, request: usize, value: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
+        Err(Errno::ENOTTY)
     }
 }

@@ -16,6 +16,7 @@ use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlC
 use crate::fs::file::Seek;
 use crate::fs::path::{resolve_path, split_last_path};
 use crate::fs::pipe::Pipe;
+use crate::fs::procfs::ProcFileSystem;
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
@@ -196,6 +197,11 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
         "devfs" => {
             proc_inner.mnt_ns.mount(target, |p| {
                 DevFileSystem::new(flags, Some(p))
+            }).await?;
+        }
+        "procfs" => {
+            proc_inner.mnt_ns.mount(target, |p| {
+                ProcFileSystem::new(flags, Some(p))
             }).await?;
         }
         _ => return Err(Errno::ENODEV),
