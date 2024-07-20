@@ -1,10 +1,8 @@
-use crate::fs::fd::{FdNum, FileDescriptor};
+use crate::fs::fd::FileDescriptor;
 use crate::fs::ffi::OpenFlags;
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec;
-use core::any::Any;
-use core::f32::consts::E;
 use async_trait::async_trait;
 use core::future::Future;
 use core::ops::DerefMut;
@@ -16,8 +14,7 @@ use smoltcp::socket::tcp;
 use smoltcp::wire::IpEndpoint;
 use smoltcp::{iface::SocketHandle, wire::IpListenEndpoint};
 use core::time::Duration;
-use tap::Pipe;
-use xmas_elf::header::Class;
+use tap::{Pipe, Tap};
 use crate::fs::file::{File, FileMeta};
 use crate::net::iface::NET_INTERFACE;
 use crate::net::port::random_port;
@@ -28,7 +25,6 @@ use crate::net::{MAX_BUFFER_SIZE, RecvFromFlags};
 use crate::net::netaddress::{endpoint, is_local};
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
-use crate::result::Errno::ENOTCONN;
 use crate::sched::{sleep_for, yield_now};
 use crate::sync::mutex::Mutex;
 
@@ -57,15 +53,15 @@ struct TcpInner {
 
 impl TcpSocket {
     pub fn new() -> Self {
-        let tx_buf = smoltcp::socket::tcp::SocketBuffer::new(vec![0 as u8; MAX_BUFFER_SIZE]);
-        let rx_buf = smoltcp::socket::tcp::SocketBuffer::new(vec![0 as u8; MAX_BUFFER_SIZE]);
-        let socket_loop = smoltcp::socket::tcp::Socket::new(rx_buf, tx_buf);
+        let tx_buf = tcp::SocketBuffer::new(vec![0; MAX_BUFFER_SIZE]);
+        let rx_buf = tcp::SocketBuffer::new(vec![0; MAX_BUFFER_SIZE]);
+        let socket_loop = tcp::Socket::new(rx_buf, tx_buf);
 
-        let tx_buf = smoltcp::socket::tcp::SocketBuffer::new(vec![0 as u8; MAX_BUFFER_SIZE]);
-        let rx_buf = smoltcp::socket::tcp::SocketBuffer::new(vec![0 as u8; MAX_BUFFER_SIZE]);
-        let socket_dev = smoltcp::socket::tcp::Socket::new(rx_buf, tx_buf);
+        let tx_buf = tcp::SocketBuffer::new(vec![0; MAX_BUFFER_SIZE]);
+        let rx_buf = tcp::SocketBuffer::new(vec![0; MAX_BUFFER_SIZE]);
+        let socket_dev = tcp::Socket::new(rx_buf, tx_buf);
         // 将 socket 加入 interface，返回 handle
-        let (handle_loop, handle_dev) = NET_INTERFACE.add_socket(socket_loop, socket_dev);
+        let (handle_loop, handle_dev) = NET_INTERFACE.lock().add_socket(socket_loop, socket_dev);
         // info!("[TcpSocket::new] new ({}, {})", handler_loop, handler_loop);
         let port = random_port();
         info!("[tcp] New socket handle_loop {} handle_dev {} at port {}", handle_loop,handle_dev, port);
@@ -85,15 +81,15 @@ impl TcpSocket {
     }
 
     pub fn new_with(iple: IpListenEndpoint) -> Self {
-        let tx_buf = smoltcp::socket::tcp::SocketBuffer::new(vec![0 as u8; MAX_BUFFER_SIZE]);
-        let rx_buf = smoltcp::socket::tcp::SocketBuffer::new(vec![0 as u8; MAX_BUFFER_SIZE]);
-        let socket_loop = smoltcp::socket::tcp::Socket::new(rx_buf, tx_buf);
+        let tx_buf = tcp::SocketBuffer::new(vec![0; MAX_BUFFER_SIZE]);
+        let rx_buf = tcp::SocketBuffer::new(vec![0; MAX_BUFFER_SIZE]);
+        let socket_loop = tcp::Socket::new(rx_buf, tx_buf);
 
-        let tx_buf = smoltcp::socket::tcp::SocketBuffer::new(vec![0 as u8; MAX_BUFFER_SIZE]);
-        let rx_buf = smoltcp::socket::tcp::SocketBuffer::new(vec![0 as u8; MAX_BUFFER_SIZE]);
-        let socket_dev = smoltcp::socket::tcp::Socket::new(rx_buf, tx_buf);
+        let tx_buf = tcp::SocketBuffer::new(vec![0; MAX_BUFFER_SIZE]);
+        let rx_buf = tcp::SocketBuffer::new(vec![0; MAX_BUFFER_SIZE]);
+        let socket_dev = tcp::Socket::new(rx_buf, tx_buf);
         // 将 socket 加入 interface，返回 handle
-        let (handle_loop, handle_dev) = NET_INTERFACE.add_socket(socket_loop, socket_dev);
+        let (handle_loop, handle_dev) = NET_INTERFACE.lock().add_socket(socket_loop, socket_dev);
         let port = random_port();
         info!("[tcp] New socket handle_loop {} handle_dev {} at port {}", handle_loop,handle_dev, port);
         Self {
@@ -111,50 +107,52 @@ impl TcpSocket {
         }
     }
 
-    /// this tcp_socket to connect someone else tcp_socket
-    fn tcp_connect(&self, remote_endpoint: IpEndpoint) -> SyscallResult<()> {
-        let is_local = is_local(remote_endpoint);
-        let local = self.inner.lock().local_endpoint;
-        info!(
-            "[Tcp::connect] local: {:?}, remote: {:?}",
-            local, remote_endpoint
-        );
-        let ret = if is_local{
-            NET_INTERFACE.loopback(|inner|{
-                NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop,|socket|{
-                    socket.connect(inner.iface.context(),remote_endpoint,local)
-                })
-            })
-        }else{
-            NET_INTERFACE.device(|inner| {
-                NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, |socket| {
-                    socket.connect(inner.iface.context(), remote_endpoint, local)
-                })
-            })
-        };
-        if ret.is_err() {
-            let inner = self.inner.lock();
-            let handle_loop = inner.handle_loop;
-            let handle_dev = inner.handle_dev;
-            drop(inner);
-            info!(
-                "[Tcp::connect] (handle_loop {}, handle_dev {}) connect error occur",
-                handle_loop,
-                handle_dev,
-            );
-            match ret.err().unwrap() {
-                tcp::ConnectError::Unaddressable => return Err(Errno::EINVAL),
-                tcp::ConnectError::InvalidState => return Err(Errno::EISCONN),
-            }
-        }
-        Ok(())
-    }
-
     /// tcp_socket wait for a connection to it , if connected , return remote IpEndpoint
     async fn tcp_accept(&self, flags: OpenFlags) -> SyscallResult<IpEndpoint> {
         TcpAcceptFuture::new(self, flags).await
     }
 }
+
+impl TcpInner {
+    /// this tcp_socket to connect someone else tcp_socket
+    fn tcp_connect(&mut self, remote_endpoint: IpEndpoint) -> SyscallResult<()> {
+        let is_local = is_local(remote_endpoint);
+        info!(
+            "[Tcp::connect] local: {:?}, remote: {:?}",
+            self.local_endpoint, remote_endpoint,
+        );
+        let ret = if is_local {
+            let net = &mut *NET_INTERFACE.lock();
+            net.sockets_loop
+                .get_mut::<tcp::Socket>(self.handle_loop)
+                .connect(net.loopback.iface.context(), remote_endpoint, self.local_endpoint)
+        } else {
+            let net = &mut *NET_INTERFACE.lock();
+            net.sockets_dev
+                .get_mut::<tcp::Socket>(self.handle_dev)
+                .connect(net.device.iface.context(), remote_endpoint, self.local_endpoint)
+        };
+        match ret {
+            Ok(_) => {
+                self.remote_endpoint = Some(remote_endpoint);
+                Ok(())
+            }
+            Err(e) => {
+                info!(
+                    "[Tcp::connect] (handle_loop {}, handle_dev {}) connect error occur",
+                    self.handle_loop,
+                    self.handle_dev,
+                );
+                self.remote_endpoint = None;
+                match e {
+                    tcp::ConnectError::Unaddressable => Err(Errno::EINVAL),
+                    tcp::ConnectError::InvalidState => Err(Errno::EISCONN),
+                }
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl File for TcpSocket {
     fn metadata(&self) -> &FileMeta {
@@ -199,53 +197,47 @@ impl File for TcpSocket {
 
     fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
         let inner = self.inner.lock();
-        let handle_loop = inner.handle_loop;
-        let handle_dev = inner.handle_dev;
-        let last_state_loop = inner.last_state_loop;
-        let last_state_dev = inner.last_state_dev;
         info!(
             "[Tcp::pollin] (handle_loop {}, handle_dev {}) enter",
-            handle_loop,
-            handle_dev
+            inner.handle_loop,
+            inner.handle_dev
         );
-        let pool_func = |socket: &mut smoltcp::socket::tcp::Socket<'_>, last_state|{
-            if socket.can_recv(){
+        let poll_func = |socket: &mut tcp::Socket<'_>, last_state| {
+            if socket.can_recv() {
                 info!(
                     "[Tcp::pollin] (handle_loop {}, handle_dev {}) recv buf have item",
-                    handle_loop,
-                    handle_dev
+                    inner.handle_loop,
+                    inner.handle_dev
                 );
-                Ok(true)
-            }else if socket.state() == tcp::State::CloseWait
+                true
+            } else if socket.state() == tcp::State::CloseWait
                 || socket.state() == tcp::State::FinWait2
                 || socket.state() == tcp::State::TimeWait
                 || (last_state == tcp::State::Listen && socket.state() == tcp::State::Established)
                 || socket.state() == tcp::State::SynReceived
-                // || (last_state==tcp::State::Closed && socket.state()==tcp::State::Established)
+            // || (last_state==tcp::State::Closed && socket.state()==tcp::State::Established)
             {
                 info!("[Tcp::pollin] state become {:?}", socket.state());
-                Ok(true)
-            }else {
+                true
+            } else {
                 info!("[Tcp::pollin] last_state is {:?}" , last_state);
                 info!("[Tcp::pollin] nothing to read, state {:?}", socket.state());
-                Ok(false)
+                if let Some(waker) = &waker {
+                    socket.register_recv_waker(waker);
+                }
+                false
             }
         };
-        //loop {
-            info!("[Tcp::pollin] poll all...");
-            NET_INTERFACE.poll_all();
-            let loop_ret = NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
-                pool_func(socket, last_state_loop)
-            })?;
-            let dev_ret = NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
-                pool_func(socket, last_state_dev)
-            })?;
-            if loop_ret || dev_ret {
-                info!("[Tcp::pollin] ret Ok(true)...");
-                return Ok(true);
-            }
-        //}
-       info!("[Tcp::pollin] ret Ok(false)...");
+        info!("[Tcp::pollin] poll all...");
+        let mut net = NET_INTERFACE.lock();
+        net.poll_all();
+        let loop_ret = poll_func(net.sockets_loop.get_mut(inner.handle_loop), inner.last_state_loop);
+        let dev_ret = poll_func(net.sockets_dev.get_mut(inner.handle_dev), inner.last_state_dev);
+        if loop_ret || dev_ret {
+            info!("[Tcp::pollin] ret Ok(true)...");
+            return Ok(true);
+        }
+        info!("[Tcp::pollin] ret Ok(false)...");
         return Ok(false);
     }
 
@@ -253,31 +245,31 @@ impl File for TcpSocket {
         let inner = self.inner.lock();
         let handle_loop = inner.handle_loop;
         let handle_dev = inner.handle_dev;
-        // drop(inner);
         info!(
             "[Tcp::pollout] (handle_loop {}, handle_dev {}) enter",
             handle_loop, handle_dev
         );
         let is_local = is_local(self.remote_endpoint().unwrap());
-        let poll_func = |socket: &mut smoltcp::socket::tcp::Socket<'_>| {
+        let poll_func = |socket: &mut tcp::Socket<'_>| {
             if socket.can_send() {
                 info!(
                     "[Tcp::pollout] (handle_loop {}, handle_dev {}) tx buf have slots",
                     handle_loop, handle_dev
                 );
-                Ok(true)
+                true
             } else {
                 if let Some(waker) = waker {
                     socket.register_send_waker(&waker);
                 }
-                Ok(false)
+                false
             }
         };
-        NET_INTERFACE.poll(is_local);
+        let mut net = NET_INTERFACE.lock();
+        net.poll(is_local);
         if is_local {
-            NET_INTERFACE.handle_tcp_socket_loop(handle_loop, poll_func)
+            Ok(poll_func(net.sockets_loop.get_mut(handle_loop)))
         } else {
-            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, poll_func)
+            Ok(poll_func(net.sockets_dev.get_mut(handle_dev)))
         }
     }
 }
@@ -292,40 +284,38 @@ impl Socket for TcpSocket {
 
     async fn connect(&self, addr: &[u8]) -> SyscallResult {
         let remote_endpoint = endpoint(addr)?;
-        self.inner.lock().remote_endpoint = Some(remote_endpoint);
+        let mut inner = self.inner.lock();
         let is_local = is_local(remote_endpoint);
         // 若不是多核心启动，需要在这里 yield ,防止单核心 Debug 没有 Yeild，这里直接Yield
         // yield_now().await;
-        self.tcp_connect(remote_endpoint)?;
+        inner.tcp_connect(remote_endpoint)?;
         loop {
-            NET_INTERFACE.poll(is_local);
-            let state = if is_local {
-                NET_INTERFACE.handle_tcp_socket_loop(self.inner.lock().handle_loop, |socket| socket.state())
+            let state = NET_INTERFACE.lock().pipe_ref_mut(|net| {
+                net.poll(is_local);
+                if is_local {
+                    net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop).state()
+                } else {
+                    net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev).state()
+                }
+            });
+            let handle = if is_local {
+                inner.handle_loop
             } else {
-                NET_INTERFACE.handle_tcp_socket_dev(self.inner.lock().handle_dev, |socket| socket.state())
-            };
-            let handler = if is_local {
-                self.inner.lock().handle_loop
-            } else {
-                self.inner.lock().handle_dev
+                inner.handle_dev
             };
             match state {
                 tcp::State::Closed => {
                     // close but not already connect, retry
-                    info!("[Tcp::connect] {} already closed, try again", handler);
-                    self.tcp_connect(remote_endpoint)?;
+                    info!("[Tcp::connect] {} already closed, try again", handle);
+                    inner.tcp_connect(remote_endpoint)?;
                     yield_now().await;
                 }
                 tcp::State::Established => {
-                    info!("[Tcp::connect] {} connected, state {:?}", handler, state);
-                    yield_now().await;
+                    info!("[Tcp::connect] {} connected, state {:?}", handle, state);
                     return Ok(());
                 }
                 _ => {
-                    info!(
-                            "[Tcp::connect] {} not connect yet, state {:?}",
-                            handler, state
-                        );
+                    info!("[Tcp::connect] {} not connect yet, state {:?}", handle, state);
                     yield_now().await;
                 }
             }
@@ -333,29 +323,27 @@ impl Socket for TcpSocket {
     }
 
     fn listen(&self) -> SyscallResult {
-        let (local, handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
-            (it.local_endpoint, it.handle_dev, it.handle_loop)
-        });
-        info!("[Tcp::listen] (handle_loop {}, handle_dev {}) listening: {:?}", handle_loop, handle_dev, local);
-        NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
-            let ret = socket.listen(local).map_err(|_| Errno::EADDRINUSE);
-            self.inner.lock().last_state_loop = socket.state();
-            ret
+        let mut inner = self.inner.lock();
+        info!(
+            "[Tcp::listen] (handle_loop {}, handle_dev {}) listening: {:?}",
+            inner.handle_loop, inner.handle_dev, inner.local_endpoint,
+        );
+        let mut net = NET_INTERFACE.lock();
+        let socket = net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop);
+        socket.listen(inner.local_endpoint).map_err(|_| Errno::EADDRINUSE).tap_mut(|_| {
+            inner.last_state_loop = socket.state();
         })?;
-        NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
-            let ret = socket.listen(local).ok().ok_or(Errno::EADDRINUSE);
-            self.inner.lock().last_state_dev = socket.state();
-            ret
+        let socket = net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev);
+        socket.listen(inner.local_endpoint).map_err(|_| Errno::EADDRINUSE).tap_mut(|_| {
+            inner.last_state_dev = socket.state();
         })?;
         Ok(())
     }
 
-    async fn accept(&self, sockfd: FdNum , addr: usize, addrlen: usize) -> SyscallResult<usize> {
+    async fn accept(&self, addr: usize, addrlen: usize) -> SyscallResult<usize> {
         let inner = self.inner.lock();
-        let handle_loop = inner.handle_loop;
-        let handle_dev = inner.handle_dev;
+        info!("[tcp] Accept on handle_loop {} handle_dev {}", inner.handle_loop, inner.handle_dev);
         drop(inner);
-        info!("[tcp] Accept on handle_loop {} handle_dev {}", handle_loop,handle_dev);
         let peer_addr = self.tcp_accept(*self.metadata.flags.lock()).await?;
         debug!("[tcp] Peer address: {:?}", peer_addr);
         let local = self.local_endpoint();
@@ -384,33 +372,31 @@ impl Socket for TcpSocket {
     }
 
     fn set_keep_live(&self, enabled: bool) -> SyscallResult {
-        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
-            (it.handle_dev, it.handle_loop)
-        });
+        let inner = self.inner.lock();
         if enabled {
-            NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
-                socket.set_keep_alive(Some(Duration::from_secs(1).into()))
-            });
-            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
-                socket.set_keep_alive(Some(Duration::from_secs(1).into()))
-            });
+            let mut net = NET_INTERFACE.lock();
+            let socket = net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop);
+            socket.set_keep_alive(Some(Duration::from_secs(1).into()));
+            let socket = net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev);
+            socket.set_keep_alive(Some(Duration::from_secs(1).into()));
         }
         Ok(())
     }
 
     fn dis_connect(&self, how: u32) -> SyscallResult {
-        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
-            (it.handle_dev, it.handle_loop)
-        });
-        NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| match how {
+        let inner = self.inner.lock();
+        let mut net = NET_INTERFACE.lock();
+        let socket = net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop);
+        match how {
             SHUT_WR => socket.close(),
             _ => socket.abort(),
-        });
-        NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| match how {
+        }
+        let socket = net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev);
+        match how {
             SHUT_WR => socket.close(),
             _ => socket.abort(),
-        });
-        NET_INTERFACE.poll_all();
+        }
+        net.poll_all();
         Ok(())
     }
 
@@ -421,14 +407,18 @@ impl Socket for TcpSocket {
     fn local_endpoint(&self) -> IpListenEndpoint {
         self.inner.lock().local_endpoint.clone()
     }
+
     fn remote_endpoint(&self) -> Option<IpEndpoint> {
-        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
-            (it.handle_dev, it.handle_loop)
-        });
-        let loop_remote =
-            NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| socket.remote_endpoint());
-        let dev_remote =
-            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| socket.remote_endpoint());
+        let inner = self.inner.lock();
+        let net = NET_INTERFACE.lock();
+        let loop_remote = net
+            .sockets_loop
+            .get::<tcp::Socket>(inner.handle_loop)
+            .remote_endpoint();
+        let dev_remote = net
+            .sockets_dev
+            .get::<tcp::Socket>(inner.handle_dev)
+            .remote_endpoint();
         match loop_remote {
             None => match dev_remote {
                 Some(_) => dev_remote,
@@ -440,18 +430,19 @@ impl Socket for TcpSocket {
 
     fn shutdown(&self, how: u32) -> SyscallResult<()> {
         info!("[TcpSocket::shutdown] how {}", how);
-        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
-            (it.handle_dev, it.handle_loop)
-        });
-        NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| match how {
+        let inner = self.inner.lock();
+        let mut net = NET_INTERFACE.lock();
+        let socket = net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop);
+        match how {
             SHUT_WR => socket.close(),
             _ => socket.abort(),
-        });
-        NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| match how {
+        }
+        let socket = net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev);
+        match how {
             SHUT_WR => socket.close(),
             _ => socket.abort(),
-        });
-        NET_INTERFACE.poll_all();
+        }
+        net.poll_all();
         Ok(())
     }
 
@@ -464,50 +455,34 @@ impl Socket for TcpSocket {
     }
 
     fn set_nagle_enabled(&self, enabled: bool) -> SyscallResult<usize> {
-        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
-            (it.handle_dev, it.handle_loop)
-        });
-        NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
-            socket.set_nagle_enabled(enabled)
-        });
-        NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| socket.set_nagle_enabled(enabled));
+        let inner = self.inner.lock();
+        let mut net = NET_INTERFACE.lock();
+        let socket = net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop);
+        socket.set_nagle_enabled(enabled);
+        let socket = net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev);
+        socket.set_nagle_enabled(enabled);
         Ok(0)
     }
 
     fn set_keep_alive(&self, enabled: bool) -> SyscallResult<usize> {
-        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
-            (it.handle_dev, it.handle_loop)
-        });
+        let inner = self.inner.lock();
+        let mut net = NET_INTERFACE.lock();
         if enabled {
-            NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
-                socket.set_keep_alive(Some(Duration::from_secs(1).into()))
-            });
-            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
-                socket.set_keep_alive(Some(Duration::from_secs(1).into()))
-            });
+            let socket = net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop);
+            socket.set_keep_alive(Some(Duration::from_secs(1).into()));
+            let socket = net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev);
+            socket.set_keep_alive(Some(Duration::from_secs(1).into()));
+        } else {
+            let socket = net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop);
+            socket.set_keep_alive(None);
+            let socket = net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev);
+            socket.set_keep_alive(None);
         }
         Ok(0)
     }
 
     async fn recv(&self, buf: &mut [u8], flags: RecvFromFlags) -> SyscallResult<isize> {
-        let future = TcpRecvFuture::new(self,buf,flags);
-        let ret =  future.await;
-        match ret {
-            Ok(len) => {
-                if len > MAX_BUFFER_SIZE / 2 {
-                    // need to be slow
-                    sleep_for(Duration::from_millis(2)).await.expect("TODO: panic message");
-                } else {
-                    yield_now().await;
-                }
-                Ok(len as isize)
-            },
-            Err(e) => Err(e)
-        }
-    }
-
-    async fn send(&self, buf: &[u8], flags: RecvFromFlags) -> SyscallResult<isize> {
-        let future = TcpSendFuture::new(self,buf,flags);
+        let future = TcpRecvFuture::new(self, buf, flags);
         let ret = future.await;
         match ret {
             Ok(len) => {
@@ -518,67 +493,80 @@ impl Socket for TcpSocket {
                     yield_now().await;
                 }
                 Ok(len as isize)
-            },
+            }
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn send(&self, buf: &[u8], flags: RecvFromFlags) -> SyscallResult<isize> {
+        let future = TcpSendFuture::new(self, buf, flags);
+        let ret = future.await;
+        match ret {
+            Ok(len) => {
+                if len > MAX_BUFFER_SIZE / 2 {
+                    // need to be slow
+                    sleep_for(Duration::from_millis(2)).await.expect("TODO: panic message");
+                } else {
+                    yield_now().await;
+                }
+                Ok(len as isize)
+            }
             Err(e) => Err(e)
         }
     }
 }
+
 impl Drop for TcpSocket {
     // 在 TcpSocket 被清除时，我们将它的端口号放回分配器中
     fn drop(&mut self) {
-        info!("[TcpSocket::Drop] ...");
-        /*
+        let inner = self.inner.lock();
         info!(
-            "[TcpSocket::drop] drop socket (handle_loop {}, handle_dev {}), localep {:?}",
-            self.inner.lock().handle_loop,
-            self.inner.lock().handle_dev,
-            self.inner.lock().local_endpoint
+            "[TcpSocket::Drop] dropping handle_loop {} handle_dev {}",
+            inner.handle_loop, inner.handle_dev,
         );
-         */
-        let (handle_dev, handle_loop) = self.inner.lock().pipe_ref_mut(|it| {
-            (it.handle_dev, it.handle_loop)
-        });
-        NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
-            info!("[TcpSocket::drop] before state is {:?}", socket.state());
-            if socket.is_open() {
-                socket.close();
-            }
-            info!("[TcpSocket::drop] after state is {:?}", socket.state());
-        });
-        NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
-            info!("[TcpSocket::drop] before state is {:?}", socket.state());
-            if socket.is_open() {
-                socket.close();
-            }
-            info!("[TcpSocket::drop] after state is {:?}", socket.state());
-        });
-        NET_INTERFACE.poll_all();
-        NET_INTERFACE.remove(handle_loop, handle_dev);
-        NET_INTERFACE.poll_all();
+        let mut net = NET_INTERFACE.lock();
+        let socket = net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop);
+        info!("[TcpSocket::drop] before state is {:?}", socket.state());
+        if socket.is_open() {
+            socket.close();
+        }
+        info!("[TcpSocket::drop] after state is {:?}", socket.state());
+        let socket = net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev);
+        info!("[TcpSocket::drop] before state is {:?}", socket.state());
+        if socket.is_open() {
+            socket.close();
+        }
+        info!("[TcpSocket::drop] after state is {:?}", socket.state());
+        net.poll_all();
+        net.remove(inner.handle_loop, inner.handle_dev);
+        net.poll_all();
     }
 }
+
 struct TcpAcceptFuture<'a> {
     socket: &'a TcpSocket,
     flags: OpenFlags,
 }
+
 impl<'a> TcpAcceptFuture<'a> {
     fn new(socket: &'a TcpSocket, flags: OpenFlags) -> Self {
         Self { socket, flags }
     }
 }
+
 impl<'a> Future for TcpAcceptFuture<'a> {
     type Output = SyscallResult<IpEndpoint>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let poll_func = |socket: &mut smoltcp::socket::tcp::Socket<'_>|{
-            if !socket.is_open(){
+        let inner = &mut *self.socket.inner.lock();
+        let mut poll_func = |socket: &mut tcp::Socket<'_>| {
+            if !socket.is_open() {
                 info!("[TcpAcceptFuture::poll] this socket is not open");
                 return Poll::Ready(Err(Errno::EINVAL));
             }
             if socket.state() == tcp::State::SynReceived
                 || socket.state() == tcp::State::Established
             {
-                let mut inner = self.socket.inner.lock();
                 if is_local(socket.remote_endpoint().unwrap()) {
                     inner.last_state_loop = socket.state();
                 } else {
@@ -588,33 +576,37 @@ impl<'a> Future for TcpAcceptFuture<'a> {
                 info!("[TcpAcceptFuture::poll] state become {:?}", socket.state());
                 return Poll::Ready(Ok(socket.remote_endpoint().unwrap()));
             }
-            if self.flags.contains(OpenFlags::O_NONBLOCK){
+            if self.flags.contains(OpenFlags::O_NONBLOCK) {
                 info!("[TcpAcceptFuture::poll] flags set nonblock");
                 return Poll::Ready(Err(Errno::EAGAIN));
             }
             Poll::Pending
         };
-        loop {
-            let (handle_dev, handle_loop) = self.socket.inner.lock().pipe_ref_mut(|it| {
-                (it.handle_dev, it.handle_loop)
-            });
-            NET_INTERFACE.poll_all();
-            let ret1 = NET_INTERFACE.handle_tcp_socket_loop(handle_loop, poll_func);
-            if ret1.is_ready() {
-                return ret1;
-            }
-            let ret2 = NET_INTERFACE.handle_tcp_socket_dev(handle_dev, poll_func);
-            if ret2.is_ready() {
-                return ret2;
-            }
+
+        let mut net = NET_INTERFACE.lock();
+        net.poll_all();
+        let socket = net.sockets_loop.get_mut(inner.handle_loop);
+        let ret1 = poll_func(socket);
+        if ret1.is_ready() {
+            return ret1;
         }
+        socket.register_recv_waker(cx.waker());
+        let socket = net.sockets_dev.get_mut(inner.handle_dev);
+        let ret2 = poll_func(socket);
+        if ret2.is_ready() {
+            return ret2;
+        }
+        socket.register_recv_waker(cx.waker());
+        Poll::Pending
     }
 }
+
 struct TcpRecvFuture<'a> {
     socket: &'a TcpSocket,
     buf: ManagedSlice<'a, u8>,
     flags: RecvFromFlags,
 }
+
 impl<'a> TcpRecvFuture<'a> {
     fn new<S>(socket: &'a TcpSocket, buf: S, flags: RecvFromFlags) -> Self
     where
@@ -632,196 +624,181 @@ impl<'a> Future for TcpRecvFuture<'a> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let is_local = is_local(self.socket.remote_endpoint().unwrap());
-        NET_INTERFACE.poll(is_local);
-        let (handle_dev, handle_loop) = self.socket.inner.lock().pipe_ref_mut(|it| {
-            (it.handle_dev, it.handle_loop)
-        });
-        let ret = if is_local{
-            NET_INTERFACE.handle_tcp_socket_loop(handle_loop,|socket|{
-                if socket.state() == tcp::State::CloseWait || socket.state() == tcp::State::TimeWait
-                {
-                    log::info!("[TcpRecvFuture::poll] state become {:?}", socket.state());
-                    return Poll::Ready(Ok(0));
+        let inner = self.socket.inner.lock();
+        let mut net = NET_INTERFACE.lock();
+        net.poll(is_local);
+        let ret = if is_local {
+            let socket = net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop);
+            if socket.state() == tcp::State::CloseWait || socket.state() == tcp::State::TimeWait {
+                info!("[TcpRecvFuture::poll] state become {:?}", socket.state());
+                return Poll::Ready(Ok(0));
+            }
+            if !socket.may_recv() {
+                info!("[TcpRecvFuture::poll] err when recv, state {:?}", socket.state());
+                return Poll::Ready(Err(Errno::ENOTCONN));
+            }
+            info!("[TcpRecvFuture::poll] state {:?}", socket.state());
+            if !socket.can_recv() {
+                info!("[TcpRecvFuture::poll] cannot recv yet");
+                if self.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
+                    info!("[TcpRecvFuture::poll] already set nonblock");
+                    return Poll::Ready(Err(Errno::EAGAIN));
                 }
-                if !socket.may_recv() {
-                    info!(
-                        "[TcpRecvFuture::poll] err when recv, state {:?}",
-                        socket.state()
-                    );
-                    return Poll::Ready(Err(Errno::ENOTCONN));
-                }
-                info!("[TcpRecvFuture::poll] state {:?}", socket.state());
-                if !socket.can_recv() {
-                    info!("[TcpRecvFuture::poll] cannot recv yet");
-
-                    if self.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
-                        info!("[TcpRecvFuture::poll] already set nonblock");
-                        return Poll::Ready(Err(Errno::EAGAIN));
+                socket.register_recv_waker(cx.waker());
+                return Poll::Pending;
+            }
+            info!("[TcpRecvFuture::poll] start to recv...");
+            let this = self.get_mut();
+            info!(
+                "[TcpRecvFuture::poll] {:?} <- {:?}",
+                socket.local_endpoint(),
+                socket.remote_endpoint(),
+            );
+            Poll::Ready(
+                match if this.flags.contains(RecvFromFlags::MSG_PEEK) {
+                    info!("[TcpRecvFuture::poll] get flags MSG_PEEK");
+                    socket.peek_slice(&mut this.buf)
+                } else {
+                    socket.recv_slice(&mut this.buf)
+                } {
+                    Ok(nbytes) => {
+                        info!(
+                            "[TcpRecvFuture::poll] recv {} bytes, buf[0] {}",
+                            nbytes, this.buf[0] as char,
+                        );
+                        Ok(nbytes)
                     }
-                    socket.register_recv_waker(cx.waker());
-                    return Poll::Pending;
+                    Err(_) => Err(Errno::ENOTCONN)
+                },
+            )
+        } else {
+            let socket = net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev);
+            if socket.state() == tcp::State::CloseWait || socket.state() == tcp::State::TimeWait {
+                info!("[TcpRecvFuture::poll] state become {:?}", socket.state());
+                return Poll::Ready(Ok(0));
+            }
+            if !socket.may_recv() {
+                info!("[TcpRecvFuture::poll] err when recv, state {:?}", socket.state());
+                return Poll::Ready(Err(Errno::ENOTCONN));
+            }
+            info!("[TcpRecvFuture::poll] state {:?}", socket.state());
+            if !socket.can_recv() {
+                info!("[TcpRecvFuture::poll] cannot recv yet");
+                if self.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
+                    info!("[TcpRecvFuture::poll] already set nonblock");
+                    return Poll::Ready(Err(Errno::EAGAIN));
                 }
-                info!("[TcpRecvFuture::poll] start to recv...");
-                let this = self.get_mut();
-                info!(
+                socket.register_recv_waker(cx.waker());
+                return Poll::Pending;
+            }
+            info!("[TcpRecvFuture::poll] start to recv...");
+            let this = self.get_mut();
+            info!(
                     "[TcpRecvFuture::poll] {:?} <- {:?}",
                     socket.local_endpoint(),
-                    socket.remote_endpoint()
+                    socket.remote_endpoint(),
                 );
-                Poll::Ready(
-                    match if this.flags.contains(RecvFromFlags::MSG_PEEK) {
-                        info!("[TcpRecvFuture::poll] get flags MSG_PEEK");
-                        socket.peek_slice(&mut this.buf)
-                    }else{
-                        socket.recv_slice(&mut this.buf)
-                    } {
-                        Ok(nbytes) => {
-                            info!(
-                                "[TcpRecvFuture::poll] recv {} bytes, buf[0] {}",
-                                nbytes, this.buf[0] as char
-                            );
-                            Ok(nbytes)
-                        }
-                        Err(_) => Err(ENOTCONN)
-                    },
-                )
-            })
-        }else{
-            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
-                if socket.state() == tcp::State::CloseWait || socket.state() == tcp::State::TimeWait
-                {
-                    log::info!("[TcpRecvFuture::poll] state become {:?}", socket.state());
-                    return Poll::Ready(Ok(0));
-                }
-                if !socket.may_recv() {
-                    log::info!(
-                        "[TcpRecvFuture::poll] err when recv, state {:?}",
-                        socket.state()
-                    );
-                    return Poll::Ready(Err(Errno::ENOTCONN));
-                }
-                log::info!("[TcpRecvFuture::poll] state {:?}", socket.state());
-                if !socket.can_recv() {
-                    log::info!("[TcpRecvFuture::poll] cannot recv yet");
-                    if self.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
-                        log::info!("[TcpRecvFuture::poll] already set nonblock");
-                        return Poll::Ready(Err(Errno::EAGAIN));
+            Poll::Ready(
+                match if this.flags.contains(RecvFromFlags::MSG_PEEK) {
+                    info!("flags: {:?}", this.flags);
+                    info!("[TcpRecvFuture::poll] get flags MSG_PEEK");
+                    socket.peek_slice(&mut this.buf)
+                } else {
+                    socket.recv_slice(&mut this.buf)
+                } {
+                    Ok(nbytes) => {
+                        info!("[TcpRecvFuture::poll] recv {} bytes, buf[0] {}", nbytes, this.buf[0] as char);
+                        Ok(nbytes)
                     }
-                    socket.register_recv_waker(cx.waker());
-                    return Poll::Pending;
-                }
-                log::info!("[TcpRecvFuture::poll] start to recv...");
-                let this = self.get_mut();
-                info!(
-                    "[TcpRecvFuture::poll] {:?} <- {:?}",
-                    socket.local_endpoint(),
-                    socket.remote_endpoint()
-                );
-                Poll::Ready(
-                    match if this.flags.contains(RecvFromFlags::MSG_PEEK) {
-                        info!("flags: {:?}", this.flags);
-                        info!("[TcpRecvFuture::poll] get flags MSG_PEEK");
-                        socket.peek_slice(&mut this.buf)
-                    }else{
-                        socket.recv_slice(&mut this.buf)
-                    } {
-                        Ok(nbytes) => {
-                            info!(
-                                "[TcpRecvFuture::poll] recv {} bytes, buf[0] {}",
-                                nbytes, this.buf[0] as char
-                            );
-                            Ok(nbytes)
-                        }
-                        Err(_) => Err(ENOTCONN),
-                    },
-                )
-            })
+                    Err(_) => Err(Errno::ENOTCONN),
+                },
+            )
         };
-        NET_INTERFACE.poll(is_local);
+        net.poll(is_local);
         ret
     }
 }
+
 struct TcpSendFuture<'a> {
     socket: &'a TcpSocket,
     buf: &'a [u8],
     flags: RecvFromFlags,
 }
+
 impl<'a> TcpSendFuture<'a> {
     fn new(socket: &'a TcpSocket, buf: &'a [u8], flags: RecvFromFlags) -> Self {
         Self { socket, buf, flags }
     }
 }
+
 impl<'a> Future for TcpSendFuture<'a> {
     type Output = SyscallResult<usize>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let is_local = is_local(self.socket.remote_endpoint().unwrap());
-        NET_INTERFACE.poll(is_local);
-        let (handle_dev, handle_loop) = self.socket.inner.lock().pipe_ref_mut(|it| {
-            (it.handle_dev, it.handle_loop)
-        });
+        let inner = self.socket.inner.lock();
+        let mut net = NET_INTERFACE.lock();
+        net.poll(is_local);
         let ret = if is_local {
-            NET_INTERFACE.handle_tcp_socket_loop(handle_loop, |socket| {
-                if !socket.may_send() {
-                    info!("[TcpSendFuture::poll] err when send");
-                    return Poll::Ready(Err(ENOTCONN));
+            let socket = net.sockets_loop.get_mut::<tcp::Socket>(inner.handle_loop);
+            if !socket.may_send() {
+                info!("[TcpSendFuture::poll] err when send");
+                return Poll::Ready(Err(Errno::ENOTCONN));
+            }
+            if !socket.can_send() {
+                info!("[TcpSendFuture::poll] cannot send yet");
+                if self.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
+                    info!("[TcpSendFuture::poll] already set nonblock");
+                    return Poll::Ready(Err(Errno::EAGAIN));
                 }
-                if !socket.can_send() {
-                    info!("[TcpSendFuture::poll] cannot send yet");
-                    if self.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
-                        info!("[TcpSendFuture::poll] already set nonblock");
-                        return Poll::Ready(Err(Errno::EAGAIN));
-                    }
-                    socket.register_send_waker(cx.waker());
-                    return Poll::Pending;
-                }
-                log::info!("[TcpSendFuture::poll] start to send...");
-                let this = self.get_mut();
-                info!(
+                socket.register_send_waker(cx.waker());
+                return Poll::Pending;
+            }
+            info!("[TcpSendFuture::poll] start to send...");
+            let this = self.get_mut();
+            info!(
                     "[TcpSendFuture::poll] {:?} -> {:?}",
                     socket.local_endpoint(),
                     socket.remote_endpoint()
                 );
-                Poll::Ready(match socket.send_slice(&mut this.buf) {
-                    Ok(nbytes) => {
-                        info!("[TcpSendFuture::poll] send {} bytes", nbytes);
-                        Ok(nbytes)
-                    }
-                    Err(_) => Err(Errno::ENOTCONN),
-                })
+            Poll::Ready(match socket.send_slice(&mut this.buf) {
+                Ok(nbytes) => {
+                    info!("[TcpSendFuture::poll] send {} bytes", nbytes);
+                    Ok(nbytes)
+                }
+                Err(_) => Err(Errno::ENOTCONN),
             })
-        }else{
-            NET_INTERFACE.handle_tcp_socket_dev(handle_dev, |socket| {
-                if !socket.may_send() {
-                    info!("[TcpSendFuture::poll] err when send");
-                    return Poll::Ready(Err(Errno::ENOTCONN));
+        } else {
+            let socket = net.sockets_dev.get_mut::<tcp::Socket>(inner.handle_dev);
+            if !socket.may_send() {
+                info!("[TcpSendFuture::poll] err when send");
+                return Poll::Ready(Err(Errno::ENOTCONN));
+            }
+            if !socket.can_send() {
+                info!("[TcpSendFuture::poll] cannot send yet");
+                if self.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
+                    info!("[TcpSendFuture::poll] already set nonblock");
+                    return Poll::Ready(Err(Errno::EAGAIN));
                 }
-                if !socket.can_send() {
-                    log::info!("[TcpSendFuture::poll] cannot send yet");
-                    if self.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
-                        log::info!("[TcpSendFuture::poll] already set nonblock");
-                        return Poll::Ready(Err(Errno::EAGAIN));
-                    }
-                    socket.register_send_waker(cx.waker());
-                    return Poll::Pending;
-                }
-                log::info!("[TcpSendFuture::poll] start to send...");
-                let this = self.get_mut();
-                info!(
+                socket.register_send_waker(cx.waker());
+                return Poll::Pending;
+            }
+            info!("[TcpSendFuture::poll] start to send...");
+            let this = self.get_mut();
+            info!(
                     "[TcpSendFuture::poll] {:?} -> {:?}",
                     socket.local_endpoint(),
                     socket.remote_endpoint()
                 );
-                Poll::Ready(match socket.send_slice(&mut this.buf) {
-                    Ok(nbytes) => {
-                        info!("[TcpSendFuture::poll] send {} bytes", nbytes);
-                        Ok(nbytes)
-                    }
-                    Err(_) => Err(Errno::ENOTCONN),
-                })
+            Poll::Ready(match socket.send_slice(&mut this.buf) {
+                Ok(nbytes) => {
+                    info!("[TcpSendFuture::poll] send {} bytes", nbytes);
+                    Ok(nbytes)
+                }
+                Err(_) => Err(Errno::ENOTCONN),
             })
         };
-        NET_INTERFACE.poll(is_local);
+        net.poll(is_local);
         ret
     }
 }

@@ -63,7 +63,7 @@ pub async fn sys_accept(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallRe
     info!("[sys_accept] sockfd: {}", sockfd);
     let ret = current_process().inner.lock()
         .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?
-        .accept(sockfd ,addr, addrlen).await;
+        .accept(addr, addrlen).await;
     ret
 }
 

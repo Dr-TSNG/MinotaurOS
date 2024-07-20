@@ -1,83 +1,68 @@
 use alloc::string::ToString;
 use alloc::sync::Arc;
-
-use async_trait::async_trait;
-use log::{info, log};
-use smoltcp::{
-    phy::{self, DeviceCapabilities},
-    time::Instant,
-};
-use smoltcp::phy::Device;
-use spin::mutex::SpinMutex;
-use virtio_drivers::{
-    device::net::{RxBuffer, VirtIONet},
-    Error,
-    transport::mmio::{MmioTransport, VirtIOHeader},
-};
-
+use smoltcp::phy::DeviceCapabilities;
+use smoltcp::time::Instant;
+use virtio_drivers::device::net::{RxBuffer, VirtIONet};
+use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
 use crate::arch::VirtAddr;
-use crate::driver::{DeviceMeta, NET_DEVICE};
+use crate::driver::DeviceMeta;
 use crate::driver::virtio::VirtioHal;
+use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
-
-type Mutex<T> = SpinMutex<T>;
 
 const QUEUE_SIZE: usize = 16;
 const BUF_LEN: usize = 1 << 12;
 
-// Virt-NetIO的驱动
-type NetDevice = VirtIONet<VirtioHal, MmioTransport, QUEUE_SIZE>;
+// Virt-NetIO 的驱动
+type Net = VirtIONet<VirtioHal, MmioTransport, QUEUE_SIZE>;
 
 
-pub struct VirtIONetDevice{
+pub struct VirtIONetDevice {
     metadata: DeviceMeta,
     base_addr: VirtAddr,
-    dev:LateInit<Arc<Mutex<NetDevice>>>,
+    dev: LateInit<Arc<Mutex<Net>>>,
 }
 
-#[async_trait]
-impl super::NetDevice for VirtIONetDevice{
-    fn metadata(&self) -> &DeviceMeta {
+impl VirtIONetDevice {
+    pub fn metadata(&self) -> &DeviceMeta {
         &self.metadata
     }
 
-    fn init(&self) {
+    pub fn init(&self) {
         unsafe {
             let header = self.base_addr.as_ptr().cast::<VirtIOHeader>().as_mut().unwrap();
             let transport = MmioTransport::new(header.into()).unwrap();
-            let net = NetDevice::new(transport,BUF_LEN).unwrap();
+            let net = Net::new(transport, BUF_LEN).unwrap();
             self.dev.init(Arc::new(Mutex::new(net)));
         }
     }
 }
 
-pub struct VirtioRxToken(Arc<Mutex<NetDevice>>, RxBuffer);
-pub struct VirtioTxToken(Arc<Mutex<NetDevice>>);
+pub struct VirtioRxToken(Arc<Mutex<Net>>, RxBuffer);
+pub struct VirtioTxToken(Arc<Mutex<Net>>);
 
-impl smoltcp::phy::Device for VirtIONetDevice{
-    type RxToken<'a>
-    = VirtioRxToken where
-        Self: 'a;
-    type TxToken<'a> =
-    VirtioTxToken
+impl smoltcp::phy::Device for VirtIONetDevice {
+    type RxToken<'a> = VirtioRxToken
     where
-        Self: 'a
-    ;
+        Self: 'a;
+    type TxToken<'a> = VirtioTxToken
+    where
+        Self: 'a;
 
-    fn receive(&mut self, timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
+    fn receive(&mut self, _timestamp: Instant) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
         match self.dev.lock().receive() {
             Ok(buf) => {
                 Some((
-                    VirtioRxToken(self.dev.clone(),buf),
+                    VirtioRxToken(self.dev.clone(), buf),
                     VirtioTxToken(self.dev.clone()),
                 ))
-            },
-            Err(Error::NotReady) => {None},
-            Err(err) => {panic!("receive failed : {}",err)},
+            }
+            Err(virtio_drivers::Error::NotReady) => { None }
+            Err(err) => { panic!("receive failed : {}", err) }
         }
     }
 
-    fn transmit(&mut self, timestamp: Instant) -> Option<Self::TxToken<'_>> {
+    fn transmit(&mut self, _timestamp: Instant) -> Option<Self::TxToken<'_>> {
         Some(VirtioTxToken(self.dev.clone()))
     }
 
@@ -89,7 +74,7 @@ impl smoltcp::phy::Device for VirtIONetDevice{
     }
 }
 
-impl phy::RxToken for VirtioRxToken {
+impl smoltcp::phy::RxToken for VirtioRxToken {
     fn consume<R, F>(self, f: F) -> R
     where
         F: FnOnce(&mut [u8]) -> R,
@@ -100,7 +85,8 @@ impl phy::RxToken for VirtioRxToken {
         ret
     }
 }
-impl phy::TxToken for VirtioTxToken {
+
+impl smoltcp::phy::TxToken for VirtioTxToken {
     fn consume<R, F>(self, len: usize, f: F) -> R
     where
         F: FnOnce(&mut [u8]) -> R,
@@ -115,11 +101,10 @@ impl phy::TxToken for VirtioTxToken {
 
 impl VirtIONetDevice {
     pub fn new(base_addr: VirtAddr) -> Self {
-        let ret = Self{
-            base_addr,
+        Self {
             metadata: DeviceMeta::new("virtio-net".to_string()),
+            base_addr,
             dev: LateInit::new(),
-        };
-        ret
+        }
     }
 }

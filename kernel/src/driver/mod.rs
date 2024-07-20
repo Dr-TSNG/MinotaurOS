@@ -4,24 +4,24 @@ use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::{format, vec};
 use alloc::vec::Vec;
+use core::ops::Deref;
 use core::task::Waker;
 use async_trait::async_trait;
 use fdt_rs::base::DevTree;
 use fdt_rs::error::DevTreeError;
 use fdt_rs::index::{DevTreeIndex, DevTreeIndexNode};
 use fdt_rs::prelude::PropReader;
-use log::info;
 use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 use crate::config::{KERNEL_ADDR_OFFSET, KERNEL_MMIO_BASE};
 use crate::driver::plic::PLIC;
-use crate::driver::virtio::VirtIODevice;
-use crate::driver::virtnet::{VirtIONetDevice, VirtioRxToken, VirtioTxToken};
+use crate::driver::virtio::blk::VirtIOBlkDevice;
+use crate::driver::virtio::net::VirtIONetDevice;
 use crate::fs::devfs::tty::{DEFAULT_TTY, TtyFile};
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::FileMeta;
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::IdAllocator;
-use crate::{panic, println};
+use crate::println;
 use crate::result::SyscallResult;
 use crate::sync::mutex::{Mutex, RwLock};
 use crate::sync::once::LateInit;
@@ -30,32 +30,14 @@ pub mod ns16550a;
 pub mod plic;
 pub mod random;
 pub mod virtio;
-pub mod virtnet;
 
 pub static BOARD_INFO: LateInit<BoardInfo> = LateInit::new();
 pub static GLOBAL_MAPPINGS: LateInit<Vec<GlobalMapping>> = LateInit::new();
 pub static DEVICES: RwLock<BTreeMap<usize, Device>> = RwLock::new(BTreeMap::new());
+pub static NET_DEVICE: Mutex<Option<VirtIONetDevice>> = Mutex::new(None);
 
 static DEV_ID_ALLOCATOR: Mutex<IdAllocator> = Mutex::new(IdAllocator::new(1));
-
-pub static NET_DEVICE: Mutex<Option<VirtIONetDevice>> = Mutex::new(None);
-// virt-net vrit address , 在设备树识别时更新
-pub static mut VIRTIO_NET_ADDR:Option<usize> = None;
-
-/// 暂时不将net dev加入设备树。
-pub fn temp_init_net_device(){
-    unsafe {
-        if VIRTIO_NET_ADDR == None {
-            panic!("not registered virt-io-net dev when init");
-        }
-    }
-    let virt: VirtAddr = VirtAddr(unsafe { VIRTIO_NET_ADDR }.unwrap());
-    let virt_io_dev = VirtIONetDevice::new(virt);
-    // init here , not in init_driver
-    virt_io_dev.init();
-    unsafe { *NET_DEVICE.lock() = Some(virt_io_dev); }
-    info!("ready!!");
-}
+static NET_DEVICE_ADDR: Mutex<Option<VirtAddr>> = Mutex::new(None);
 
 pub struct BoardInfo {
     pub smp: usize,
@@ -95,7 +77,6 @@ impl GlobalMapping {
 pub enum Device {
     Block(Arc<dyn BlockDevice>),
     Character(Arc<dyn CharacterDevice>),
-    Net(Arc<VirtIONetDevice>),
 }
 
 impl Device {
@@ -103,7 +84,6 @@ impl Device {
         match self {
             Device::Block(dev) => dev.metadata(),
             Device::Character(dev) => dev.metadata(),
-            Device::Net(dev) => dev.metadata(),
         }
     }
 
@@ -111,7 +91,6 @@ impl Device {
         match self {
             Device::Block(dev) => dev.init(),
             Device::Character(dev) => dev.init(),
-            Device::Net(dev) => dev.init(),
         }
     }
 }
@@ -177,13 +156,6 @@ trait IrqDevice: Send + Sync {
     fn handle_irq(&self);
 }
 
-#[async_trait]
-pub trait NetDevice: Send + Sync{
-    /// 设备元数据
-    fn metadata(&self) -> &DeviceMeta;
-    fn init(&self);
-}
-
 pub fn init_dtb(dtb_paddr: usize) {
     parse_dev_tree(dtb_paddr).unwrap()
 }
@@ -198,7 +170,12 @@ pub fn init_driver() -> SyscallResult<()> {
         }
     }
     BOARD_INFO.plic.init(BOARD_INFO.smp);
-    temp_init_net_device();
+    if let Some(addr) = NET_DEVICE_ADDR.lock().deref() {
+        let dev = VirtIONetDevice::new(*addr);
+        dev.init();
+        NET_DEVICE.lock().replace(dev);
+        crate::net::init();
+    }
     Ok(())
 }
 
@@ -273,20 +250,19 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                 if name == "virtio_mmio@10001000" {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let mapping = GlobalMapping::new(
-                        "[virtio]".to_string(),
+                        "[virtio_blk]".to_string(),
                         PhysAddr(reg[0].0),
                         KERNEL_MMIO_BASE + mmio_offset,
                         reg[0].1,
                         ASPerms::R | ASPerms::W,
                     );
                     mmio_offset += reg[0].1;
-                    let dev = Arc::new(VirtIODevice::new(mapping.virt_start));
+                    let dev = Arc::new(VirtIOBlkDevice::new(mapping.virt_start));
                     DEVICES.write().insert(dev.metadata().dev_id, Device::Block(dev));
-                    println!("[kernel] Register virtio device at {:?}", mapping.virt_start);
+                    println!("[kernel] Register virtio block device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
-                }else if name == "virtio_mmio@10008000"{
+                } else if name == "virtio_mmio@10008000" {
                     let reg = parse_reg(&node, addr_cells, size_cells);
-                    mmio_offset = mmio_offset.div_ceil(0x1000)*0x1000;
                     let mapping = GlobalMapping::new(
                         "[virtio_net]".to_string(),
                         PhysAddr(reg[0].0),
@@ -295,13 +271,11 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                         ASPerms::R | ASPerms::W,
                     );
                     mmio_offset += reg[0].1;
-                    let dev = Arc::new(VirtIONetDevice::new(mapping.virt_start));
-                    // DEVICES.write().insert(dev.metadata().dev_id, Device::Net(dev));
-                    println!("[kernel] Register virtio-net device at {:?}", mapping.virt_start);
-                    unsafe { VIRTIO_NET_ADDR.replace(mapping.virt_start.0); }
+                    // let dev = Arc::new(VirtIONetDevice::new(mapping.virt_start));
+                    NET_DEVICE_ADDR.lock().replace(mapping.virt_start);
+                    println!("[kernel] Register virtio net device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
-                }
-                else if name.starts_with("plic@") {
+                } else if name.starts_with("plic@") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     if mmio_offset % reg[0].1 != 0 {
                         mmio_offset += reg[0].1 - mmio_offset % reg[0].1;

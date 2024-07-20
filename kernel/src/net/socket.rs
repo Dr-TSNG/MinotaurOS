@@ -1,11 +1,9 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
-
 use async_trait::async_trait;
 use bitflags::bitflags;
 use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
-
 use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::fs::file::File;
 use crate::net::netaddress::{fill_with_endpoint, to_endpoint};
@@ -28,10 +26,6 @@ pub const BUFFER_SIZE: usize = 1 << 17;
 pub struct SocketTable(BTreeMap<FdNum, Arc<dyn Socket>>);
 
 impl SocketTable {
-    pub const fn new() -> Self {
-        Self(BTreeMap::new())
-    }
-
     pub fn insert(&mut self, key: FdNum, value: Arc<dyn Socket>) {
         self.0.insert(key, value);
     }
@@ -99,7 +93,7 @@ pub trait Socket: File {
         Err(Errno::EOPNOTSUPP)
     }
 
-    async fn accept(&self, sockfd: FdNum , addr: usize, addrlen: usize) -> SyscallResult<usize> {
+    async fn accept(&self, addr: usize, addrlen: usize) -> SyscallResult<usize> {
         Err(Errno::EOPNOTSUPP)
     }
 
