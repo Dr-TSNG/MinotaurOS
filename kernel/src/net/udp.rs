@@ -1,5 +1,6 @@
 use alloc::boxed::Box;
 use alloc::vec;
+use core::f32::consts::E;
 use async_trait::async_trait;
 use core::future::Future;
 use core::pin::Pin;
@@ -17,7 +18,7 @@ use smoltcp::socket::udp::{PacketMetadata, SendError, UdpMetadata};
 use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
 use crate::fs::file::{File, FileMeta};
 use crate::net::iface::NET_INTERFACE;
-use crate::net::MAX_BUFFER_SIZE;
+use crate::net::{MAX_BUFFER_SIZE, RecvFromFlags};
 use crate::net::netaddress::{endpoint, is_local, SocketAddressV4};
 use crate::net::socket::{Socket};
 use crate::net::socket::{SocketType, BUFFER_SIZE};
@@ -84,90 +85,35 @@ impl File for UdpSocket {
     }
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
-        /*
-        {
-            info!(
-                "[Ucp::read] (handle_loop {}, handle_dev {}) enter",
-                self.inner.lock().handle_loop,self.inner.lock().handle_dev
-            );
-        }
-         */
-        let buf_start = buf.as_ptr() as usize;
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
+        info!(
+            "[Ucp::read] ({}, {}) enter",handle_loop,handle_dev
+        );
         let flags = self.metadata().flags.lock();
-        // back loop dev
-        let future1 = UdpRecvFuture::new(self, buf_start, buf.len(), *flags, true);
-        // os virt-net dev
-        let future2 = UdpRecvFuture::new(self,buf_start,buf.len(),*flags,false);
-        match select(future1,future2).await {
-            Either::Left(ret1) => {
-                match ret1 {
-                    (len,future) => {
-                        match len {
-                            Ok(len) => {
-                                if len > MAX_BUFFER_SIZE / 2 {
-                                    // need to be slow
-                                    sleep_for(Duration::from_millis(1)).await.expect("TODO: panic message");
-                                } else {
-                                    yield_now().await;
-                                }
-                                Ok(len as isize)
-                            }
-                            Err(e) => {
-                                Err(e)
-                            }
-                        }
-                    }
-                }
-            }
-            Either::Right(ret2) => {
-                match ret2 {
-                    (len,future) => {
-                        match len {
-                            Ok(len) => {
-                                if len > MAX_BUFFER_SIZE / 2 {
-                                    // need to be slow
-                                    sleep_for(Duration::from_millis(1)).await.expect("TODO: panic message");
-                                } else {
-                                    yield_now().await;
-                                }
-                                Ok(len as isize)
-                            }
-                            Err(e) => {
-                                Err(e)
-                            }
-                        }
-                    }
-                }
-            }
+        let mut flags_recv = RecvFromFlags::default();
+        if flags.contains(OpenFlags::O_NONBLOCK){
+            flags_recv = RecvFromFlags::MSG_DONTWAIT;
         }
+        self.recv(buf,flags_recv).await
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
-        info!("Entry udp write");
-        // info!("[Udp::inner locked? {}]",self.inner.is_locked());
-        {
-            /*
-            info!(
-                "[Ucp::write] (handle_loop {}, handle_dev {}) enter",
-                self.inner.lock().handle_loop,self.inner.lock().handle_dev
-            );
-
-             */
-        }
-        info!("[Udp::write] prepare");
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
+        info!(
+            "[Ucp::read] ({}, {}) enter",handle_loop,handle_dev
+        );
         let flags = self.metadata().flags.lock();
-        match UdpSendFuture::new(self, buf, *flags).await {
-            Ok(len) => {
-                if len > MAX_BUFFER_SIZE / 2 {
-                    sleep_for(Duration::from_millis(2)).await?;
-                } else {
-                    yield_now().await;
-                }
-                info!("udp send ok");
-                Ok(len as isize)
-            }
-            Err(e) => Err(e),
+        let mut flags_recv = RecvFromFlags::default();
+        if flags.contains(OpenFlags::O_NONBLOCK) {
+            flags_recv = RecvFromFlags::MSG_DONTWAIT;
         }
+        self.send(buf, flags_recv).await
     }
 
     fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
@@ -346,7 +292,89 @@ impl Socket for UdpSocket {
     fn send_buf_size(&self) -> SyscallResult<usize> {
         Ok(self.inner.lock().sendbuf_size)
     }
+
+    async fn recv(&self, buf: &mut [u8], flags: RecvFromFlags) -> SyscallResult<isize> {
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
+        info!(
+            "[Ucp::recv] ({}, {}) enter",handle_loop,handle_dev
+        );
+        let buf_start = buf.as_ptr() as usize;
+        // back loop dev
+        let future1 = UdpRecvFuture::new(self, buf_start, buf.len(), flags, true);
+        // os virt-net dev
+        let future2 = UdpRecvFuture::new(self,buf_start,buf.len(),flags,false);
+        match select(future1,future2).await{
+            Either::Left(ret1) => {
+                match ret1 {
+                    (len,future) => {
+                        match len {
+                            Ok(len) => {
+                                if len > MAX_BUFFER_SIZE / 2 {
+                                    // need to be slow
+                                    sleep_for(Duration::from_millis(1)).await.expect("TODO: panic message");
+                                } else {
+                                    yield_now().await;
+                                }
+                                Ok(len as isize)
+                            }
+                            Err(e) => {
+                                Err(e)
+                            }
+                        }
+                    }
+                }
+            }
+            Either::Right(ret2) => {
+                match ret2 {
+                    (len,future) => {
+                        match len {
+                            Ok(len) => {
+                                if len > MAX_BUFFER_SIZE / 2 {
+                                    // need to be slow
+                                    sleep_for(Duration::from_millis(1)).await.expect("TODO: panic message");
+                                } else {
+                                    yield_now().await;
+                                }
+                                Ok(len as isize)
+                            }
+                            Err(e) => {
+                                Err(e)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn send(&self, buf: &[u8], flags: RecvFromFlags) -> SyscallResult<isize> {
+        let inner = self.inner.lock();
+        let handle_loop = inner.handle_loop;
+        let handle_dev = inner.handle_dev;
+        drop(inner);
+        info!(
+            "[Ucp::recv] ({}, {}) enter",handle_loop,handle_dev
+        );
+        let future = UdpSendFuture::new(self,buf,flags);
+        let ret = future.await;
+        match ret {
+            Ok(len) => {
+                if len > MAX_BUFFER_SIZE / 2 {
+                    // need to be slow
+                    sleep_for(Duration::from_millis(1)).await;
+                } else {
+                    yield_now().await;
+                }
+                Ok(len as isize)
+            }
+            Err(e) => {Err(e)}
+        }
+    }
 }
+
 impl Drop for UdpSocket {
     fn drop(&mut self) {
         /*
@@ -377,17 +405,12 @@ impl Drop for UdpSocket {
     }
 }
 
-
-// udp recv future 无连接过程， 不知道远程发送信息的 socket 是否是 local ，
-// 所以这里加入 for_loop ， 在 recv 时，同时启动两个接受过程 。
-// 方法有两个，一个是在 recv函数中启动两个future ， 等待任意一个结束；
-// 另一个是改造 UdpRecvFuture，使它可以等待 本地loop成功接受或者 os virt-net成功接受
 struct UdpRecvFuture<'a> {
     socket: &'a UdpSocket,
     // buf: ManagedSlice<'a, u8>,
     buf_start: usize,
     buf_len: usize,
-    flags: OpenFlags,
+    flags: RecvFromFlags,
     for_loop: bool,
 }
 impl<'a> UdpRecvFuture<'a> {
@@ -395,7 +418,7 @@ impl<'a> UdpRecvFuture<'a> {
         socket: &'a UdpSocket,
         buf_start: usize,
         buf_len: usize,
-        flags: OpenFlags,
+        flags: RecvFromFlags,
         for_loop: bool,
     ) -> Self {
         Self {
@@ -422,7 +445,7 @@ impl<'a> Future for UdpRecvFuture<'a> {
                 let this = self.get_mut();
                 if !socket.can_recv() {
                     info!("[UdpRecvFuture::poll] cannot recv yet");
-                    if this.flags.contains(OpenFlags::O_NONBLOCK) {
+                    if this.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
                         info!("[UdpRecvFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }
@@ -430,26 +453,42 @@ impl<'a> Future for UdpRecvFuture<'a> {
                     return Poll::Pending;
                 }
                 info!("[UdpRecvFuture::poll] start to recv...");
-                Poll::Ready({
-                    let (ret, meta) = socket
-                        .recv_slice(unsafe {
-                            &mut core::slice::from_raw_parts_mut(
-                                this.buf_start as *mut u8,
-                                this.buf_len,
-                            )
-                        })
-                        .ok()
-                        .ok_or(Errno::ENOTCONN)?;
-                    let remote = meta.endpoint;
-                    info!(
-                        "[UdpRecvFuture::poll] {:?} <- {:?}",
-                        socket.endpoint(),
-                        remote
-                    );
-                    this.socket.inner.lock().remote_endpoint = Some(remote);
-                    debug!("[UdpRecvFuture::poll] recv {} bytes", ret);
-                    Ok(ret)
-                })
+                Poll::Ready(
+                    {
+                        let (ret,remote) = if this.flags.bits() & RecvFromFlags::MSG_PEEK.bits() >0 {
+                            info!("[UdpRecvFuture::poll] get flags MSG_PEEK");
+                            let (ret, meta) = socket
+                                .peek_slice(unsafe {
+                                    &mut core::slice::from_raw_parts_mut(
+                                        this.buf_start as *mut u8,
+                                        this.buf_len,
+                                    )
+                                })
+                                .ok()
+                                .ok_or(Errno::ENOTCONN)?;
+                            let endpoint = meta.endpoint;
+                            (ret, endpoint)
+                        }else{
+                            let (ret , meta) = socket
+                                .recv_slice(unsafe{
+                                    &mut core::slice::from_raw_parts_mut(
+                                        this.buf_start as *mut u8,
+                                        this.buf_len,
+                                    )
+                                }).ok().ok_or(Errno::ENOTCONN)?;
+                            let endpoint = meta.endpoint;
+                            (ret,endpoint)
+                        };
+                        info!(
+                            "[UdpRecvFuture::poll] {:?} <- {:?}",
+                            socket.endpoint(),
+                            remote
+                        );
+                        this.socket.inner.lock().remote_endpoint = Some(remote);
+                        info!("[UdpRecvFuture::poll] recv {} bytes", ret);
+                        Ok(ret)
+                    }
+                )
             })
         }else {
             let handle_dev_lock = self.socket.inner.lock();
@@ -459,7 +498,7 @@ impl<'a> Future for UdpRecvFuture<'a> {
                 let this = self.get_mut();
                 if !socket.can_recv() {
                     info!("[UdpRecvFuture::poll] cannot recv yet");
-                    if this.flags.contains(OpenFlags::O_NONBLOCK) {
+                    if this.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
                         info!("[UdpRecvFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }
@@ -467,26 +506,44 @@ impl<'a> Future for UdpRecvFuture<'a> {
                     return Poll::Pending;
                 }
                 info!("[UdpRecvFuture::poll] start to recv...");
-                Poll::Ready({
-                    let (ret, meta) = socket
-                        .recv_slice(unsafe {
-                            &mut core::slice::from_raw_parts_mut(
-                                this.buf_start as *mut u8,
-                                this.buf_len,
-                            )
-                        })
-                        .ok()
-                        .ok_or(Errno::ENOTCONN)?;
-                    let remote = meta.endpoint;
-                    info!(
-                        "[UdpRecvFuture::poll] {:?} <- {:?}",
-                        socket.endpoint(),
-                        remote
-                    );
-                    this.socket.inner.lock().remote_endpoint = Some(remote);
-                    info!("[UdpRecvFuture::poll] recv {} bytes", ret);
-                    Ok(ret)
-                })
+                Poll::Ready(
+                    {
+                        let (ret,remote) = if this.flags.bits() & RecvFromFlags::MSG_PEEK.bits() > 0 {
+                            info!("[UdpRecvFuture::poll] get flags MSG_PEEK");
+                            let (ret, meta) = socket
+                                .peek_slice(unsafe {
+                                    &mut core::slice::from_raw_parts_mut(
+                                        this.buf_start as *mut u8,
+                                        this.buf_len,
+                                    )
+                                })
+                                .ok()
+                                .ok_or(Errno::ENOTCONN)?;
+                            let endpoint = meta.endpoint;
+                            (ret, endpoint)
+                        }else{
+                            let (ret, meta) = socket
+                                .recv_slice(unsafe {
+                                    &mut core::slice::from_raw_parts_mut(
+                                        this.buf_start as *mut u8,
+                                        this.buf_len,
+                                    )
+                                })
+                                .ok()
+                                .ok_or(Errno::ENOTCONN)?;
+                            let endpoint = meta.endpoint;
+                            (ret, endpoint)
+                        };
+                        info!(
+                            "[UdpRecvFuture::poll] {:?} <- {:?}",
+                            socket.endpoint(),
+                            remote
+                        );
+                        this.socket.inner.lock().remote_endpoint = Some(remote);
+                        info!("[UdpRecvFuture::poll] recv {} bytes", ret);
+                        Ok(ret)
+                    }
+                )
             })
         }
     }
@@ -494,10 +551,10 @@ impl<'a> Future for UdpRecvFuture<'a> {
 struct UdpSendFuture<'a> {
     socket: &'a UdpSocket,
     buf: &'a [u8],
-    flags: OpenFlags,
+    flags: RecvFromFlags,
 }
 impl<'a> UdpSendFuture<'a> {
-    fn new(socket: &'a UdpSocket, buf: &'a [u8], flags: OpenFlags) -> Self {
+    fn new(socket: &'a UdpSocket, buf: &'a [u8], flags: RecvFromFlags) -> Self {
         Self { socket, buf, flags }
     }
 }
@@ -510,11 +567,12 @@ impl<'a> Future for UdpSendFuture<'a> {
         let ret = if is_local{
             let inner = self.socket.inner.lock();
             let remote_endpoint = inner.remote_endpoint;
+            let handle_loop = inner.handle_loop;
             drop(inner);
-            NET_INTERFACE.handle_udp_socket_loop(self.socket.inner.lock().handle_loop, |socket| {
+            NET_INTERFACE.handle_udp_socket_loop(handle_loop, |socket| {
                 if !socket.can_send() {
                     info!("[UdpSendFuture::poll] cannot send yet");
-                    if self.flags.contains(OpenFlags::O_NONBLOCK) {
+                    if self.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
                         info!("[UdpSendFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }
@@ -549,11 +607,12 @@ impl<'a> Future for UdpSendFuture<'a> {
         }else{
             let inner = self.socket.inner.lock();
             let remote_endpoint = inner.remote_endpoint;
+            let handle_dev = inner.handle_dev;
             drop(inner);
-            NET_INTERFACE.handle_udp_socket_dev(self.socket.inner.lock().handle_dev, |socket| {
+            NET_INTERFACE.handle_udp_socket_dev(handle_dev, |socket| {
                 if !socket.can_send() {
                     info!("[UdpSendFuture::poll] cannot send yet");
-                    if self.flags.contains(OpenFlags::O_NONBLOCK) {
+                    if self.flags.contains(RecvFromFlags::MSG_DONTWAIT) {
                         info!("[UdpSendFuture::poll] already set nonblock");
                         return Poll::Ready(Err(Errno::EAGAIN));
                     }

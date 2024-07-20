@@ -1,8 +1,6 @@
 use core::mem::size_of;
 use crate::fs::fd::{FdNum, FileDescriptor};
-use crate::net::{
-    listen_endpoint, make_unix_socket_pair, Socket, SocketAddressV4, SocketType, TCP_MSS,
-};
+use crate::net::{listen_endpoint, make_unix_socket_pair, RecvFromFlags, Socket, SocketAddressV4, SocketType, TCP_MSS};
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 use log::{debug, info, warn};
@@ -24,6 +22,10 @@ const SO_RCVBUF: u32 = 8;
 const SO_KEEPALIVE: u32 = 9;
 
 pub fn sys_socket(domain: u32, socket_type: u32, protocol: u32) -> SyscallResult<usize> {
+    info!(
+        "[sys_socket] domain: {}, type: {}, protocol: {}",
+        domain, socket_type, protocol
+    );
     let sockfd = <dyn Socket>::alloc(domain, socket_type)?;
     info!("[sys_socket] new sockfd: {}", sockfd);
     Ok(sockfd)
@@ -61,8 +63,7 @@ pub async fn sys_accept(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallRe
     info!("[sys_accept] sockfd: {}", sockfd);
     let ret = current_process().inner.lock()
         .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?
-        .accept(addr, addrlen).await;
-    info!("here??");
+        .accept(sockfd ,addr, addrlen).await;
     ret
 }
 
@@ -91,11 +92,12 @@ pub async fn sys_sendto(
     sockfd: FdNum,
     buf: usize,
     len: usize,
-    _flags: u32,
+    flags: u32,
     dest_addr: usize,
     addrlen: u32,
 ) -> SyscallResult<usize> {
     info!("[sys_sendto] get socket sockfd: {}", sockfd);
+    let flags = RecvFromFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     let fd_impl = current_process().inner.lock().fd_table.get(sockfd)?;
     // 在此检查buf开始到len长度的内存是不是用户可读的
     let buf = unsafe { core::slice::from_raw_parts(buf as *const u8, len) };
@@ -106,7 +108,10 @@ pub async fn sys_sendto(
     drop(proc_inner);
 
     let len = match socket.socket_type() {
-        SocketType::SOCK_STREAM => fd_impl.file.write(buf).await?,
+        SocketType::SOCK_STREAM => {
+            let ret= socket.send(buf,flags).await?;
+            Ok(ret as usize)
+        },
         SocketType::SOCK_DGRAM => {
             debug!("[sys_sendto] socket is udp");
             // 在此处检查 dest_addr到addrlen长度是否用户可读
@@ -119,24 +124,30 @@ pub async fn sys_sendto(
             let dest_addr =
                 unsafe { core::slice::from_raw_parts(dest_addr as *const u8, addrlen as usize) };
             socket.connect(dest_addr).await?;
-            let ret = fd_impl.file.write(buf).await?;
-            info!("[sys_sendto ::write] last write OK");
-            ret
+            let ret = socket.send(buf,flags).await;
+            match ret {
+                Ok(len) => {
+                    Ok(len as usize)
+                }
+                Err(e) => {
+                    Err(e)
+                }
+            }
         }
         _ => todo!(),
     };
-    Ok(len as usize)
+    len
 }
 pub async fn sys_recvfrom(
     sockfd: FdNum,
     buf: usize,
     len: u32,
-    _flags: u32,
+    flags: u32,
     src_addr: usize,
     addrlen: usize,
 ) -> SyscallResult<usize> {
     info!("[sys_recvfrom] get socket sockfd: {}", sockfd);
-
+    let flags = RecvFromFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     let fd_impl = current_process().inner.lock().fd_table.get(sockfd)?;
     // 在此检查buf开始到len长度的内存是不是用户可写的
     let buf = unsafe { core::slice::from_raw_parts_mut(buf as *mut u8, len as usize) };
@@ -146,7 +157,7 @@ pub async fn sys_recvfrom(
     drop(proc_inner);
     match socket.socket_type() {
         SocketType::SOCK_STREAM => {
-            let len = fd_impl.file.read(buf).await?;
+            let len = socket.recv(buf,flags).await?;
             if src_addr != 0 {
                 socket.peer_addr(src_addr, addrlen)?;
             }
@@ -154,7 +165,7 @@ pub async fn sys_recvfrom(
         }
         SocketType::SOCK_DGRAM => {
             debug!("[sys_recvfrom] udp read begin...");
-            let len = fd_impl.file.read(buf).await?;
+            let len = socket.recv(buf,flags).await?;
             if src_addr != 0 {
                 socket.peer_addr(src_addr, addrlen)?;
             }

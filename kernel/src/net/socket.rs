@@ -19,8 +19,8 @@ pub const AF_UNIX: u16 = 0x0001;
 pub const AF_INET: u16 = 0x0002;
 pub const AF_INET6: u16 = 0x000a;
 
-/// 32KiB , both send and recv
-pub const BUFFER_SIZE: usize = 1 << 15;
+
+pub const BUFFER_SIZE: usize = 1 << 17;
 
 /// 这是fd描述符与Socket相关的映射表，
 /// 实现file trait后，用于使用fd查找socket
@@ -63,8 +63,25 @@ bitflags! {
         const SOCK_DGRAM = 1 << 1;
         const SOCK_CLOEXEC = 1 << 19;
     }
+
+    /// recv_from flags
+    pub struct RecvFromFlags: u32 {
+        /// peek
+        const MSG_PEEK = 1 << 1;
+        /// noblock
+        const MSG_DONTWAIT = 1 << 6;
+        /// nothing to do
+        const MSG_NOTHING = 1 << 0;
+    }
 }
 
+impl Default for RecvFromFlags {
+    fn default() -> Self {
+        Self {
+            bits: RecvFromFlags::MSG_NOTHING.bits,
+        }
+    }
+}
 
 /// for syscall on net part , return SyscallResult
 #[allow(unused)]
@@ -82,7 +99,7 @@ pub trait Socket: File {
         Err(Errno::EOPNOTSUPP)
     }
 
-    async fn accept(&self, addr: usize, addrlen: usize) -> SyscallResult<usize> {
+    async fn accept(&self, sockfd: FdNum , addr: usize, addrlen: usize) -> SyscallResult<usize> {
         Err(Errno::EOPNOTSUPP)
     }
 
@@ -113,6 +130,10 @@ pub trait Socket: File {
     fn set_keep_alive(&self, enabled: bool) -> SyscallResult<usize> {
         Err(Errno::EOPNOTSUPP)
     }
+
+    async fn recv(&self, buf: &mut [u8],flags: RecvFromFlags) -> SyscallResult<isize>{Err(Errno::EOPNOTSUPP)}
+
+    async fn send(&self,buf: &[u8],flags: RecvFromFlags) -> SyscallResult<isize>{Err(Errno::EOPNOTSUPP)}
 }
 
 

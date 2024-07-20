@@ -12,7 +12,7 @@ pub use crate::net::netaddress::listen_endpoint;
 pub use crate::net::socket::Socket;
 pub use crate::net::netaddress::SocketAddressV4;
 pub use crate::net::netaddress::SocketAddressV6;
-pub use crate::net::socket::SocketType;
+pub use crate::net::socket::{SocketType,RecvFromFlags};
 pub use crate::net::tcp::*;
 pub use crate::net::unix::make_unix_socket_pair;
 pub use iface::NET_INTERFACE;
