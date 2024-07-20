@@ -50,6 +50,7 @@ fn main() {
     sys_mkdir("/tmp", 0);
     sys_mkdir("/sys", 0);
     mount("devfs", "/dev", "devfs", 0, None);
+    mount("procfs", "/proc", "procfs", 0, None);
     if sys_access("sort.src", 0) != 0 {
         init_shell();
         run_cmd("busybox ln -s /lib/dlopen_dso.so /dlopen_dso.so");

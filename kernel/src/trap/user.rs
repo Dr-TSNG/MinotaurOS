@@ -47,7 +47,7 @@ pub async fn trap_from_user() {
                     ctx.user_x[15],
                 ],
             ).await;
-            ctx.user_x[10] = result.unwrap_or_else(|err| -(err as isize) as usize)
+            ctx.user_x[10] = result.unwrap_or_else(|err| -(err as isize) as usize);
         }
         | Trap::Exception(Exception::LoadFault)
         | Trap::Exception(Exception::LoadPageFault) => {

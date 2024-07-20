@@ -4,9 +4,8 @@ use core::pin::pin;
 use core::time::Duration;
 use log::{debug, warn};
 use zerocopy::{AsBytes, FromBytes};
-
+use macros::suspend;
 use crate::arch::VirtAddr;
-use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::{CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID, ITimerType, ITimerVal, TIMER_ABSTIME, TimeSpec, TimeVal, TMS};
@@ -15,11 +14,12 @@ use crate::sched::time::{cpu_time, GLOBAL_CLOCK, real_time};
 use crate::sched::timer::TimerFuture;
 use crate::signal::ffi::Signal;
 
+#[suspend]
 pub async fn sys_nanosleep(req: usize, _rem: usize) -> SyscallResult<usize> {
     let user_buf = current_process().inner.lock().addr_space.user_slice_r(VirtAddr(req), size_of::<TimeSpec>())?;
     let ts = TimeSpec::ref_from(user_buf).unwrap();
     let duration = Duration::from(*ts);
-    current_thread().event_bus.suspend_with(Event::all(), pin!(sleep_for(duration))).await?;
+    sleep_for(duration).await?;
     Ok(0)
 }
 
@@ -127,6 +127,7 @@ pub fn sys_clock_getres(clock_id: usize, buf: usize) -> SyscallResult<usize> {
     }
 }
 
+#[suspend]
 pub async fn sys_clock_nanosleep(clock_id: usize, flags: i32, rqtp: usize, remain: usize) -> SyscallResult<usize> {
     let rqtp = current_process().inner.lock()
         .addr_space.user_slice_r(VirtAddr(rqtp), size_of::<TimeSpec>())?;
@@ -138,7 +139,7 @@ pub async fn sys_clock_nanosleep(clock_id: usize, flags: i32, rqtp: usize, remai
     } else {
         clock_time + now + Duration::from(rqtp)
     };
-    current_thread().event_bus.suspend_with(Event::all(), pin!(sleep_for(sleep_time))).await?;
+    sleep_for(sleep_time).await?;
     if remain != 0 {
         let remain = current_process().inner.lock()
             .addr_space.user_slice_w(VirtAddr(remain), size_of::<TimeSpec>())?;

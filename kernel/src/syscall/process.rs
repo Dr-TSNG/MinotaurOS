@@ -15,7 +15,7 @@ use crate::process::monitor::MONITORS;
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
-use crate::sched::yield_now;
+use crate::sched::{suspend_now, yield_now};
 use crate::signal::ffi::Signal;
 
 pub fn sys_exit(exit_code: i8) -> SyscallResult<usize> {
@@ -234,13 +234,13 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     if !envs_vec.iter().any(|s| s.to_str().unwrap().contains("LD_LIBRARY_PATH=")) {
         envs_vec.push(CString::new("LD_LIBRARY_PATH=/:/lib").unwrap());
     }
+    drop(proc_inner);
 
-    let inode = resolve_path(&proc_inner, AT_FDCWD, path, true).await?;
+    let inode = resolve_path(AT_FDCWD, path, true).await?;
     if inode.metadata().mode == InodeMode::IFDIR {
         return Err(Errno::EISDIR);
     }
 
-    drop(proc_inner);
     let file = inode.clone().open(OpenFlags::O_RDONLY)?;
     let elf_data = file.read_all().await?;
     // TODO: Here path is incorrect, we should update resolve_path
@@ -250,10 +250,8 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
 pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
     let options = WaitOptions::from_bits(options).ok_or(Errno::EINVAL)?;
     info!("[wait4] pid: {:?}, wstatus: {:#x}, options: {:?}", pid as isize, wstatus, options);
-    let ret = current_thread().event_bus.suspend_with(
-        Event::all().difference(Event::CHILD_EXIT),
-        WaitPidFuture::new(pid, options, wstatus),
-    ).await;
+    let fut = WaitPidFuture::new(pid, options, wstatus);
+    let ret = suspend_now(None, Event::all().difference(Event::CHILD_EXIT), fut).await;
     info!("[wait4] ret: {:?}", ret);
     ret
 }

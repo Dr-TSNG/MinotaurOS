@@ -10,8 +10,6 @@ use log::debug;
 use crate::config::PIPE_BUF_CAP;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::{File, FileMeta};
-use crate::process::thread::event_bus::Event;
-use crate::processor::current_thread;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
@@ -80,12 +78,11 @@ impl File for Pipe {
         if buf.len() == 0 {
             return Ok(0);
         }
-        let fut = PipeReadFuture {
+        PipeReadFuture {
             pipe: self,
             buf,
             pos: 0,
-        };
-        current_thread().event_bus.suspend_with(Event::KILL_THREAD, fut).await
+        }.await
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
@@ -95,12 +92,11 @@ impl File for Pipe {
         if buf.len() == 0 {
             return Ok(0);
         }
-        let fut = PipeWriteFuture {
+        PipeWriteFuture {
             pipe: self,
             buf,
             pos: 0,
-        };
-        current_thread().event_bus.suspend_with(Event::KILL_THREAD, fut).await
+        }.await
     }
 
     fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {

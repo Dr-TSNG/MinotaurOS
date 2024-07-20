@@ -122,6 +122,7 @@ impl File for TtyFile {
                     .user_slice_r(VirtAddr(value), size_of::<WinSize>())?;
                 self.inner.lock().win_size = WinSize::ref_from(value).unwrap().clone();
             }
+            TermiosType::RTC_RD_TIME => {}
         }
         Ok(0)
     }
@@ -160,6 +161,8 @@ enum TermiosType {
     TIOCGWINSZ = 0x5413,
     /// Set the window size of the terminal.
     TIOCSWINSZ = 0x5414,
+    /// Read time
+    RTC_RD_TIME = 0x80247009,
 }
 
 #[repr(C)]

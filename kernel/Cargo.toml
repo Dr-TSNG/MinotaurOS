@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+macros = { path = "../macros" }
 riscv = { git = "https://github.com/Dr-TSNG/riscv" }
 lwext4_rust = { git = "https://github.com/Dr-TSNG/lwext4_rust" }
 aligned = "0.4.2"

@@ -5,7 +5,8 @@ use log::{debug, info};
 use crate::fs::fd::FdNum;
 use crate::fs::ffi::AT_FDCWD;
 use crate::fs::inode::Inode;
-use crate::process::ProcessInner;
+use crate::processor::current_process;
+use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 
 #[macro_export]
@@ -15,30 +16,37 @@ macro_rules! split_path {
     };
 }
 
+/// SAFETY: 调用该函数前必须 drop 所有的 Process.inner
 pub async fn resolve_path(
-    proc_inner: &ProcessInner,
     dirfd: FdNum,
     path: &str,
     follow_link: bool,
 ) -> SyscallResult<Arc<dyn Inode>> {
-    let path = normalize_path(path);
-    let mut path = path.as_str();
+    assert_ne!(current_process().inner.locked_by(), local_hart().id);
+    let proc_inner = current_process().inner.lock();
+
+    let mut path = normalize_path(path);
     debug!("[resolve_path] dirfd: {}, path: {:?}", dirfd, path);
 
     // TODO: Remove the hack
     if path == "/proc/self/exe" {
-        path = &proc_inner.exe;
+        path = proc_inner.exe.clone();
     }
 
-    if is_absolute_path(path) {
-        proc_inner.mnt_ns.lookup_absolute(path, follow_link).await
+    let mnt_ns = proc_inner.mnt_ns.clone();
+    if is_absolute_path(&path) {
+        drop(proc_inner);
+        mnt_ns.lookup_absolute(&path, follow_link).await
     } else if dirfd == AT_FDCWD {
-        let inode = proc_inner.mnt_ns.lookup_absolute(&proc_inner.cwd, follow_link).await?;
-        proc_inner.mnt_ns.lookup_relative(inode, path, follow_link).await
+        let cwd = proc_inner.cwd.clone();
+        drop(proc_inner);
+        let inode = mnt_ns.lookup_absolute(&cwd, follow_link).await?;
+        mnt_ns.lookup_relative(inode, &path, follow_link).await
     } else {
         let fd_impl = proc_inner.fd_table.get(dirfd)?;
         let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
-        proc_inner.mnt_ns.lookup_relative(inode, path, follow_link).await
+        drop(proc_inner);
+        mnt_ns.lookup_relative(inode, &path, follow_link).await
     }
 }
 

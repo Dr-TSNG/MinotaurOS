@@ -119,11 +119,17 @@ impl Inode for Ext4Inode {
     fn file_system(&self) -> Weak<dyn FileSystem> {
         self.fs.clone()
     }
+
+    fn ioctl(&self, request: usize, value: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
+        Err(Errno::ENOTTY)
+    }
 }
 
 #[async_trait]
 impl InodeInternal for Ext4Inode {
     async fn read_direct(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let _guard = fs.driver_lock.lock().await;
         let mut file = Ext4File::open(&self.metadata.path, O_RDWR).map_err(i32_to_err)?;
         file.seek(offset as i64, SEEK_SET).map_err(i32_to_err)?;
         let read = file.read(buf).map_err(i32_to_err)?;
@@ -131,6 +137,8 @@ impl InodeInternal for Ext4Inode {
     }
 
     async fn write_direct(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let _guard = fs.driver_lock.lock().await;
         let mut file = Ext4File::open(&self.metadata.path, O_RDWR).map_err(i32_to_err)?;
         file.seek(offset as i64, SEEK_SET).map_err(i32_to_err)?;
         let written = file.write(buf).map_err(i32_to_err)?;
@@ -139,12 +147,14 @@ impl InodeInternal for Ext4Inode {
     }
 
     async fn truncate_direct(&self, size: isize) -> SyscallResult {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let old_size = self.metadata.inner.lock().size;
         if old_size < size {
             // lwext4 driver does not extend file size, so we need to write zeros manually
             let buf = vec![0u8; (size - old_size) as usize];
             self.write_direct(&buf, old_size).await?;
         } else {
+            let _guard = fs.driver_lock.lock().await;
             let mut file = Ext4File::open(&self.metadata.path, O_RDWR).map_err(i32_to_err)?;
             file.truncate(size as u64).map_err(i32_to_err)?;
         }
@@ -153,6 +163,8 @@ impl InodeInternal for Ext4Inode {
     }
 
     async fn do_lookup_name(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let _guard = fs.driver_lock.lock().await;
         let mut inner = self.inner.lock().await;
         if !inner.children_loaded {
             self.clone().load_children(&mut inner)?;
@@ -164,6 +176,8 @@ impl InodeInternal for Ext4Inode {
     }
 
     async fn do_lookup_idx(self: Arc<Self>, idx: usize) -> SyscallResult<Arc<dyn Inode>> {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let _guard = fs.driver_lock.lock().await;
         let mut inner = self.inner.lock().await;
         if !inner.children_loaded {
             self.clone().load_children(&mut inner)?;
@@ -177,6 +191,7 @@ impl InodeInternal for Ext4Inode {
     async fn do_create(self: Arc<Self>, mode: InodeMode, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         debug!("[ext4] Create file: {}", name);
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let _guard = fs.driver_lock.lock().await;
         let mut inner = self.inner.lock().await;
         self.clone().check_exists(&mut inner, name, false)?;
 
@@ -216,6 +231,7 @@ impl InodeInternal for Ext4Inode {
     async fn do_symlink(self: Arc<Self>, name: &str, target: &str) -> SyscallResult {
         debug!("[ext4] Symlink {} -> {}", name, target);
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let _guard = fs.driver_lock.lock().await;
         let mut inner = self.inner.lock().await;
         self.clone().check_exists(&mut inner, name, false)?;
 
@@ -245,6 +261,8 @@ impl InodeInternal for Ext4Inode {
     }
 
     async fn do_movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>) -> SyscallResult {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let _guard = fs.driver_lock.lock().await;
         let mut inner = self.inner.lock().await;
         self.clone().check_exists(&mut inner, name, false)?;
 
@@ -274,6 +292,8 @@ impl InodeInternal for Ext4Inode {
     }
 
     async fn do_unlink(self: Arc<Self>, target: Arc<dyn Inode>) -> SyscallResult {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let _guard = fs.driver_lock.lock().await;
         let mut inner = self.inner.lock().await;
         self.clone().check_exists(&mut inner, &target.metadata().name, true)?;
 
@@ -287,6 +307,8 @@ impl InodeInternal for Ext4Inode {
     }
 
     async fn do_readlink(self: Arc<Self>) -> SyscallResult<String> {
+        let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let _guard = fs.driver_lock.lock().await;
         Ext4Dir::readlink(&self.metadata.path).map_err(i32_to_err)
     }
 }

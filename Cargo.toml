@@ -4,6 +4,7 @@ members = [
     "kernel",
     "user",
     "tasks",
+    "macros",
 ]
 default-members = ["tasks"]
 

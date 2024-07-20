@@ -48,12 +48,13 @@ impl<T, S: MutexStrategy> SpinMutex<T, S> {
     pub fn lock(&self) -> SpinMutexGuard<T, S> {
         let start_time = cpu_time();
         loop {
-            if let Some(guard) = self.try_lock() {
+            if self.lock.load(Ordering::Relaxed) {
+                core::hint::spin_loop();
+                if cpu_time() - start_time > Duration::from_secs(15) {
+                    panic!("SpinMutex deadlock");
+                }
+            } else if let Some(guard) = self.try_lock() {
                 return guard;
-            }
-            core::hint::spin_loop();
-            if cpu_time() - start_time > Duration::from_secs(5) {
-                panic!("SpinMutex deadlock");
             }
         }
     }

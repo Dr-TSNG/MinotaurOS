@@ -175,7 +175,7 @@ pub(super) trait InodeInternal {
     }
 }
 
-#[allow(private_bounds)]
+#[allow(private_bounds, unused)]
 #[async_trait]
 pub trait Inode: DowncastSync + InodeInternal {
     /// 获取 Inode 元数据
@@ -183,6 +183,17 @@ pub trait Inode: DowncastSync + InodeInternal {
 
     /// 获取文件系统
     fn file_system(&self) -> Weak<dyn FileSystem>;
+
+    fn ioctl(
+        &self,
+        request: usize,
+        value: usize,
+        arg3: usize,
+        arg4: usize,
+        arg5: usize,
+    ) -> SyscallResult<i32> {
+        Err(Errno::ENOTTY)
+    }
 }
 impl_downcast!(sync Inode);
 
@@ -232,8 +243,10 @@ impl dyn Inode {
         if self.metadata().mode != InodeMode::IFDIR {
             return Err(Errno::ENOTDIR);
         }
-        match self.metadata().inner.lock().mounts.get(name) {
-            Some(inode) => Ok(inode.clone()),
+        // 这里不能放到 match 里面，否则锁会被延后释放
+        let inode = self.metadata().inner.lock().mounts.get(name).cloned();
+        match inode {
+            Some(inode) => Ok(inode),
             None => self.clone().do_lookup_name(name).await,
         }
     }
@@ -244,10 +257,7 @@ impl dyn Inode {
         }
         self.clone().do_lookup_idx(idx).await.map(|inode| {
             let name = &self.metadata().name;
-            match self.metadata().inner.lock().mounts.get(name) {
-                Some(mount) => mount.clone(),
-                None => inode,
-            }
+            self.metadata().inner.lock().mounts.get(name).cloned().unwrap_or(inode)
         })
     }
 
