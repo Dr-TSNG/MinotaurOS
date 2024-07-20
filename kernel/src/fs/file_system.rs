@@ -1,6 +1,7 @@
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
+use core::fmt::Display;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use log::debug;
 use crate::fs::ffi::{InodeMode, VfsFlags};
@@ -14,10 +15,22 @@ use crate::sync::mutex::Mutex;
 #[repr(u64)]
 pub enum FileSystemType {
     DEVFS = 0x62646576,
+    EXT4 = 0xef53,
     FAT32 = 0x4d44,
     TMPFS = 0x01021994,
     PROCFS = 0x9fa0,
-    EXT4 = 0xef53,
+}
+
+impl Display for FileSystemType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            FileSystemType::DEVFS => write!(f, "devfs"),
+            FileSystemType::EXT4 => write!(f, "ext4"),
+            FileSystemType::FAT32 => write!(f, "fat32"),
+            FileSystemType::TMPFS => write!(f, "tmpfs"),
+            FileSystemType::PROCFS => write!(f, "proc"),
+        }
+    }
 }
 
 /// 文件系统元数据
@@ -75,6 +88,14 @@ impl MountNamespace {
         let mnt_ns_id = MNT_NS_ID_POOL.fetch_add(1, Ordering::Acquire);
         let tree = Mutex::new(MountTree::new(root_fs));
         Self { mnt_ns_id, tree }
+    }
+    
+    pub fn print_mounts(&self) -> String {
+        let mut res = String::new();
+        res += "/dev/sda1 / ext4 rw 0 0\n";
+        res += "dev /dev devtmpfs rw 0 0\n";
+        res += "proc /proc proc rw 0 0\n";
+        res
     }
 
     pub async fn lookup_absolute(

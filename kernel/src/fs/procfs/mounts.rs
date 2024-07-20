@@ -2,12 +2,14 @@ use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use alloc::sync::{Arc, Weak};
+use core::cmp::min;
 use core::sync::atomic::Ordering;
 use async_trait::async_trait;
 use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::procfs::ProcFileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
+use crate::processor::current_process;
 use crate::result::SyscallResult;
 use crate::sched::ffi::TimeSpec;
 
@@ -41,26 +43,14 @@ impl MountsInode {
 #[async_trait]
 impl InodeInternal for MountsInode {
     async fn read_direct(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
-        let dev_name = "proc";
-        let mount_point = "/proc";
-        let fstype = "proc";
-        let flags = "rw";
-        let buf_str = dev_name.to_owned()
-            + " "
-            + mount_point
-            + " "
-            + fstype
-            + " "
-            + flags
-            + " 0 0\n";
-        let len = buf_str.len();
-        if offset == len as isize {
-            Ok(0)
+        let mounts = current_process().inner.lock().mnt_ns.print_mounts();
+        if offset as usize >= mounts.len() {
+            return Ok(0);
         }
-        else {
-            buf[..len].copy_from_slice(buf_str.as_bytes());
-            Ok(len as isize)
-        }
+        let copy = min(buf.len(), mounts.len() - offset as usize);
+        let to_copy = &mounts.as_bytes()[offset as usize..offset as usize + copy];
+        buf[..copy].copy_from_slice(to_copy);
+        Ok(copy as isize)
     }
 
     async fn write_direct(&self, _: &[u8], _: isize) -> SyscallResult<isize> {
