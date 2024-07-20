@@ -8,6 +8,8 @@ use tap::Tap;
 use crate::fs::devfs::net::NetInode;
 use crate::fs::devfs::null::NullInode;
 use crate::fs::devfs::zero::ZeroInode;
+use crate::fs::devfs::rtc::RtcInode;
+use crate::fs::devfs::urandom::UrandomInode;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
@@ -20,6 +22,8 @@ mod net;
 mod null;
 pub mod tty;
 mod zero;
+mod rtc;
+mod urandom;
 
 pub struct DevFileSystem {
     vfsmeta: FileSystemMeta,
@@ -78,6 +82,8 @@ impl RootInode {
             it.insert("null".to_string(), NullInode::new(fs.clone(), root.clone()));
             it.insert("zero".to_string(), ZeroInode::new(fs.clone(), root.clone()));
             it.insert("net".to_string(), NetInode::new(fs.clone(), root.clone()));
+            it.insert("rtc".to_string(), RtcInode::new(fs.clone(), root.clone()));
+            it.insert("urandom".to_string(), UrandomInode::new(fs.clone(), root.clone()));
         });
         root
     }
