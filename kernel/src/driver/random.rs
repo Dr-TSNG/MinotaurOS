@@ -8,7 +8,7 @@ lazy_static! {
     pub static ref KRNG: Mutex<SmallRng> = Mutex::new(SmallRng::from_rng(SeedGenerator(19260817)).unwrap());
 }
 
-pub struct SeedGenerator(usize);
+struct SeedGenerator(usize);
 
 impl RngCore for SeedGenerator {
     fn next_u32(&mut self) -> u32 {
@@ -35,5 +35,3 @@ impl RngCore for SeedGenerator {
         Ok(())
     }
 }
-
-pub static mut RNG: SeedGenerator = SeedGenerator(1242132739);

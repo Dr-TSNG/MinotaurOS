@@ -175,7 +175,7 @@ pub(super) trait InodeInternal {
     }
 }
 
-#[allow(private_bounds)]
+#[allow(private_bounds, unused)]
 #[async_trait]
 pub trait Inode: DowncastSync + InodeInternal {
     /// 获取 Inode 元数据
@@ -184,7 +184,16 @@ pub trait Inode: DowncastSync + InodeInternal {
     /// 获取文件系统
     fn file_system(&self) -> Weak<dyn FileSystem>;
 
-    fn ioctl(&self, request: usize, value: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32>;
+    fn ioctl(
+        &self,
+        request: usize,
+        value: usize,
+        arg3: usize,
+        arg4: usize,
+        arg5: usize,
+    ) -> SyscallResult<i32> {
+        Err(Errno::ENOTTY)
+    }
 }
 impl_downcast!(sync Inode);
 

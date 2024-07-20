@@ -140,7 +140,7 @@ impl File for CharacterFile {
 
     async fn ioctl(&self, request: usize, value: usize, arg2: usize, arg3: usize, arg4: usize) -> SyscallResult<i32> {
         let inode = self.metadata.inode.as_ref().unwrap();
-        inode.ioctl(request,value,arg2,arg3,arg4)
+        inode.ioctl(request, value, arg2, arg3, arg4)
     }
 }
 

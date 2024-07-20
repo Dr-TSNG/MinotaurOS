@@ -17,6 +17,7 @@ use crate::sync::once::LateInit;
 
 mod mounts;
 mod meminfo;
+
 pub struct ProcFileSystem {
     vfsmeta: FileSystemMeta,
     ino_pool: AtomicUsize,
@@ -96,9 +97,5 @@ impl Inode for RootInode {
 
     fn file_system(&self) -> Weak<dyn FileSystem> {
         self.fs.clone()
-    }
-
-    fn ioctl(&self, request: usize, value: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
-        Err(Errno::ENOTTY)
     }
 }

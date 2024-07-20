@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::sync::Weak;
@@ -7,7 +6,6 @@ use crate::fs::devfs::DevFileSystem;
 use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
-use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 
 pub struct NetInode {
@@ -45,9 +43,5 @@ impl Inode for NetInode {
 
     fn file_system(&self) -> Weak<dyn FileSystem> {
         self.fs.clone()
-    }
-
-    fn ioctl(&self, request: usize, value: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
-        Err(Errno::ENOTTY)
     }
 }

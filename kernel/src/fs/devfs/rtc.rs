@@ -1,21 +1,17 @@
 use alloc::boxed::Box;
 use alloc::string::ToString;
 use alloc::sync::{Arc, Weak};
-use core::mem::size_of;
 use core::sync::atomic::Ordering;
 use async_trait::async_trait;
-use log::debug;
-use riscv::register::Permission::R;
-use zerocopy::AsBytes;
-use crate::arch::VirtAddr;
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::fs::devfs::DevFileSystem;
-use crate::fs::ffi::{InodeMode, OpenFlags, PollFd};
-use crate::fs::file::File;
+use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
+
 pub struct RtcInode(InodeMeta, Weak<DevFileSystem>);
 
 impl RtcInode {
@@ -39,7 +35,6 @@ impl RtcInode {
 #[async_trait]
 impl InodeInternal for RtcInode {
     async fn read_direct(&self, buf: &mut [u8], _: isize) -> SyscallResult<isize> {
-        debug!("read /dev/rtc");
         buf.fill(0);
         Ok(buf.len() as isize)
     }
@@ -58,17 +53,16 @@ impl Inode for RtcInode {
         self.1.clone()
     }
 
-    fn ioctl(&self, request: usize, value: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
+    fn ioctl(&self, _: usize, value: usize, _: usize, _: usize, _: usize) -> SyscallResult<i32> {
         let value = current_process().inner.lock().addr_space
-            .user_slice_w(VirtAddr(value), size_of::<RtcTime>())?;
-        let rtc=RtcTime::new();
-        value.copy_from_slice(rtc.as_bytes());
+            .transmute_w::<RtcTime>(value)?.ok_or(Errno::EINVAL)?;
+        *value = RtcTime::default();
         Ok(0)
     }
 }
 
 #[repr(C)]
-#[derive(AsBytes,Debug)]
+#[derive(Default, AsBytes, FromZeroes, FromBytes)]
 pub struct RtcTime {
     tm_sec: i32,
     tm_min: i32,
@@ -76,10 +70,4 @@ pub struct RtcTime {
     tm_mday: i32,
     tm_mon: i32,
     tm_year: i32,
-
-}
-impl RtcTime{
-    fn new() -> Self {
-        RtcTime { tm_sec:0, tm_min: 0, tm_hour: 0, tm_mday: 0, tm_mon: 0, tm_year: 0}
-    }
 }
