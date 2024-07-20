@@ -9,6 +9,7 @@ use core::time::Duration;
 use log::{debug, info, warn};
 use tap::Tap;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use macros::suspend;
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::devfs::DevFileSystem;
 use crate::fs::fd::{FdNum, FileDescriptor};
@@ -22,7 +23,8 @@ use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::{TimeSpec, TimeVal, UTIME_NOW, UTIME_OMIT};
 use crate::sched::iomultiplex::{FdSetRWE, IOFormat, IOMultiplexFuture};
-use crate::sched::time::{real_time, TimeoutFuture, TimeoutResult};
+use crate::sched::suspend_now;
+use crate::sched::time::real_time;
 use crate::signal::ffi::SigSet;
 
 pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
@@ -257,6 +259,7 @@ pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
     Ok(0)
 }
 
+#[suspend]
 pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     if !fd_impl.file.metadata().flags.lock().writable() {
@@ -364,6 +367,7 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
     Ok(cur - buf)
 }
 
+#[suspend]
 pub async fn sys_lseek(fd: FdNum, offset: isize, whence: i32) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     let seek = Seek::try_from((whence, offset))?;
@@ -371,6 +375,7 @@ pub async fn sys_lseek(fd: FdNum, offset: isize, whence: i32) -> SyscallResult<u
     Ok(ret as usize)
 }
 
+#[suspend]
 pub async fn sys_read(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
@@ -383,6 +388,7 @@ pub async fn sys_read(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize>
     Ok(ret as usize)
 }
 
+#[suspend]
 pub async fn sys_write(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
@@ -395,6 +401,7 @@ pub async fn sys_write(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize
     Ok(ret as usize)
 }
 
+#[suspend]
 pub async fn sys_readv(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
@@ -414,6 +421,7 @@ pub async fn sys_readv(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<us
     Ok(ret as usize)
 }
 
+#[suspend]
 pub async fn sys_writev(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
@@ -434,6 +442,7 @@ pub async fn sys_writev(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<u
     Ok(ret as usize)
 }
 
+#[suspend]
 pub async fn sys_pread(fd: FdNum, buf: usize, len: usize, offset: isize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
@@ -446,6 +455,7 @@ pub async fn sys_pread(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sysc
     Ok(ret as usize)
 }
 
+#[suspend]
 pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get(fd)?;
@@ -458,6 +468,7 @@ pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> Sys
     Ok(ret as usize)
 }
 
+#[suspend]
 pub async fn sys_sendfile(out_fd: FdNum, in_fd: FdNum, offset: usize, count: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let out_fd_impl = proc_inner.fd_table.get(out_fd)?;
@@ -504,42 +515,22 @@ pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize)
     let proc_inner = current_process().inner.lock();
     let slice = proc_inner.addr_space.user_slice_w(VirtAddr(ufds), size_of::<PollFd>() * nfds)?;
     let fds = PollFd::slice_from(slice).unwrap().to_vec();
-    let timeout = match timeout {
-        0 => None,
-        _ => {
-            let timeout = proc_inner.addr_space.user_slice_r(VirtAddr(timeout), size_of::<TimeSpec>())?;
-            let timeout = TimeSpec::ref_from(timeout).unwrap();
-            Some(Duration::from(*timeout))
-        }
-    };
-    let sigmask = match sigmask {
-        0 => None,
-        _ => {
-            let sigmask = proc_inner.addr_space.user_slice_r(VirtAddr(sigmask), size_of::<SigSet>())?;
-            let sigmask = SigSet::ref_from(sigmask).unwrap();
-            Some(*sigmask)
-        }
-    };
+    let timeout = proc_inner.addr_space.transmute_r::<TimeSpec>(timeout)?.cloned().map(Duration::from);
+    let sigmask = proc_inner.addr_space.transmute_r::<SigSet>(sigmask)?.cloned();
     drop(proc_inner);
     debug!("[ppoll] fds: {:?}, timeout: {:?}, sigmask: {:?}", fds, timeout, sigmask);
 
-    let future = current_thread().event_bus.suspend_with(
-        Event::KILL_THREAD,
-        IOMultiplexFuture::new(fds, IOFormat::PollFds(ufds)),
-    );
     let mask_bak = current_thread().signals.get_mask();
     if let Some(sigmask) = sigmask {
         current_thread().signals.set_mask(sigmask);
     }
-    let ret = match timeout {
-        Some(timeout) => match TimeoutFuture::new(timeout, future).await {
-            TimeoutResult::Ready(ret) => ret,
-            TimeoutResult::Timeout => {
-                debug!("[ppoll] timeout");
-                Ok(0)
-            }
-        },
-        None => future.await,
+    let fut = IOMultiplexFuture::new(fds, IOFormat::PollFds(ufds));
+    let ret = match suspend_now(timeout, Event::all(), fut).await {
+        Err(Errno::ETIMEDOUT) => {
+            debug!("[ppoll] timeout");
+            Ok(0)
+        }
+        other => other,
     };
     current_thread().signals.set_mask(mask_bak);
     ret
@@ -630,23 +621,17 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
         fds.fds_bits.fill(0);
     }
     drop(proc_inner);
-    let future = current_thread().event_bus.suspend_with(
-        Event::KILL_THREAD,
-        IOMultiplexFuture::new(fds, IOFormat::FdSets(FdSetRWE::new(readfds, writefds, exceptfds))),
-    );
     let mask_bak = current_thread().signals.get_mask();
     if let Some(sigmask) = sigmask {
         current_thread().signals.set_mask(sigmask);
     }
-    let ret = match timeout {
-        Some(timeout) => match TimeoutFuture::new(timeout, future).await {
-            TimeoutResult::Ready(ret) => ret,
-            TimeoutResult::Timeout => {
-                debug!("[pselect] timeout");
-                Ok(0)
-            }
-        },
-        None => future.await,
+    let fut = IOMultiplexFuture::new(fds, IOFormat::FdSets(FdSetRWE::new(readfds, writefds, exceptfds)));
+    let ret = match suspend_now(timeout, Event::all(), fut).await {
+        Err(Errno::ETIMEDOUT) => {
+            debug!("[pselect] timeout");
+            Ok(0)
+        }
+        other => other,
     };
     current_thread().signals.set_mask(mask_bak);
     ret
@@ -717,6 +702,7 @@ pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {
     Ok(0)
 }
 
+#[suspend]
 pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) -> SyscallResult<usize> {
     let path = current_process().inner.lock()
         .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");

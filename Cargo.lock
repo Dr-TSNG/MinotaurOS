@@ -557,6 +557,7 @@ dependencies = [
  "log",
  "lru",
  "lwext4_rust",
+ "macros",
  "managed",
  "num_enum",
  "pin-project",
@@ -642,6 +643,14 @@ dependencies = [
  "bindgen",
  "log",
  "printf-compat",
+]
+
+[[package]]
+name = "macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn 2.0.71",
 ]
 
 [[package]]
