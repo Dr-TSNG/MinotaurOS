@@ -83,6 +83,7 @@ impl Future for IdleFuture {
 
 async fn thread_loop(thread: Arc<Thread>) {
     loop {
+        thread.event_bus.reset();
         trap_return();
         trap_from_user().await;
         check_signal();

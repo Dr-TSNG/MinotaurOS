@@ -213,7 +213,6 @@ impl Process {
         // 重置线程状态
         let thread = current_thread();
         thread.signals.reset();
-        thread.event_bus.reset();
         thread.inner().tap_mut(|it| {
             it.trap_ctx = TrapContext::new(entry, user_sp);
             it.tid_address = Default::default();
