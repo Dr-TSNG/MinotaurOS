@@ -15,5 +15,4 @@ pub use crate::net::netaddress::SocketAddressV6;
 pub use crate::net::socket::{SocketType,RecvFromFlags};
 pub use crate::net::tcp::*;
 pub use crate::net::unix::make_unix_socket_pair;
-pub use socket::SocketTable;
 pub use crate::net::iface::init;

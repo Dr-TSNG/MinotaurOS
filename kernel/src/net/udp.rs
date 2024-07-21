@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::vec;
 use async_trait::async_trait;
 use core::future::Future;
@@ -62,7 +63,7 @@ impl UdpSocket {
         let (handle_loop, handle_dev) = NET_INTERFACE.lock().add_socket(socket_loop, socket_dev);
         info!("[UdpSocket::new] new (handler_loop {}, handler_dev {})", handle_loop, handle_dev);
         Self {
-            metadata: FileMeta::new(None, OpenFlags::empty()),
+            metadata: FileMeta::new(None, OpenFlags::O_RDWR),
             inner: Mutex::new(UdpSocketInner {
                 handle_dev,
                 handle_loop,
@@ -78,6 +79,10 @@ impl UdpSocket {
 impl File for UdpSocket {
     fn metadata(&self) -> &FileMeta {
         &self.metadata
+    }
+
+    fn as_socket(self: Arc<Self>) -> SyscallResult<Arc<dyn Socket>> {
+        Ok(self)
     }
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {

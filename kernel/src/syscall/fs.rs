@@ -321,7 +321,6 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> Sy
 pub fn sys_close(fd: FdNum) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     proc_inner.fd_table.remove(fd)?;
-    proc_inner.socket_table.take(fd);
     Ok(0)
 }
 

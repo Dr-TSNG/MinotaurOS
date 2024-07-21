@@ -21,6 +21,10 @@ impl File for UnixSocket {
         &self.metadata
     }
 
+    fn as_socket(self: Arc<Self>) -> SyscallResult<Arc<dyn Socket>> {
+        Ok(self)
+    }
+
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         self.read_end.read(buf).await
     }

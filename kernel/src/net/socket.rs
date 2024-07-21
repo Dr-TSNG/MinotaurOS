@@ -1,10 +1,9 @@
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use async_trait::async_trait;
 use bitflags::bitflags;
 use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
-use crate::fs::fd::{FdNum, FileDescriptor};
+use crate::fs::fd::FileDescriptor;
 use crate::fs::file::File;
 use crate::net::netaddress::{fill_with_endpoint, to_endpoint};
 use crate::net::tcp::TcpSocket;
@@ -19,29 +18,6 @@ pub const AF_INET6: u16 = 0x000a;
 
 
 pub const BUFFER_SIZE: usize = 1 << 17;
-
-/// 这是fd描述符与Socket相关的映射表，
-/// 实现file trait后，用于使用fd查找socket
-#[derive(Clone, Default)]
-pub struct SocketTable(BTreeMap<FdNum, Arc<dyn Socket>>);
-
-impl SocketTable {
-    pub fn insert(&mut self, key: FdNum, value: Arc<dyn Socket>) {
-        self.0.insert(key, value);
-    }
-
-    pub fn get(&self, fd: FdNum) -> Option<Arc<dyn Socket>> {
-        self.0.get(&fd).cloned()
-    }
-
-    pub fn take(&mut self, fd: FdNum) -> Option<Arc<dyn Socket>> {
-        self.0.remove(&fd)
-    }
-
-    pub fn can_bind(&self, endpoint: IpListenEndpoint) -> bool {
-        self.0.values().all(|socket| socket.local_endpoint() != endpoint)
-    }
-}
 
 /// shutdown
 #[allow(unused)]
@@ -142,13 +118,11 @@ impl dyn Socket {
                     let socket = Arc::new(UdpSocket::new());
                     let mut proc_inner = current_process().inner.lock();
                     let fd = proc_inner.fd_table.put(FileDescriptor::new(socket.clone(), cloexec), 0)?;
-                    proc_inner.socket_table.insert(fd, socket);
                     Ok(fd as usize)
                 } else if socket_type.contains(SocketType::SOCK_STREAM) {
                     let socket = Arc::new(TcpSocket::new());
                     let mut proc_inner = current_process().inner.lock();
                     let fd = proc_inner.fd_table.put(FileDescriptor::new(socket.clone(), cloexec), 0)?;
-                    proc_inner.socket_table.insert(fd, socket);
                     Ok(fd as usize)
                 } else {
                     Err(Errno::EINVAL)

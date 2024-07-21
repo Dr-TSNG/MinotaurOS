@@ -66,7 +66,7 @@ impl TcpSocket {
         let port = random_port();
         info!("[tcp] New socket handle_loop {} handle_dev {} at port {}", handle_loop,handle_dev, port);
         Self {
-            metadata: FileMeta::new(None, OpenFlags::empty()),
+            metadata: FileMeta::new(None, OpenFlags::O_RDWR),
             inner: Mutex::new(TcpInner {
                 handle_dev,
                 handle_loop,
@@ -93,7 +93,7 @@ impl TcpSocket {
         let port = random_port();
         info!("[tcp] New socket handle_loop {} handle_dev {} at port {}", handle_loop,handle_dev, port);
         Self {
-            metadata: FileMeta::new(None, OpenFlags::empty()),
+            metadata: FileMeta::new(None, OpenFlags::O_RDWR),
             inner: Mutex::new(TcpInner {
                 handle_loop,
                 handle_dev,
@@ -157,6 +157,10 @@ impl TcpInner {
 impl File for TcpSocket {
     fn metadata(&self) -> &FileMeta {
         &self.metadata
+    }
+
+    fn as_socket(self: Arc<Self>) -> SyscallResult<Arc<dyn Socket>> {
+        Ok(self)
     }
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
@@ -356,7 +360,6 @@ impl Socket for TcpSocket {
 
         let mut proc_inner = current_process().inner.lock();
         let new_fd = proc_inner.fd_table.put(FileDescriptor::new(new_socket.clone(), false), 0)?;
-        proc_inner.socket_table.insert(new_fd, new_socket.clone());
         core::mem::swap(self.inner.lock().deref_mut(), new_socket.inner.lock().deref_mut());
         Ok(new_fd as usize)
     }

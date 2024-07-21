@@ -35,13 +35,13 @@ pub fn sys_socket(domain: u32, socket_type: u32, protocol: u32) -> SyscallResult
 pub fn sys_bind(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     let addr_buf = proc_inner.addr_space.user_slice_r(VirtAddr(addr), addrlen as usize)?;
-    let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+    let socket = proc_inner.fd_table.get(sockfd)?.file.as_socket()?;
     let endpoint = listen_endpoint(addr_buf)?;
     info!("[sys_bind] sockfd: {}, ep: {}", sockfd, endpoint);
     match socket.socket_type() {
         SocketType::SOCK_STREAM => socket.bind(endpoint)?,
         SocketType::SOCK_DGRAM => {
-            if proc_inner.socket_table.can_bind(endpoint) {
+            if proc_inner.fd_table.socket_can_bind(endpoint) {
                 socket.bind(endpoint)?;
             } else {
                 return Err(Errno::EADDRINUSE);
@@ -54,9 +54,9 @@ pub fn sys_bind(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallResult<usize
 
 pub fn sys_listen(sockfd: FdNum, _backlog: u32) -> SyscallResult<usize> {
     info!("[sys_listen] sockfd: {}", sockfd);
-    current_process().inner.lock()
-        .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?
-        .listen()?;
+    let socket = current_process().inner.lock()
+        .fd_table.get(sockfd)?.file.as_socket()?;
+    socket.listen()?;
     Ok(0)
 }
 
@@ -64,7 +64,7 @@ pub fn sys_listen(sockfd: FdNum, _backlog: u32) -> SyscallResult<usize> {
 pub async fn sys_accept(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallResult<usize> {
     info!("[sys_accept] sockfd: {}", sockfd);
     let socket = current_process().inner.lock()
-        .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+        .fd_table.get(sockfd)?.file.as_socket()?;
     let ret = socket.accept(addr, addrlen).await;
     ret
 }
@@ -74,20 +74,20 @@ pub async fn sys_connect(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallRes
     info!("[sys_connect] sockfd: {}",sockfd);
     let addr_buf = unsafe { core::slice::from_raw_parts(addr as *const u8, addrlen as usize) };
     let socket = current_process().inner.lock()
-        .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+        .fd_table.get(sockfd)?.file.as_socket()?;
     socket.connect(addr_buf).await?;
     Ok(0)
 }
 
 pub fn sys_getsockname(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+    let socket = proc_inner.fd_table.get(sockfd)?.file.as_socket()?;
     socket.addr(addr, addrlen)
 }
 
 pub fn sys_getpeername(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+    let socket = proc_inner.fd_table.get(sockfd)?.file.as_socket()?;
     socket.peer_addr(addr, addrlen)
 }
 
@@ -107,7 +107,7 @@ pub async fn sys_sendto(
     let buf = unsafe { core::slice::from_raw_parts(buf as *const u8, len) };
 
     let proc_inner = current_process().inner.lock();
-    let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+    let socket = proc_inner.fd_table.get(sockfd)?.file.as_socket()?;
     // debug!("[sys_sendto] get socket sockfd: {}", sockfd);
     drop(proc_inner);
 
@@ -159,7 +159,7 @@ pub async fn sys_recvfrom(
     let buf = unsafe { core::slice::from_raw_parts_mut(buf as *mut u8, len as usize) };
 
     let proc_inner = current_process().inner.lock();
-    let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+    let socket = proc_inner.fd_table.get(sockfd)?.file.as_socket()?;
     drop(proc_inner);
     match socket.socket_type() {
         SocketType::SOCK_STREAM => {
@@ -218,7 +218,7 @@ pub fn sys_getsockopt(
                 .ok_or(Errno::ENOTSOCK)?;
              */
             let proc_inner = current_process().inner.lock();
-            let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+            let socket = proc_inner.fd_table.get(sockfd)?.file.as_socket()?;
             drop(proc_inner);
             match optname {
                 SO_SNDBUF => {
@@ -253,15 +253,9 @@ pub fn sys_setsockopt(
     optlen: u32,
 ) -> SyscallResult<usize> {
     info!("[sys_setsocket] socketfd: {}",sockfd);
-    /*
-    let socket = current_process()
-        .inner_handler(move |proc| proc.socket_table.get_ref(sockfd).cloned())
-        .ok_or(Errno::ENOTSOCK)?;
-    */
-    let proc_inner = current_process().inner.lock();
-    let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+    let socket = current_process().inner.lock()
+        .fd_table.get(sockfd)?.file.as_socket()?;
 
-    drop(proc_inner);
     match (level, optname) {
         (SOL_SOCKET, SO_SNDBUF | SO_RCVBUF) => {
             // 在此处检查用户是否有读optval_ptr到optlen长度的权限
@@ -308,7 +302,7 @@ pub fn sys_setsockopt(
 pub fn sys_sockshutdown(sockfd: FdNum, how: u32) -> SyscallResult<usize> {
     info!("[sys_shutdown] sockfd {}, how {}", sockfd, how);
     let proc_inner = current_process().inner.lock();
-    let socket = proc_inner.socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+    let socket = proc_inner.fd_table.get(sockfd)?.file.as_socket()?;
     drop(proc_inner);
     socket.shutdown(how)?;
     Ok(0)
