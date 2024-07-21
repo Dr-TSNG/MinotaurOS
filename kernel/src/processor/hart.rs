@@ -1,8 +1,8 @@
 use alloc::sync::Arc;
 use core::arch::asm;
 use aligned::{A16, Aligned};
-use riscv::register::mstatus::FS;
 use riscv::register::sstatus;
+use riscv::register::sstatus::FS;
 use crate::config::{KERNEL_STACK_SIZE, MAX_HARTS};
 use crate::mm::KERNEL_SPACE;
 use crate::process::thread::Thread;
@@ -31,6 +31,7 @@ impl Hart {
             another.user_task.as_ref().map(|t| &t.thread),
         );
         if let Some(now) = thread_now {
+            now.inner().trap_ctx.fctx.sched_out();
             now.inner().rusage.sched_out();
         }
         if let Some(next) = thread_next {

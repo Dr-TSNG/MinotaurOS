@@ -2,6 +2,7 @@ use core::mem::size_of;
 use log::{debug, error, info, trace};
 use riscv::register::{scause, sepc, stval};
 use riscv::register::scause::{Exception, Interrupt, Trap};
+use riscv::register::sstatus::FS;
 use crate::arch::VirtAddr;
 use crate::config::TRAMPOLINE_BASE;
 use crate::mm::addr_space::ASPerms;
@@ -20,7 +21,13 @@ pub fn trap_return() {
 
     unsafe {
         current_thread().inner().rusage.trap_out();
-        __restore_to_user(current_trap_ctx());
+
+        let trap_ctx = current_trap_ctx();
+        trap_ctx.fctx.restore();
+        trap_ctx.sstatus.set_fs(FS::Clean);
+        __restore_to_user(trap_ctx);
+        trap_ctx.fctx.trap_in(trap_ctx.sstatus);
+
         current_thread().inner().rusage.trap_in();
     }
 }
@@ -80,17 +87,17 @@ pub fn check_signal() {
             SignalHandler::Kernel(f) => {
                 f(poll.signal);
                 current_thread().signals.set_mask(poll.blocked_before);
-            },
+            }
             SignalHandler::User(sig_action) => {
                 debug!("Switch pc to {:#x}", sig_action.sa_handler);
-                let ucontext = UContext::new(poll.blocked_before, &trap_ctx);
-                let mut user_sp = VirtAddr(trap_ctx.get_sp());
+                trap_ctx.fctx.on_signal();
+                let ucontext = UContext::new(poll.blocked_before, trap_ctx);
+                let user_sp = VirtAddr(trap_ctx.get_sp()) - size_of::<UContext>();
                 if let Err(e) = current_process()
                     .inner.lock().addr_space
                     .user_slice_w(user_sp, size_of::<UContext>()) {
                     todo!("Stack Overflow: {:?}", e)
                 }
-                user_sp = user_sp - size_of::<UContext>();
                 unsafe { user_sp.as_ptr().cast::<UContext>().write(ucontext); }
 
                 trap_ctx.set_pc(sig_action.sa_handler);

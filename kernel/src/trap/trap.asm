@@ -6,12 +6,6 @@
 .macro LOAD_GP n
     ld x\n, \n*8(sp)
 .endm
-.macro SAVE_FP n, m
-    fsd f\n, \m*8(sp)
-.endm
-.macro LOAD_FP n, m
-    fld f\n, \m*8(sp)
-.endm
 
 .section .text
 .align 2
@@ -29,20 +23,9 @@ __trap_from_user:
         .set n, n+1
     .endr
 
-    # 保存浮点寄存器
-    .set n, 0
-    .set m, 32
-    .rept 32
-        SAVE_FP %n, %m
-        .set n, n+1
-        .set m, m+1
-    .endr
-
-    # 保存 fcsr/sstatus/sepc
-    csrr t0, fcsr
+    # 保存 sstatus/sepc
     csrr t1, sstatus
     csrr t2, sepc
-    sd t0, 64*8(sp)
     sd t1, 65*8(sp)
     sd t2, 0*8(sp)
 
@@ -101,11 +84,9 @@ __restore_to_user:
     # 现在 sp 指向 &TrapContext
     mv sp, a0
 
-    # 恢复 fcsr/sstatus/sepc
-    ld t0, 64*8(sp)
+    # 恢复 sstatus/sepc
     ld t1, 65*8(sp)
     ld t2, 0*8(sp)
-    csrw fcsr, t0
     csrw sstatus, t1
     csrw sepc, t2
 
@@ -115,15 +96,6 @@ __restore_to_user:
     .rept 29
         LOAD_GP %n
         .set n, n+1
-    .endr
-
-    # 恢复浮点寄存器
-    .set n, 0
-    .set m, 32
-    .rept 32
-        LOAD_FP %n, %m
-        .set n, n+1
-        .set m, m+1
     .endr
 
     # 恢复用户栈指针
