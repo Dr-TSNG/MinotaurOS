@@ -4,6 +4,7 @@ use aligned::{A16, Aligned};
 use riscv::register::sstatus;
 use riscv::register::sstatus::FS;
 use crate::config::{KERNEL_STACK_SIZE, MAX_HARTS};
+use crate::mm::asid::ASIDManager;
 use crate::mm::KERNEL_SPACE;
 use crate::process::thread::Thread;
 use crate::processor::context::HartContext;
@@ -11,6 +12,7 @@ use crate::processor::context::HartContext;
 pub struct Hart {
     pub id: usize,
     pub ctx: HartContext,
+    pub asid_manager: Option<ASIDManager>,
 }
 
 impl Hart {
@@ -18,6 +20,7 @@ impl Hart {
         Self {
             id: 0,
             ctx: HartContext::new(None),
+            asid_manager: None,
         }
     }
 

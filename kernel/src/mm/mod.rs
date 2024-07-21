@@ -2,12 +2,15 @@ use alloc::string::ToString;
 use log::info;
 use crate::arch::{PAGE_SIZE, VirtAddr, VirtPageNum};
 use crate::mm::addr_space::{AddressSpace, ASPerms};
+use crate::mm::asid::ASIDManager;
 use crate::mm::region::ASRegionMeta;
 use crate::mm::region::lazy::LazyRegion;
+use crate::processor::hart::local_hart;
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
 
+pub mod asid;
 pub mod addr_space;
 pub mod allocator;
 pub mod ffi;
@@ -23,6 +26,7 @@ pub fn vm_init(primary: bool) -> SyscallResult {
         vm_test()?;
         info!("Kernel address space initialized");
     }
+    local_hart().asid_manager.replace(ASIDManager::new());
     unsafe { KERNEL_SPACE.lock().activate(); }
     Ok(())
 }

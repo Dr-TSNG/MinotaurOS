@@ -119,7 +119,7 @@ impl Process {
         envs: &[CString],
     ) -> SyscallResult<usize> {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
-        let (addr_space, entry, mut auxv) =
+        let (mut addr_space, entry, mut auxv) =
             AddressSpace::from_elf(&mnt_ns, elf_data).await?;
 
         current_process().inner.lock().tap_mut(|proc_inner| {

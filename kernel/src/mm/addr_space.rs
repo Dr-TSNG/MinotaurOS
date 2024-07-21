@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::arch::asm;
@@ -20,6 +20,7 @@ use crate::fs::ffi::OpenFlags;
 use crate::fs::file_system::MountNamespace;
 use crate::fs::inode::Inode;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
+use crate::mm::asid::ASID;
 use crate::mm::page_table::PageTable;
 use crate::mm::region::{ASRegion, ASRegionMeta};
 use crate::mm::region::direct::DirectRegion;
@@ -28,6 +29,7 @@ use crate::mm::region::lazy::LazyRegion;
 use crate::mm::region::shared::SharedRegion;
 use crate::mm::sysv_shm::SysVShm;
 use crate::process::aux::{self, Aux};
+use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
@@ -42,13 +44,11 @@ bitflags! {
 
 // static ASID_POOL: Mutex<WeakValueHashMap<ASID, AddressSpace>> = Mutex::default();
 
-pub type ASID = u16;
-
 pub struct AddressSpace {
     /// 根页表
     pub root_pt: PageTable,
     /// 与地址空间关联的 ASID
-    asid: ASID,
+    asid: Weak<ASID>,
     /// 地址空间中的区域
     regions: BTreeMap<VirtPageNum, Box<dyn ASRegion>>,
     /// 该地址空间关联的页表帧
@@ -65,7 +65,7 @@ impl AddressSpace {
         debug!("[addr_space] create root page table {:?}", root_pt_page.ppn);
         let mut addr_space = AddressSpace {
             root_pt: PageTable::new(root_pt_page.ppn),
-            asid: 0,
+            asid: Weak::new(),
             regions: BTreeMap::new(),
             pt_dirs: vec![],
             sysv_shm: Default::default(),
@@ -196,7 +196,7 @@ impl AddressSpace {
         debug!("[addr_space] forked root page table {:?}", root_pt_page.ppn);
         let mut forked = AddressSpace {
             root_pt: PageTable::new(root_pt_page.ppn),
-            asid: 0,
+            asid: Weak::new(),
             regions: BTreeMap::new(),
             pt_dirs: vec![],
             sysv_shm: self.sysv_shm.clone(),
@@ -210,9 +210,22 @@ impl AddressSpace {
         forked
     }
 
-    pub unsafe fn activate(&self) {
-        satp::set(satp::Mode::Sv39, self.asid as usize, self.root_pt.ppn.0);
-        asm!("sfence.vma");
+    pub unsafe fn activate(&mut self) {
+        let asid = match local_hart().asid_manager.as_mut() {
+            None => 0,
+            Some(manager) => {
+                match self.asid.upgrade() {
+                    Some(asid) => *asid,
+                    None => {
+                        let asid = manager.alloc();
+                        self.asid = Arc::downgrade(&asid);
+                        *asid
+                    }
+                }
+            }
+        };
+        satp::set(satp::Mode::Sv39, asid as usize, self.root_pt.ppn.0);
+        asm!("sfence.vma x0, {}", in(reg) asid);
     }
 
     pub fn map_region(&mut self, region: Box<dyn ASRegion>) {
