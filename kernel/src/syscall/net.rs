@@ -5,6 +5,7 @@ use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 use log::{debug, info, warn};
 use smoltcp::wire::IpListenEndpoint;
+use macros::suspend;
 use crate::arch::VirtAddr;
 
 /// socket level
@@ -59,14 +60,16 @@ pub fn sys_listen(sockfd: FdNum, _backlog: u32) -> SyscallResult<usize> {
     Ok(0)
 }
 
+#[suspend]
 pub async fn sys_accept(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallResult<usize> {
     info!("[sys_accept] sockfd: {}", sockfd);
-    let ret = current_process().inner.lock()
-        .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?
-        .accept(addr, addrlen).await;
+    let socket = current_process().inner.lock()
+        .socket_table.get(sockfd).ok_or(Errno::ENOTSOCK)?;
+    let ret = socket.accept(addr, addrlen).await;
     ret
 }
 
+#[suspend]
 pub async fn sys_connect(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallResult<usize> {
     info!("[sys_connect] sockfd: {}",sockfd);
     let addr_buf = unsafe { core::slice::from_raw_parts(addr as *const u8, addrlen as usize) };
@@ -88,6 +91,7 @@ pub fn sys_getpeername(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallRes
     socket.peer_addr(addr, addrlen)
 }
 
+#[suspend]
 pub async fn sys_sendto(
     sockfd: FdNum,
     buf: usize,
@@ -138,6 +142,8 @@ pub async fn sys_sendto(
     };
     len
 }
+
+#[suspend]
 pub async fn sys_recvfrom(
     sockfd: FdNum,
     buf: usize,

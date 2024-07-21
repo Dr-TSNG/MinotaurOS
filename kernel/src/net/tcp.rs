@@ -623,7 +623,8 @@ impl<'a> Future for TcpRecvFuture<'a> {
     type Output = SyscallResult<usize>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let is_local = is_local(self.socket.remote_endpoint().unwrap());
+        let remote = self.socket.remote_endpoint().ok_or(Errno::ENOTCONN)?;
+        let is_local = is_local(remote);
         let inner = self.socket.inner.lock();
         let mut net = NET_INTERFACE.lock();
         net.poll(is_local);
@@ -652,7 +653,7 @@ impl<'a> Future for TcpRecvFuture<'a> {
             info!(
                 "[TcpRecvFuture::poll] {:?} <- {:?}",
                 socket.local_endpoint(),
-                socket.remote_endpoint(),
+                remote,
             );
             Poll::Ready(
                 match if this.flags.contains(RecvFromFlags::MSG_PEEK) {
@@ -696,7 +697,7 @@ impl<'a> Future for TcpRecvFuture<'a> {
             info!(
                     "[TcpRecvFuture::poll] {:?} <- {:?}",
                     socket.local_endpoint(),
-                    socket.remote_endpoint(),
+                    remote,
                 );
             Poll::Ready(
                 match if this.flags.contains(RecvFromFlags::MSG_PEEK) {
