@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::time::Duration;
 use log::{debug, info, warn};
-use tap::Pipe;
 use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
 use crate::config::USER_STACK_SIZE;
