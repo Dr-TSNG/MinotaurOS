@@ -1,6 +1,7 @@
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
+use smoltcp::wire::IpListenEndpoint;
 use crate::config::MAX_FD_NUM;
 use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::fs::file::File;
@@ -93,6 +94,19 @@ impl FdTable {
     pub fn remove(&mut self, fd: FdNum) -> SyscallResult<()> {
         self.table.get_mut(fd as usize).and_then(Option::take).ok_or(Errno::EBADF)?;
         Ok(())
+    }
+
+    pub fn socket_can_bind(&self, endpoint: IpListenEndpoint) -> bool {
+        for fd_impl in self.table.iter() {
+            if let Some(fd_impl) = fd_impl {
+                if let Ok(socket) = fd_impl.file.clone().as_socket() {
+                    if socket.local_endpoint() == endpoint {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 }
 

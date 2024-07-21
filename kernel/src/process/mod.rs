@@ -18,7 +18,6 @@ use crate::config::USER_STACK_TOP;
 use crate::fs::fd::FdTable;
 use crate::fs::file_system::MountNamespace;
 use crate::mm::addr_space::AddressSpace;
-use crate::net::SocketTable;
 use crate::process::aux::Aux;
 use crate::process::ffi::{CloneFlags, CpuSet};
 use crate::process::monitor::MONITORS;
@@ -62,8 +61,6 @@ pub struct ProcessInner {
     pub mnt_ns: Arc<MountNamespace>,
     /// 文件描述符表
     pub fd_table: FdTable,
-    /// Socket 表
-    pub socket_table: SocketTable,
     /// 互斥锁队列
     pub futex_queue: FutexQueue,
     /// 定时器
@@ -94,7 +91,6 @@ impl Process {
                 addr_space,
                 mnt_ns,
                 fd_table: FdTable::new(),
-                socket_table: Default::default(),
                 futex_queue: Default::default(),
                 timers: Default::default(),
                 cwd: String::from("/"),
@@ -241,7 +237,6 @@ impl Process {
                     addr_space: proc_inner.addr_space.fork(),
                     mnt_ns: proc_inner.mnt_ns.clone(),
                     fd_table: proc_inner.fd_table.clone(),
-                    socket_table: proc_inner.socket_table.clone(),
                     futex_queue: Default::default(),
                     timers: Default::default(),
                     cwd: proc_inner.cwd.clone(),

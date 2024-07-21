@@ -77,7 +77,7 @@ impl From<TimeSpec> for Duration {
 
 impl From<TimeVal> for Duration {
     fn from(tv: TimeVal) -> Self {
-        Duration::new(tv.sec as u64, tv.usec as u32 * 1000)
+        Duration::new(tv.sec as u64, (tv.usec * 1000) as u32)
     }
 }
 

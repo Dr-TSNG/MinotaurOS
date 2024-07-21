@@ -119,7 +119,7 @@ pub fn sys_setpgid(pid: usize, pgid: usize) -> SyscallResult<usize> {
 
     let mut proc_inner = proc.inner.lock();
     let delegate = monitors.process.get(new_pgid).upgrade().ok_or(Errno::EPERM)?;
-    monitors.group.move_to_group(proc_inner.pgid.0, proc.pid.0, delegate.pid.0)?;
+    monitors.group.move_to_group(proc_inner.pgid.0, proc.pid.0, new_pgid)?;
     proc_inner.pgid = delegate.pid.clone();
     Ok(0)
 }
@@ -131,6 +131,11 @@ pub fn sys_getpgid(pid: usize) -> SyscallResult<usize> {
     };
     let pgid = proc.inner.lock().pgid.0;
     Ok(pgid)
+}
+
+pub fn sys_setsid() -> SyscallResult<usize> {
+    warn!("setsid is not implemented");
+    Ok(0)
 }
 
 pub fn sys_getrlimit(resource: u32, rlim: usize) -> SyscallResult<usize> {

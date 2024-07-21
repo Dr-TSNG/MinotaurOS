@@ -73,11 +73,14 @@ pub async fn trap_from_user() {
 }
 
 pub fn check_signal() {
-    if let Some(poll) = current_thread().signals.poll() {
+    while let Some(poll) = current_thread().signals.poll() {
         let trap_ctx = current_trap_ctx();
         info!("Handle signal {:?} at {:#x}", poll.signal, trap_ctx.get_pc());
         match poll.handler {
-            SignalHandler::Kernel(f) => f(poll.signal),
+            SignalHandler::Kernel(f) => {
+                f(poll.signal);
+                current_thread().signals.set_mask(poll.blocked_before);
+            },
             SignalHandler::User(sig_action) => {
                 debug!("Switch pc to {:#x}", sig_action.sa_handler);
                 let ucontext = UContext::new(poll.blocked_before, &trap_ctx);

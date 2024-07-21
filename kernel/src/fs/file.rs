@@ -8,6 +8,7 @@ use crate::fs::inode::Inode;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::{AsyncMutex, Mutex};
 use crate::fs::ffi::OpenFlags;
+use crate::net::Socket;
 
 pub struct FileMeta {
     pub inode: Option<Arc<dyn Inode>>,
@@ -50,6 +51,10 @@ impl TryFrom<(i32, isize)> for Seek {
 #[async_trait]
 pub trait File: Send + Sync {
     fn metadata(&self) -> &FileMeta;
+
+    fn as_socket(self: Arc<Self>) -> SyscallResult<Arc<dyn Socket>> {
+        Err(Errno::ENOTSOCK)
+    }
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         Err(Errno::EOPNOTSUPP)
