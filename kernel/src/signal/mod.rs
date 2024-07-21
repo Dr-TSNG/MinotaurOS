@@ -69,6 +69,7 @@ pub struct SignalController(Mutex<SignalControllerInner>);
 struct SignalControllerInner {
     pending: SignalQueue,
     blocked: SigSet,
+    waiting_child: bool,
     handlers: Arc<Mutex<[SignalHandler; SIG_MAX]>>,
 }
 
@@ -86,6 +87,7 @@ impl SignalControllerInner {
         SignalControllerInner {
             pending: SignalQueue::default(),
             blocked: SigSet::default(),
+            waiting_child: false,
             handlers: Arc::new(Mutex::new(handlers)),
         }
     }
@@ -106,6 +108,7 @@ impl SignalController {
         Self(Mutex::new(SignalControllerInner {
             pending: SignalQueue::default(),
             blocked: inner.blocked.clone(),
+            waiting_child: false,
             handlers: Arc::new(Mutex::new(handlers)),
         }))
     }
@@ -115,6 +118,7 @@ impl SignalController {
         Self(Mutex::new(SignalControllerInner {
             pending: SignalQueue::default(),
             blocked: inner.blocked.clone(),
+            waiting_child: false,
             handlers: inner.handlers.clone(),
         }))
     }
@@ -138,6 +142,20 @@ impl SignalController {
 
     pub fn set_handler(&self, signal: Signal, handler: SignalHandler) {
         self.0.lock().handlers.lock()[signal as usize] = handler;
+    }
+
+    pub fn set_waiting_child(&self, waiting: bool) {
+        self.0.lock().waiting_child = waiting;
+    }
+
+    pub fn ignore_on_bus(&self, signal: Signal) -> bool {
+        let inner = self.0.lock();
+        if signal == Signal::SIGCHLD && inner.waiting_child {
+            return false;
+        }
+        let handler = inner.handlers.lock()[signal as usize];
+        inner.blocked.contains(signal.into())
+            || matches!(handler, SignalHandler::Kernel(f) if f == SignalHandler::k_ignore)
     }
 
     pub fn poll(&self) -> Option<SignalPoll> {

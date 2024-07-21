@@ -73,10 +73,14 @@ impl Thread {
     pub fn recv_signal(&self, signal: Signal) {
         info!("Thread {} receive signal {:?}", self.tid.0, signal);
         match signal {
-            Signal::SIGCHLD => self.event_bus.recv_event(Event::CHILD_EXIT),
+            Signal::SIGCHLD => {
+                if !self.signals.ignore_on_bus(signal) {
+                    self.event_bus.recv_event(Event::CHILD_EXIT);
+                }
+            },
             Signal::SIGKILL => self.event_bus.recv_event(Event::KILL_THREAD),
             _ => {
-                if !self.signals.get_mask().contains(signal.into()) {
+                if !self.signals.ignore_on_bus(signal) {
                     self.event_bus.recv_event(Event::COMMON_SIGNAL);
                 }
             }

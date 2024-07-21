@@ -544,8 +544,8 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     let timeout = proc_inner.addr_space.transmute_r::<TimeVal>(timeout)?.cloned().map(Duration::from);
     let sigmask = proc_inner.addr_space.transmute_r::<SigSet>(sigmask)?.cloned();
     debug!(
-        "[sys_pselect]: readfds {:?}, writefds {:?}, exceptfds {:?}, timeout {:?}",
-        rfds, wfds, efds, timeout,
+        "[sys_pselect]: readfds {:?}, writefds {:?}, exceptfds {:?}, timeout {:?}, sigmask {:?}",
+        rfds, wfds, efds, timeout, sigmask,
     );
     let fd_slot_bits = 8 * size_of::<usize>();
     let mut fds: Vec<PollFd> = Vec::new();

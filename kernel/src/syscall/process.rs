@@ -250,8 +250,10 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
 pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
     let options = WaitOptions::from_bits(options).ok_or(Errno::EINVAL)?;
     info!("[wait4] pid: {:?}, wstatus: {:#x}, options: {:?}", pid as isize, wstatus, options);
+    current_thread().signals.set_waiting_child(true);
     let fut = WaitPidFuture::new(pid, options, wstatus);
     let ret = suspend_now(None, Event::all().difference(Event::CHILD_EXIT), fut).await;
+    current_thread().signals.set_waiting_child(false);
     info!("[wait4] ret: {:?}", ret);
     ret
 }
