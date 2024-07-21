@@ -135,7 +135,7 @@ pub struct UContext {
     pub uc_link: usize,
     pub uc_stack: SignalStack,
     pub uc_sigmask: SigSet,
-    _unused: [u8; 1024 / 8 - size_of::<SigSet>()],
+    _unused: [u8; 128],
     pub uc_mcontext: [usize; 32],
     pub uc_fcontext: [f64; 32],
 }
@@ -155,7 +155,7 @@ impl UContext {
             uc_link: 0,
             uc_stack: SignalStack::default(),
             uc_sigmask: sigmask,
-            _unused: [0; 120],
+            _unused: [0; 128],
             uc_mcontext: trap_ctx.user_x,
             uc_fcontext: trap_ctx.fctx.user_f,
         }
