@@ -4,9 +4,10 @@ use alloc::sync::Arc;
 use core::fmt::Display;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use log::debug;
+use crate::config::MAX_INODE_CACHE;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::inode::Inode;
-use crate::fs::inode_cache::INODE_CACHE;
+use crate::fs::inode_cache::InodeCache;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
 use crate::split_path;
@@ -66,6 +67,7 @@ static MNT_NS_ID_POOL: AtomicUsize = AtomicUsize::new(1);
 /// 挂载命名空间
 pub struct MountNamespace {
     pub mnt_ns_id: usize,
+    pub inode_cache: InodeCache,
     tree: Mutex<MountTree>,
 }
 
@@ -86,9 +88,11 @@ impl MountTree {
 
 impl MountNamespace {
     pub fn new(root_fs: Arc<dyn FileSystem>) -> Self {
-        let mnt_ns_id = MNT_NS_ID_POOL.fetch_add(1, Ordering::Acquire);
-        let tree = Mutex::new(MountTree::new(root_fs));
-        Self { mnt_ns_id, tree }
+        Self {
+            mnt_ns_id: MNT_NS_ID_POOL.fetch_add(1, Ordering::Acquire),
+            tree: Mutex::new(MountTree::new(root_fs)),
+            inode_cache: InodeCache::new(MAX_INODE_CACHE),
+        }
     }
 
     pub fn print_mounts(&self) -> String {
@@ -107,7 +111,7 @@ impl MountNamespace {
         assert!(is_absolute_path(path));
         let root = self.tree.lock().fs.root();
         let inode = self.lookup_relative(root, &path[1..], follow_link).await?;
-        INODE_CACHE.insert(None, path.to_string(), &inode);
+        self.inode_cache.insert(None, path.to_string(), &inode);
         Ok(inode)
     }
 
@@ -146,7 +150,7 @@ impl MountNamespace {
                     inode = inode.lookup_name(&name).await?;
                 }
             } else {
-                INODE_CACHE.insert(Some(&parent), path.to_string(), &inode);
+                self.inode_cache.insert(Some(&parent), path.to_string(), &inode);
                 break Ok(inode);
             }
         }
@@ -164,6 +168,7 @@ impl MountNamespace {
         let mut tree = self.tree.lock();
         Self::do_mount(&mut tree.sub_trees, fs.clone(), absolute_path)?;
         inode.metadata().inner.lock().mounts.insert(dir_name, fs.root());
+        self.inode_cache.invalidate();
         Ok(())
     }
 
@@ -175,6 +180,7 @@ impl MountNamespace {
         let mut tree = self.tree.lock();
         Self::do_unmount(&mut tree.sub_trees, absolute_path)?;
         inode.metadata().inner.lock().mounts.remove(&dir_name);
+        self.inode_cache.invalidate();
         Ok(())
     }
 

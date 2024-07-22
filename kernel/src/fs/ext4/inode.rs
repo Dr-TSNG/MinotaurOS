@@ -286,7 +286,7 @@ impl InodeInternal for Ext4Inode {
                 metadata: InodeMeta::movein(
                     inode.as_ref(),
                     name.to_string(),
-                    append_path(&self.metadata.path, &name),
+                    new_path,
                     self.clone(),
                 ),
                 fs: self.fs.clone(),

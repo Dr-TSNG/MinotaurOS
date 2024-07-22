@@ -5,7 +5,6 @@ use core::num::NonZeroUsize;
 use lru::LruCache;
 use crate::fs::inode::Inode;
 use crate::sync::mutex::Mutex;
-use crate::sync::once::LateInit;
 
 #[derive(Eq, Hash, PartialEq, Clone, Debug)]
 struct HashKey {
@@ -23,8 +22,6 @@ impl HashKey {
 }
 
 pub struct InodeCache(Mutex<LruCache<HashKey, Weak<dyn Inode>>>);
-
-pub static INODE_CACHE: LateInit<InodeCache> = LateInit::new();
 
 impl InodeCache {
     pub fn new(size: usize) -> Self {
@@ -44,7 +41,7 @@ impl InodeCache {
     }
 
     pub fn get(
-        &self, 
+        &self,
         parent: Option<&Arc<dyn Inode>>,
         subpath: &str,
     ) -> Option<Arc<dyn Inode>> {
@@ -53,5 +50,10 @@ impl InodeCache {
         let subpath: &'static str = unsafe { core::mem::transmute(subpath) };
         let hash_key = HashKey::new(parent_key, Cow::Borrowed(subpath));
         cache.get(&hash_key).and_then(|inode| inode.upgrade())
+    }
+
+    pub fn invalidate(&self) {
+        let mut cache = self.0.lock();
+        cache.clear();
     }
 }

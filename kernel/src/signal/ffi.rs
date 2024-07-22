@@ -1,4 +1,3 @@
-use core::mem::size_of;
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
 use zerocopy::{FromBytes, FromZeroes};

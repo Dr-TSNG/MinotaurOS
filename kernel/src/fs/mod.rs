@@ -1,11 +1,9 @@
 use alloc::sync::Arc;
 use log::info;
-use crate::config::MAX_INODE_CACHE;
 use crate::driver::{DEVICES, Device};
 use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::MountNamespace;
-use crate::fs::inode_cache::{INODE_CACHE, InodeCache};
 use crate::result::SyscallResult;
 
 pub mod devfs;
@@ -21,6 +19,7 @@ pub mod path;
 pub mod page_cache;
 pub mod pipe;
 pub mod procfs;
+pub mod tmpfs;
 
 pub fn init() -> SyscallResult<Arc<MountNamespace>> {
     let mut root_dev = None;
@@ -30,7 +29,6 @@ pub fn init() -> SyscallResult<Arc<MountNamespace>> {
             break;
         }
     }
-    INODE_CACHE.init(InodeCache::new(MAX_INODE_CACHE));
     let root_dev = root_dev.expect("Missing root block device");
     let root_fs = Ext4FileSystem::new(root_dev, VfsFlags::empty());
     let mnt_ns = Arc::new(MountNamespace::new(root_fs));
