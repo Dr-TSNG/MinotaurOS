@@ -3,13 +3,13 @@ use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
+use core::cell::SyncUnsafeCell;
 use core::time::Duration;
 use async_trait::async_trait;
 use log::{debug, trace};
 use lwext4_rust::Ext4File;
 use lwext4_rust::bindings::{EXT4_INODE_ROOT_INDEX, O_CREAT, O_RDWR, SEEK_SET};
 use lwext4_rust::dir::{lwext4_movedir, lwext4_movefile, lwext4_readlink, lwext4_rmdir, lwext4_rmfile, lwext4_symlink};
-use tap::Tap;
 use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::ext4::wrapper::i32_to_err;
 use crate::fs::ffi::InodeMode;
@@ -18,12 +18,11 @@ use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::page_cache::PageCache;
 use crate::fs::path::append_path;
 use crate::result::{Errno, SyscallResult};
-use crate::sync::mutex::AsyncMutex;
 
 pub struct Ext4Inode {
     metadata: InodeMeta,
     fs: Weak<Ext4FileSystem>,
-    inner: Arc<AsyncMutex<Ext4InodeInner>>,
+    inner: Arc<SyncUnsafeCell<Ext4InodeInner>>,
 }
 
 struct Ext4InodeInner {
@@ -32,11 +31,13 @@ struct Ext4InodeInner {
     children: BTreeMap<String, Arc<Ext4Inode>>,
 }
 
+// Safety: We use global lock to ensure that only one thread can access the inode at the same time
 unsafe impl Send for Ext4InodeInner {}
+unsafe impl Sync for Ext4InodeInner {}
 
 impl Ext4InodeInner {
-    fn new(file: Option<Ext4File>) -> Arc<AsyncMutex<Self>> {
-        Arc::new(AsyncMutex::new(Self {
+    fn new(file: Option<Ext4File>) -> Arc<SyncUnsafeCell<Self>> {
+        Arc::new(SyncUnsafeCell::new(Self {
             file,
             children_loaded: false,
             children: Default::default(),
@@ -67,10 +68,14 @@ impl Ext4Inode {
         })
     }
 
-    fn load_children(self: Arc<Self>, inner: &mut Ext4InodeInner) -> SyscallResult {
+    fn inner(&self) -> &mut Ext4InodeInner {
+        unsafe { &mut *self.inner.get() }
+    }
+
+    fn load_children(self: Arc<Self>) -> SyscallResult {
         debug!("[ext4] Load children");
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
-        let mut iter = inner.file.as_ref().unwrap().iter_dir();
+        let mut iter = self.inner().file.as_ref().unwrap().iter_dir();
         while let Some(dirent) = iter.next() {
             trace!("[ext4] Dirent: {}", dirent.name);
             if dirent.name == "." || dirent.name == ".." {
@@ -105,17 +110,17 @@ impl Ext4Inode {
                 fs: self.fs.clone(),
                 inner: Ext4InodeInner::new(file),
             });
-            inner.children.insert(dirent.name.to_string(), inode);
+            self.inner().children.insert(dirent.name.to_string(), inode);
         }
-        inner.children_loaded = true;
+        self.inner().children_loaded = true;
         Ok(())
     }
 
-    fn check_exists(self: Arc<Self>, inner: &mut Ext4InodeInner, name: &str, should: bool) -> SyscallResult {
-        if !inner.children_loaded {
-            self.load_children(inner)?;
+    fn check_exists(self: Arc<Self>, name: &str, should: bool) -> SyscallResult {
+        if !self.inner().children_loaded {
+            self.clone().load_children()?;
         }
-        if should ^ inner.children.contains_key(name) {
+        if should ^ self.inner().children.contains_key(name) {
             Err(Errno::EEXIST)
         } else {
             Ok(())
@@ -138,8 +143,7 @@ impl InodeInternal for Ext4Inode {
     async fn read_direct(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut inner = self.inner.lock().await;
-        let file = inner.file.as_mut().unwrap();
+        let file = self.inner().file.as_mut().unwrap();
         file.seek(offset as i64, SEEK_SET).map_err(i32_to_err)?;
         let read = file.read(buf).map_err(i32_to_err)?;
         Ok(read as isize)
@@ -148,8 +152,7 @@ impl InodeInternal for Ext4Inode {
     async fn write_direct(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut inner = self.inner.lock().await;
-        let file = inner.file.as_mut().unwrap();
+        let file = self.inner().file.as_mut().unwrap();
         file.seek(offset as i64, SEEK_SET).map_err(i32_to_err)?;
         let written = file.write(buf).map_err(i32_to_err)?;
         self.metadata.inner.lock().size = file.size() as isize;
@@ -159,8 +162,7 @@ impl InodeInternal for Ext4Inode {
     async fn truncate_direct(&self, size: isize) -> SyscallResult {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut inner = self.inner.lock().await;
-        let file = inner.file.as_mut().unwrap();
+        let file = self.inner().file.as_mut().unwrap();
         let old_size = self.metadata.inner.lock().size;
         if old_size < size {
             // lwext4 driver does not extend file size, so we need to write zeroes manually
@@ -177,11 +179,10 @@ impl InodeInternal for Ext4Inode {
     async fn do_lookup_name(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut inner = self.inner.lock().await;
-        if !inner.children_loaded {
-            self.clone().load_children(&mut inner)?;
+        if !self.inner().children_loaded {
+            self.clone().load_children()?;
         }
-        match inner.children.get(name) {
+        match self.inner().children.get(name) {
             Some(inode) => Ok(inode.clone()),
             None => Err(Errno::ENOENT),
         }
@@ -190,11 +191,10 @@ impl InodeInternal for Ext4Inode {
     async fn do_lookup_idx(self: Arc<Self>, idx: usize) -> SyscallResult<Arc<dyn Inode>> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut inner = self.inner.lock().await;
-        if !inner.children_loaded {
-            self.clone().load_children(&mut inner)?;
+        if !self.inner().children_loaded {
+            self.clone().load_children()?;
         }
-        match inner.children.values().nth(idx) {
+        match self.inner().children.values().nth(idx) {
             Some(inode) => Ok(inode.clone()),
             None => Err(Errno::ENOENT),
         }
@@ -204,8 +204,7 @@ impl InodeInternal for Ext4Inode {
         debug!("[ext4] Create file: {}", name);
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut inner = self.inner.lock().await;
-        self.clone().check_exists(&mut inner, name, false)?;
+        self.clone().check_exists(name, false)?;
 
         let path = append_path(&self.metadata.path, &name);
         let file = if mode == InodeMode::IFDIR {
@@ -235,7 +234,7 @@ impl InodeInternal for Ext4Inode {
             fs: self.fs.clone(),
             inner: Ext4InodeInner::new(Some(file)),
         });
-        inner.children.insert(name.to_string(), inode.clone());
+        self.inner().children.insert(name.to_string(), inode.clone());
         Ok(inode)
     }
 
@@ -243,8 +242,7 @@ impl InodeInternal for Ext4Inode {
         debug!("[ext4] Symlink {} -> {}", name, target);
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut inner = self.inner.lock().await;
-        self.clone().check_exists(&mut inner, name, false)?;
+        self.clone().check_exists(name, false)?;
 
         let path = append_path(&self.metadata.path, &name);
         lwext4_symlink(&path, target).map_err(i32_to_err)?;
@@ -267,15 +265,14 @@ impl InodeInternal for Ext4Inode {
             fs: self.fs.clone(),
             inner: Ext4InodeInner::new(None),
         });
-        inner.children.insert(name.to_string(), inode);
+        self.inner().children.insert(name.to_string(), inode);
         Ok(())
     }
 
     async fn do_movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>) -> SyscallResult {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut inner = self.inner.lock().await;
-        self.clone().check_exists(&mut inner, name, false)?;
+        self.clone().check_exists(name, false)?;
 
         if let Ok(inode) = inode.downcast_arc::<Ext4Inode>() {
             let old_path = inode.metadata().path.as_str();
@@ -295,7 +292,7 @@ impl InodeInternal for Ext4Inode {
                 fs: self.fs.clone(),
                 inner: inode.inner.clone(),
             });
-            inner.children.insert(name.to_string(), inode);
+            self.inner().children.insert(name.to_string(), inode);
         } else {
             todo!("Moving across file systems is not supported yet");
         }
@@ -305,15 +302,14 @@ impl InodeInternal for Ext4Inode {
     async fn do_unlink(self: Arc<Self>, target: Arc<dyn Inode>) -> SyscallResult {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut inner = self.inner.lock().await;
-        self.clone().check_exists(&mut inner, &target.metadata().name, true)?;
+        self.clone().check_exists(&target.metadata().name, true)?;
 
         if target.metadata().mode == InodeMode::IFDIR {
             lwext4_rmdir(&target.metadata().path).map_err(i32_to_err)?;
         } else {
             lwext4_rmfile(&target.metadata().path).map_err(i32_to_err)?;
         }
-        inner.children.remove(&target.metadata().name);
+        self.inner().children.remove(&target.metadata().name);
         Ok(())
     }
 
