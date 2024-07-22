@@ -1,7 +1,9 @@
 use alloc::sync::Arc;
+use core::cmp::min;
 use core::num::NonZeroUsize;
 use lru::LruCache;
 use riscv::register::satp;
+use crate::config::MAX_ASID;
 
 pub type ASID = u16;
 
@@ -14,7 +16,7 @@ impl ASIDManager {
             satp::set(satp.mode(), ASID::MAX as usize, satp.ppn());
             let cap = satp::read().asid();
             satp::set(satp.mode(), satp.asid(), satp.ppn());
-            cap
+            min(cap, MAX_ASID)
         };
         let mut cache = LruCache::new(NonZeroUsize::new(asid_cap).unwrap());
         for i in 0..asid_cap as ASID {

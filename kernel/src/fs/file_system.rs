@@ -6,6 +6,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use log::debug;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::inode::Inode;
+use crate::fs::inode_cache::INODE_CACHE;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
 use crate::split_path;
@@ -89,7 +90,7 @@ impl MountNamespace {
         let tree = Mutex::new(MountTree::new(root_fs));
         Self { mnt_ns_id, tree }
     }
-    
+
     pub fn print_mounts(&self) -> String {
         let mut res = String::new();
         res += "/dev/sda1 / ext4 rw 0 0\n";
@@ -105,17 +106,20 @@ impl MountNamespace {
     ) -> SyscallResult<Arc<dyn Inode>> {
         assert!(is_absolute_path(path));
         let root = self.tree.lock().fs.root();
-        self.lookup_relative(root, &path[1..], follow_link).await
+        let inode = self.lookup_relative(root, &path[1..], follow_link).await?;
+        INODE_CACHE.insert(None, path.to_string(), &inode);
+        Ok(inode)
     }
 
     pub async fn lookup_relative(
         &self,
-        mut inode: Arc<dyn Inode>,
+        parent: Arc<dyn Inode>,
         path: &str,
         follow_link: bool,
     ) -> SyscallResult<Arc<dyn Inode>> {
         assert!(!is_absolute_path(&path));
         let mut names = split_path!(path).map(|s| s.to_string()).collect::<VecDeque<_>>();
+        let mut inode = parent.clone();
         loop {
             if inode.metadata().mode == InodeMode::IFLNK && (!names.is_empty() || follow_link) {
                 let path = inode.clone().do_readlink().await?;
@@ -142,6 +146,7 @@ impl MountNamespace {
                     inode = inode.lookup_name(&name).await?;
                 }
             } else {
+                INODE_CACHE.insert(Some(&parent), path.to_string(), &inode);
                 break Ok(inode);
             }
         }

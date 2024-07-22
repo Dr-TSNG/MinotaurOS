@@ -2,6 +2,7 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use downcast_rs::{DowncastSync, impl_downcast};
 use crate::fs::ffi::{InodeMode, OpenFlags};
@@ -12,7 +13,10 @@ use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
 
+static KEY_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
 pub struct InodeMeta {
+    pub key: usize,
     /// 结点编号
     pub ino: usize,
     /// 结点设备
@@ -77,8 +81,9 @@ impl InodeMeta {
             size,
             mounts: BTreeMap::new(),
         };
+        let key = KEY_COUNTER.fetch_add(1, Ordering::Relaxed);
         let parent = parent.map(|parent| Arc::downgrade(&parent));
-        Self { ino, dev, mode, name, path, parent, page_cache, inner: Arc::new(Mutex::new(inner)) }
+        Self { key, ino, dev, mode, name, path, parent, page_cache, inner: Arc::new(Mutex::new(inner)) }
     }
 
     pub fn movein(
@@ -88,6 +93,7 @@ impl InodeMeta {
         parent: Arc<dyn Inode>,
     ) -> Self {
         Self {
+            key: inode.metadata().key,
             ino: inode.metadata().ino,
             dev: inode.metadata().dev,
             mode: inode.metadata().mode,
