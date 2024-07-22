@@ -8,7 +8,8 @@ use async_trait::async_trait;
 use log::{debug, trace};
 use lwext4_rust::Ext4File;
 use lwext4_rust::bindings::{EXT4_INODE_ROOT_INDEX, O_CREAT, O_RDWR, SEEK_SET};
-use lwext4_rust::dir::Ext4Dir;
+use lwext4_rust::dir::{lwext4_movedir, lwext4_movefile, lwext4_readlink, lwext4_rmdir, lwext4_rmfile, lwext4_symlink};
+use tap::Tap;
 use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::ext4::wrapper::i32_to_err;
 use crate::fs::ffi::InodeMode;
@@ -26,13 +27,17 @@ pub struct Ext4Inode {
 }
 
 struct Ext4InodeInner {
+    file: Option<Ext4File>,
     children_loaded: bool,
     children: BTreeMap<String, Arc<Ext4Inode>>,
 }
 
+unsafe impl Send for Ext4InodeInner {}
+
 impl Ext4InodeInner {
-    fn new() -> Arc<AsyncMutex<Self>> {
+    fn new(file: Option<Ext4File>) -> Arc<AsyncMutex<Self>> {
         Arc::new(AsyncMutex::new(Self {
+            file,
             children_loaded: false,
             children: Default::default(),
         }))
@@ -41,6 +46,7 @@ impl Ext4InodeInner {
 
 impl Ext4Inode {
     pub fn root(fs: &Arc<Ext4FileSystem>, parent: Option<Arc<dyn Inode>>) -> Arc<Self> {
+        let file = Ext4File::open_dir("/", false).unwrap();
         let inode_ref = fs.ext4.ext4_get_inode_ref(EXT4_INODE_ROOT_INDEX).unwrap();
         Arc::new(Self {
             metadata: InodeMeta::new(
@@ -57,21 +63,27 @@ impl Ext4Inode {
                 fs.ext4.ext4_get_inode_size(&inode_ref) as isize,
             ),
             fs: Arc::downgrade(fs),
-            inner: Ext4InodeInner::new(),
+            inner: Ext4InodeInner::new(Some(file)),
         })
     }
 
     fn load_children(self: Arc<Self>, inner: &mut Ext4InodeInner) -> SyscallResult {
         debug!("[ext4] Load children");
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
-        for dirent in Ext4Dir::open(&self.metadata.path).map_err(i32_to_err)? {
+        let mut iter = inner.file.as_ref().unwrap().iter_dir();
+        while let Some(dirent) = iter.next() {
             trace!("[ext4] Dirent: {}", dirent.name);
             if dirent.name == "." || dirent.name == ".." {
                 continue;
             }
-            let path = append_path(&self.metadata.path, &dirent.name);
+            let path = append_path(&self.metadata.path, dirent.name);
             let inode_ref = fs.ext4.ext4_get_inode_ref(dirent.inode).map_err(i32_to_err)?;
             let mode = InodeMode::try_from(inode_ref.mode & 0xf000).unwrap();
+            let file = match mode {
+                InodeMode::IFDIR => Some(Ext4File::open_dir(&path, false).map_err(i32_to_err)?),
+                InodeMode::IFREG => Some(Ext4File::open_file(&path, O_RDWR).map_err(i32_to_err)?),
+                _ => None,
+            };
             let page_cache = match mode {
                 InodeMode::IFREG => Some(PageCache::new()),
                 _ => None,
@@ -81,7 +93,7 @@ impl Ext4Inode {
                     dirent.inode as usize,
                     fs.device.metadata().dev_id,
                     mode,
-                    dirent.name.clone(),
+                    dirent.name.to_string(),
                     path,
                     Some(self.clone()),
                     page_cache,
@@ -91,9 +103,9 @@ impl Ext4Inode {
                     fs.ext4.ext4_get_inode_size(&inode_ref) as isize,
                 ),
                 fs: self.fs.clone(),
-                inner: Ext4InodeInner::new(),
+                inner: Ext4InodeInner::new(file),
             });
-            inner.children.insert(dirent.name, inode);
+            inner.children.insert(dirent.name.to_string(), inode);
         }
         inner.children_loaded = true;
         Ok(())
@@ -119,10 +131,6 @@ impl Inode for Ext4Inode {
     fn file_system(&self) -> Weak<dyn FileSystem> {
         self.fs.clone()
     }
-
-    fn ioctl(&self, request: usize, value: usize, arg3: usize, arg4: usize, arg5: usize) -> SyscallResult<i32> {
-        Err(Errno::ENOTTY)
-    }
 }
 
 #[async_trait]
@@ -130,7 +138,8 @@ impl InodeInternal for Ext4Inode {
     async fn read_direct(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut file = Ext4File::open(&self.metadata.path, O_RDWR).map_err(i32_to_err)?;
+        let mut inner = self.inner.lock().await;
+        let file = inner.file.as_mut().unwrap();
         file.seek(offset as i64, SEEK_SET).map_err(i32_to_err)?;
         let read = file.read(buf).map_err(i32_to_err)?;
         Ok(read as isize)
@@ -139,7 +148,8 @@ impl InodeInternal for Ext4Inode {
     async fn write_direct(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        let mut file = Ext4File::open(&self.metadata.path, O_RDWR).map_err(i32_to_err)?;
+        let mut inner = self.inner.lock().await;
+        let file = inner.file.as_mut().unwrap();
         file.seek(offset as i64, SEEK_SET).map_err(i32_to_err)?;
         let written = file.write(buf).map_err(i32_to_err)?;
         self.metadata.inner.lock().size = file.size() as isize;
@@ -148,14 +158,16 @@ impl InodeInternal for Ext4Inode {
 
     async fn truncate_direct(&self, size: isize) -> SyscallResult {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
+        let _guard = fs.driver_lock.lock().await;
+        let mut inner = self.inner.lock().await;
+        let file = inner.file.as_mut().unwrap();
         let old_size = self.metadata.inner.lock().size;
         if old_size < size {
-            // lwext4 driver does not extend file size, so we need to write zeros manually
+            // lwext4 driver does not extend file size, so we need to write zeroes manually
             let buf = vec![0u8; (size - old_size) as usize];
-            self.write_direct(&buf, old_size).await?;
+            file.seek(old_size as i64, SEEK_SET).map_err(i32_to_err)?;
+            file.write(&buf).map_err(i32_to_err)?;
         } else {
-            let _guard = fs.driver_lock.lock().await;
-            let mut file = Ext4File::open(&self.metadata.path, O_RDWR).map_err(i32_to_err)?;
             file.truncate(size as u64).map_err(i32_to_err)?;
         }
         self.metadata.inner.lock().size = size;
@@ -196,20 +208,19 @@ impl InodeInternal for Ext4Inode {
         self.clone().check_exists(&mut inner, name, false)?;
 
         let path = append_path(&self.metadata.path, &name);
-        let inode = if mode == InodeMode::IFDIR {
-            Ext4Dir::mkdir(&path).map_err(i32_to_err)?;
-            Ext4Dir::open(&path).map_err(i32_to_err)?.inode()
+        let file = if mode == InodeMode::IFDIR {
+            Ext4File::open_dir(&path, true).map_err(i32_to_err)?
         } else {
-            Ext4File::open(&path, O_RDWR | O_CREAT).map_err(i32_to_err)?.inode()
+            Ext4File::open_file(&path, O_RDWR | O_CREAT).map_err(i32_to_err)?
         };
         let page_cache = match mode {
             InodeMode::IFREG => Some(PageCache::new()),
             _ => None,
         };
-        let inode_ref = fs.ext4.ext4_get_inode_ref(inode).map_err(i32_to_err)?;
+        let inode_ref = fs.ext4.ext4_get_inode_ref(file.inode()).map_err(i32_to_err)?;
         let inode = Arc::new(Self {
             metadata: InodeMeta::new(
-                inode as usize,
+                file.inode() as usize,
                 fs.device.metadata().dev_id,
                 mode,
                 name.to_string(),
@@ -222,7 +233,7 @@ impl InodeInternal for Ext4Inode {
                 0,
             ),
             fs: self.fs.clone(),
-            inner: Ext4InodeInner::new(),
+            inner: Ext4InodeInner::new(Some(file)),
         });
         inner.children.insert(name.to_string(), inode.clone());
         Ok(inode)
@@ -236,7 +247,7 @@ impl InodeInternal for Ext4Inode {
         self.clone().check_exists(&mut inner, name, false)?;
 
         let path = append_path(&self.metadata.path, &name);
-        Ext4Dir::symlink(&path, target).map_err(i32_to_err)?;
+        lwext4_symlink(&path, target).map_err(i32_to_err)?;
         let inode = fs.ext4.ext4_get_ino_by_path(&path).map_err(i32_to_err)?;
         let inode_ref = fs.ext4.ext4_get_inode_ref(inode).map_err(i32_to_err)?;
         let inode = Arc::new(Self {
@@ -254,7 +265,7 @@ impl InodeInternal for Ext4Inode {
                 0,
             ),
             fs: self.fs.clone(),
-            inner: Ext4InodeInner::new(),
+            inner: Ext4InodeInner::new(None),
         });
         inner.children.insert(name.to_string(), inode);
         Ok(())
@@ -270,9 +281,9 @@ impl InodeInternal for Ext4Inode {
             let old_path = inode.metadata().path.as_str();
             let new_path = append_path(&self.metadata.path, &name);
             if self.metadata.mode == InodeMode::IFDIR {
-                Ext4Dir::movedir(&old_path, &new_path).map_err(i32_to_err)?;
+                lwext4_movedir(&old_path, &new_path).map_err(i32_to_err)?;
             } else {
-                Ext4Dir::movefile(&old_path, &new_path).map_err(i32_to_err)?;
+                lwext4_movefile(&old_path, &new_path).map_err(i32_to_err)?;
             }
             let inode = Arc::new(Self {
                 metadata: InodeMeta::movein(
@@ -298,9 +309,9 @@ impl InodeInternal for Ext4Inode {
         self.clone().check_exists(&mut inner, &target.metadata().name, true)?;
 
         if target.metadata().mode == InodeMode::IFDIR {
-            Ext4Dir::rmdir(&target.metadata().path).map_err(i32_to_err)?;
+            lwext4_rmdir(&target.metadata().path).map_err(i32_to_err)?;
         } else {
-            Ext4Dir::rmfile(&target.metadata().path).map_err(i32_to_err)?;
+            lwext4_rmfile(&target.metadata().path).map_err(i32_to_err)?;
         }
         inner.children.remove(&target.metadata().name);
         Ok(())
@@ -309,6 +320,6 @@ impl InodeInternal for Ext4Inode {
     async fn do_readlink(self: Arc<Self>) -> SyscallResult<String> {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
-        Ext4Dir::readlink(&self.metadata.path).map_err(i32_to_err)
+        lwext4_readlink(&self.metadata.path).map_err(i32_to_err)
     }
 }
