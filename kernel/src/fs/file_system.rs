@@ -111,7 +111,7 @@ impl MountNamespace {
         assert!(is_absolute_path(path));
         let root = self.tree.lock().fs.root();
         let inode = self.lookup_relative(root, &path[1..], follow_link).await?;
-        self.inode_cache.insert(None, path.to_string(), &inode);
+        // self.inode_cache.insert(None, path.to_string(), &inode);
         Ok(inode)
     }
 
@@ -150,7 +150,7 @@ impl MountNamespace {
                     inode = inode.lookup_name(&name).await?;
                 }
             } else {
-                self.inode_cache.insert(Some(&parent), path.to_string(), &inode);
+                // self.inode_cache.insert(Some(&parent), path.to_string(), &inode);
                 break Ok(inode);
             }
         }
@@ -168,7 +168,7 @@ impl MountNamespace {
         let mut tree = self.tree.lock();
         Self::do_mount(&mut tree.sub_trees, fs.clone(), absolute_path)?;
         inode.metadata().inner.lock().mounts.insert(dir_name, fs.root());
-        self.inode_cache.invalidate();
+        // self.inode_cache.invalidate();
         Ok(())
     }
 
@@ -180,7 +180,7 @@ impl MountNamespace {
         let mut tree = self.tree.lock();
         Self::do_unmount(&mut tree.sub_trees, absolute_path)?;
         inode.metadata().inner.lock().mounts.remove(&dir_name);
-        self.inode_cache.invalidate();
+        // self.inode_cache.invalidate();
         Ok(())
     }
 
