@@ -1,5 +1,6 @@
 use core::arch::asm;
 use core::mem::size_of;
+use bitflags::bitflags;
 use riscv::register::sstatus;
 use riscv::register::sstatus::{FS, SPP, Sstatus};
 
@@ -21,11 +22,24 @@ pub struct TrapContext {
 pub struct FloatContext {
     /* 32 */ pub user_f: [f64; 32],
     /* 64 */ pub fcsr: u32,
-    /* 64 */ pub is_dirty: u8,    // 当前寄存器是否被修改
-    /* 64 */ pub trap_reload: u8, // 是否需要恢复
-    /* 64 */ _pad: u16,
+    /* 64 */ status: FloatStatus,
 }
 
+bitflags! {
+    #[repr(transparent)]
+    struct FloatStatus: u32 {
+        const IS_DIRTY      = 1 << 0; // 当前寄存器是否被修改
+        const TRAP_RELOAD   = 1 << 1; // 是否需要恢复
+        const EVER_MODIFIED = 1 << 2; // 是否曾经修改过寄存器
+    }
+}
+
+// 浮点寄存器状态机
+// 1. 从用户态陷入内核态时，如果浮点寄存器在此次运行期间被修改过，标记为脏
+// 2. 从内核态返回用户态时，恢复浮点寄存器
+// 3. 切换线程时，如果浮点寄存器自线程诞生以来有被修改过，保存到上下文，标记为需要恢复
+// 4. 当信号发生并准备切换 pc 到用户态 handler 时，如果浮点寄存器自线程诞生以来有被修改过，保存到上下文
+// 5. sigreturn 时，如果浮点寄存器在此次运行期间被修改过，标记为需要恢复
 impl TrapContext {
     pub fn new(entry: usize, sp: usize) -> Self {
         let mut sstatus = sstatus::read();
@@ -66,35 +80,51 @@ impl TrapContext {
 }
 
 impl FloatContext {
-    pub fn new() -> Self {
+    fn new() -> Self {
         debug_assert_eq!(size_of::<Self>(), 33 * size_of::<usize>());
         Self {
             user_f: [0f64; 32],
             fcsr: FS::Clean as u32,
-            is_dirty: 0,
-            trap_reload: 0,
-            _pad: 0,
+            status: FloatStatus::empty(),
         }
     }
 
     pub fn trap_in(&mut self, sstatus: Sstatus) {
-        self.is_dirty |= (sstatus.fs() == FS::Dirty) as u8;
+        if sstatus.fs() == FS::Dirty {
+            self.status |= FloatStatus::IS_DIRTY;
+            self.status |= FloatStatus::EVER_MODIFIED;
+        }
+    }
+
+    pub fn trap_out(&mut self) {
+        self.restore();
     }
 
     pub fn sched_out(&mut self) {
-        self.save();
-        self.trap_reload = 1;
+        if self.status.contains(FloatStatus::EVER_MODIFIED) {
+            self.save();
+            self.status.insert(FloatStatus::TRAP_RELOAD);
+        }
     }
 
-    pub fn on_signal(&mut self) {
-        self.save();
+    pub fn signal_enter(&mut self) {
+        if self.status.contains(FloatStatus::EVER_MODIFIED) {
+            self.save();
+        }
     }
 
-    pub fn save(&mut self) {
-        if self.is_dirty == 0 {
+    pub fn signal_exit(&mut self, saved: &[f64; 32]) {
+        if self.status.contains(FloatStatus::IS_DIRTY) {
+            self.user_f.copy_from_slice(saved);
+            self.status.insert(FloatStatus::TRAP_RELOAD);
+        }
+    }
+
+    fn save(&mut self) {
+        if !self.status.contains(FloatStatus::IS_DIRTY) {
             return;
         }
-        self.is_dirty = 0;
+        self.status.remove(FloatStatus::IS_DIRTY);
         unsafe {
             asm! {
             "fsd  f0,  0*8({0})",
@@ -136,11 +166,11 @@ impl FloatContext {
         }
     }
 
-    pub fn restore(&mut self) {
-        if self.trap_reload == 0 {
+    fn restore(&mut self) {
+        if !self.status.contains(FloatStatus::TRAP_RELOAD) {
             return;
         }
-        self.trap_reload = 0;
+        self.status.remove(FloatStatus::TRAP_RELOAD);
         unsafe {
             asm! {
             "fld  f0,  0*8({0})",

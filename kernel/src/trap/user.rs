@@ -23,7 +23,7 @@ pub fn trap_return() {
         current_thread().inner().rusage.trap_out();
 
         let trap_ctx = current_trap_ctx();
-        trap_ctx.fctx.restore();
+        trap_ctx.fctx.trap_out();
         trap_ctx.sstatus.set_fs(FS::Clean);
         __restore_to_user(trap_ctx);
         trap_ctx.fctx.trap_in(trap_ctx.sstatus);
@@ -90,7 +90,7 @@ pub fn check_signal() {
             }
             SignalHandler::User(sig_action) => {
                 debug!("Switch pc to {:#x}", sig_action.sa_handler);
-                trap_ctx.fctx.on_signal();
+                trap_ctx.fctx.signal_enter();
                 let ucontext = UContext::new(poll.blocked_before, trap_ctx);
                 let user_sp = VirtAddr(trap_ctx.get_sp()) - size_of::<UContext>();
                 if let Err(e) = current_process()
