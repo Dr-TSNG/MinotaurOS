@@ -102,7 +102,7 @@ impl smoltcp::phy::TxToken for VirtioTxToken {
 impl VirtIONetDevice {
     pub fn new(base_addr: VirtAddr) -> Self {
         Self {
-            metadata: DeviceMeta::new("virtio-net".to_string()),
+            metadata: DeviceMeta::new(0, 0, "virtio-net".to_string()),
             base_addr,
             dev: LateInit::new(),
         }

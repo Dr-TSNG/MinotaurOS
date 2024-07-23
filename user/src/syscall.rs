@@ -202,6 +202,37 @@ bitflags! {
     }
 }
 
+bitflags! {
+    pub struct VfsFlags: u32 {
+        /// Mount read-only
+        const ST_RDONLY      = 1;
+        /// Ignore suid and sgid bits
+        const ST_NOSUID      = 1 << 1;
+        /// Disallow access to device special files
+        const ST_NODEV       = 1 << 2;
+        /// Disallow program execution
+        const ST_NOEXEC      = 1 << 3;
+        /// Writes are synced at once
+        const ST_SYNCHRONOUS = 1 << 4;
+        /// Allow mandatory locks on an FS
+        const ST_MANDLOCK    = 1 << 6;
+        /// Write on file/directory/symlink
+        const ST_WRITE       = 1 << 7;
+        /// Append-only file
+        const ST_APPEND      = 1 << 8;
+        /// Immutable file
+        const ST_IMMUTABLE   = 1 << 9;
+        /// Do not update access times
+        const ST_NOATIME     = 1 << 10;
+        /// Do not update directory access times
+        const ST_NODIRATIME  = 1 << 11;
+        /// Update atime relative to mtime/ctime
+        const ST_RELATIME    = 1 << 12;
+        /// Do not follow symlinks
+        const ST_NOSYMFOLLOW = 1 << 13;
+    }
+}
+
 pub static AT_FDCWD: i32 = -100;
 
 macro_rules! syscall {
@@ -352,11 +383,11 @@ pub fn sigprocmask(how: u32, set: Option<&SigSet>, oldset: Option<&mut SigSet>) 
     syscall!(RtSigprocmask, how as usize, set_ptr, oldset_ptr, 8)
 }
 
-pub fn mount(source: &str, target: &str, fstype: &str, flags: u32, data: Option<&str>) -> isize {
+pub fn mount(source: &str, target: &str, fstype: &str, flags: VfsFlags, data: Option<&str>) -> isize {
     let source = CString::new(source).unwrap();
     let target = CString::new(target).unwrap();
     let fstype = CString::new(fstype).unwrap();
     let data = data.map(|s| CString::new(s).unwrap());
     let data = data.as_ref().map(|s| s.as_ptr()).unwrap_or(null());
-    syscall!(Mount, source.as_ptr(), target.as_ptr(), fstype.as_ptr(), flags, data)
+    syscall!(Mount, source.as_ptr(), target.as_ptr(), fstype.as_ptr(), flags.bits, data)
 }

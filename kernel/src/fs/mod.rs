@@ -22,14 +22,14 @@ pub mod tmpfs;
 
 pub fn init() -> SyscallResult<Arc<MountNamespace>> {
     let mut root_dev = None;
-    for device in DEVICES.read().values() {
+    for device in DEVICES.lock().values() {
         if let Device::Block(blk) = device {
             root_dev = Some(blk.clone());
             break;
         }
     }
     let root_dev = root_dev.expect("Missing root block device");
-    let root_fs = Ext4FileSystem::new(root_dev, VfsFlags::empty());
+    let root_fs = Ext4FileSystem::new(root_dev, VfsFlags::ST_WRITE | VfsFlags::ST_RELATIME);
     let mnt_ns = Arc::new(MountNamespace::new(root_fs));
     info!("File systems initialized");
     path::path_test();

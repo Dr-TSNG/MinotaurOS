@@ -196,19 +196,19 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
     );
 
     match fstype {
-        "devfs" => {
+        "devtmpfs" => {
             proc_inner.mnt_ns.mount(target, |p| {
-                DevFileSystem::new(flags, Some(p))
+                DevFileSystem::new(source, flags, Some(p))
             }).await?;
         }
-        "procfs" => {
+        "proc" => {
             proc_inner.mnt_ns.mount(target, |p| {
-                ProcFileSystem::new(flags, Some(p))
+                ProcFileSystem::new(source, flags, Some(p))
             }).await?;
         }
         "tmpfs" => {
             proc_inner.mnt_ns.mount(target, |p| {
-                TmpFileSystem::new(flags, Some(p))
+                TmpFileSystem::new(source, flags, Some(p))
             }).await?;
         }
         _ => return Err(Errno::ENODEV),

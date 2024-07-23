@@ -7,6 +7,7 @@ use crate::sync::mutex::IrqMutex;
 use virtio_drivers::device::blk::{SECTOR_SIZE, VirtIOBlk};
 use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
 use crate::arch::VirtAddr;
+use crate::driver::ffi::DEV_BLOCK_SCSI;
 use crate::driver::virtio::VirtioHal;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::once::LateInit;
@@ -67,7 +68,7 @@ impl BlockDevice for VirtIOBlkDevice {
 impl VirtIOBlkDevice {
     pub fn new(base_addr: VirtAddr) -> Self {
         Self {
-            metadata: DeviceMeta::new("virtio-blk".to_string()),
+            metadata: DeviceMeta::new(DEV_BLOCK_SCSI, 0, "virtio-blk".to_string()),
             base_addr,
             block: LateInit::new(),
         }

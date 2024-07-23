@@ -13,6 +13,7 @@ use fdt_rs::index::{DevTreeIndex, DevTreeIndexNode};
 use fdt_rs::prelude::PropReader;
 use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 use crate::config::{KERNEL_ADDR_OFFSET, KERNEL_MMIO_BASE};
+use crate::driver::ffi::make_dev;
 use crate::driver::plic::PLIC;
 use crate::driver::virtio::blk::VirtIOBlkDevice;
 use crate::driver::virtio::net::VirtIONetDevice;
@@ -20,12 +21,12 @@ use crate::fs::devfs::tty::{DEFAULT_TTY, TtyFile};
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::FileMeta;
 use crate::mm::addr_space::ASPerms;
-use crate::mm::allocator::IdAllocator;
 use crate::println;
 use crate::result::SyscallResult;
-use crate::sync::mutex::{Mutex, RwLock};
+use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
 
+pub mod ffi;
 pub mod ns16550a;
 pub mod plic;
 pub mod random;
@@ -33,10 +34,9 @@ pub mod virtio;
 
 pub static BOARD_INFO: LateInit<BoardInfo> = LateInit::new();
 pub static GLOBAL_MAPPINGS: LateInit<Vec<GlobalMapping>> = LateInit::new();
-pub static DEVICES: RwLock<BTreeMap<usize, Device>> = RwLock::new(BTreeMap::new());
+pub static DEVICES: Mutex<BTreeMap<u64, Device>> = Mutex::new(BTreeMap::new());
 pub static NET_DEVICE: Mutex<Option<VirtIONetDevice>> = Mutex::new(None);
 
-static DEV_ID_ALLOCATOR: Mutex<IdAllocator> = Mutex::new(IdAllocator::new(1));
 static NET_DEVICE_ADDR: Mutex<Option<VirtAddr>> = Mutex::new(None);
 
 pub struct BoardInfo {
@@ -96,14 +96,14 @@ impl Device {
 }
 
 pub struct DeviceMeta {
-    pub dev_id: usize,
+    pub dev_id: u64,
     pub dev_name: String,
 }
 
 impl DeviceMeta {
-    fn new(dev_name: String) -> DeviceMeta {
+    fn new(major: u32, minor: u32, dev_name: String) -> DeviceMeta {
         Self {
-            dev_id: DEV_ID_ALLOCATOR.lock().alloc(),
+            dev_id: make_dev(major, minor),
             dev_name,
         }
     }
@@ -161,7 +161,7 @@ pub fn init_dtb(dtb_paddr: usize) {
 }
 
 pub fn init_driver() -> SyscallResult<()> {
-    for device in DEVICES.read().values() {
+    for device in DEVICES.lock().values() {
         device.init();
         if let Device::Character(dev) = device {
             if dev.metadata().dev_name == "uart" {
@@ -258,7 +258,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     );
                     mmio_offset += reg[0].1;
                     let dev = Arc::new(VirtIOBlkDevice::new(mapping.virt_start));
-                    DEVICES.write().insert(dev.metadata().dev_id, Device::Block(dev));
+                    DEVICES.lock().insert(dev.metadata().dev_id, Device::Block(dev));
                     println!("[kernel] Register virtio block device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
                 } else if name == "virtio_mmio@10008000" {
@@ -308,7 +308,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     mmio_offset += size;
                     let dev = Arc::new(ns16550a::UartDevice::new(mapping.virt_start));
                     b_plic_intr.insert(intr as usize, dev.clone());
-                    DEVICES.write().insert(dev.metadata().dev_id, Device::Character(dev));
+                    DEVICES.lock().insert(dev.metadata().dev_id, Device::Character(dev));
                     println!("[kernel] Register serial device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
                 }

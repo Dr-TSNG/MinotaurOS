@@ -22,7 +22,7 @@ pub struct InodeMeta {
     /// 结点编号
     pub ino: usize,
     /// 结点设备
-    pub dev: usize,
+    pub dev: u64,
     /// 结点类型
     pub mode: InodeMode,
     /// 文件名
@@ -62,7 +62,7 @@ impl InodeMeta {
     /// 若 `parent` 为 `None`，则指向自身
     pub fn new(
         ino: usize,
-        dev: usize,
+        dev: u64,
         mode: InodeMode,
         name: String,
         path: String,

@@ -25,9 +25,10 @@ impl Ext4FileSystem {
         device: Arc<dyn BlockDevice>,
         flags: VfsFlags,
     ) -> Arc<Self> {
+        let dev = device.metadata().dev_id;
         let fs = Arc::new(Ext4FileSystem {
             device: device.clone(),
-            vfsmeta: FileSystemMeta::new(FileSystemType::EXT4, flags),
+            vfsmeta: FileSystemMeta::new(dev, "/dev/sda1", FileSystemType::EXT4, flags),
             ext4: Ext4::new(device),
             driver_lock: AsyncMutex::new(()),
             root: ManuallyDrop::new(LateInit::new()),

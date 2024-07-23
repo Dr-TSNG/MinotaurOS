@@ -1,10 +1,12 @@
 use alloc::collections::{BTreeMap, VecDeque};
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use core::fmt::Display;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hashbrown::HashMap;
 use log::debug;
+use crate::driver::ffi::sep_dev;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::inode::Inode;
 use crate::fs::path::is_absolute_path;
@@ -25,7 +27,7 @@ pub enum FileSystemType {
 impl Display for FileSystemType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            FileSystemType::DEVFS => write!(f, "devfs"),
+            FileSystemType::DEVFS => write!(f, "devtmpfs"),
             FileSystemType::EXT4 => write!(f, "ext4"),
             FileSystemType::FAT32 => write!(f, "fat32"),
             FileSystemType::TMPFS => write!(f, "tmpfs"),
@@ -40,6 +42,12 @@ impl Display for FileSystemType {
 pub struct FileSystemMeta {
     /// 唯一标识符
     fsid: usize,
+
+    /// 设备号
+    pub dev: u64,
+
+    /// 挂载源
+    pub source: String,
 
     /// 文件系统类型
     pub fstype: FileSystemType,
@@ -58,9 +66,10 @@ pub trait FileSystem: Send + Sync {
 }
 
 impl FileSystemMeta {
-    pub fn new(fstype: FileSystemType, flags: VfsFlags) -> Self {
+    pub fn new(dev: u64, source: &str, fstype: FileSystemType, flags: VfsFlags) -> Self {
         let fsid = FS_ID_POOL.fetch_add(1, Ordering::Acquire);
-        Self { fsid, fstype, flags }
+        let source = source.to_string();
+        Self { dev, source, fsid, fstype, flags }
     }
 }
 
@@ -97,7 +106,7 @@ impl MountTree {
 impl MountNamespace {
     pub fn new(root_fs: Arc<dyn FileSystem>) -> Self {
         let tree = MountTree::new(root_fs);
-        let snapshot = (tree.fs.metadata().fsid, (tree.mnt_id, "/".to_string()));
+        let snapshot = (tree.fs.metadata().fsid, (tree.mnt_id, String::new()));
         Self {
             mnt_ns_id: MNT_NS_ID_POOL.fetch_add(1, Ordering::Acquire),
             inner: Mutex::new(NSInner { tree, snapshot: HashMap::from([snapshot]) }),
@@ -106,9 +115,23 @@ impl MountNamespace {
 
     pub fn print_mounts(&self) -> String {
         let mut res = String::new();
-        res += "/dev/sda1 / ext4 rw 0 0\n";
-        res += "dev /dev devtmpfs rw 0 0\n";
-        res += "proc /proc proc rw 0 0\n";
+        let inner = self.inner.lock();
+        let mut queue = VecDeque::from([&inner.tree]);
+        while let Some(tree) = queue.pop_front() {
+            for sub_tree in tree.sub_trees.values() {
+                queue.push_back(sub_tree);
+            }
+            let meta = tree.fs.metadata();
+            let mut mp = inner.snapshot[&meta.fsid].1.as_str();
+            if mp.is_empty() {
+                mp = "/";
+            }
+            let (major, minor) = sep_dev(meta.dev);
+            res += &format!(
+                "{} {} {} {} {} {}\n",
+                meta.source, mp, meta.fstype, meta.flags, major, minor,
+            );
+        }
         res
     }
 

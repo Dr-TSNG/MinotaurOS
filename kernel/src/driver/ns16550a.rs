@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use futures::task::AtomicWaker;
 use crate::arch::VirtAddr;
 use crate::driver::{CharacterDevice, DeviceMeta, IrqDevice};
+use crate::driver::ffi::DEV_CHAR_TTY;
 use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::result::SyscallResult;
 
@@ -22,7 +23,7 @@ pub struct UartDevice {
 impl UartDevice {
     pub fn new(base_addr: VirtAddr) -> Self {
         Self {
-            metadata: DeviceMeta::new("uart".to_string()),
+            metadata: DeviceMeta::new(DEV_CHAR_TTY, 0, "uart".to_string()),
             base_addr,
             waker: AtomicWaker::new(),
             buf: AtomicU8::new(0xff),

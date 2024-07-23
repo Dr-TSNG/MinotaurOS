@@ -32,9 +32,9 @@ pub struct DevFileSystem {
 }
 
 impl DevFileSystem {
-    pub fn new(flags: VfsFlags, parent: Option<Arc<dyn Inode>>) -> Arc<Self> {
+    pub fn new(source: &str, flags: VfsFlags, parent: Option<Arc<dyn Inode>>) -> Arc<Self> {
         let fs = Arc::new(Self {
-            vfsmeta: FileSystemMeta::new(FileSystemType::DEVFS, flags),
+            vfsmeta: FileSystemMeta::new(0, source, FileSystemType::DEVFS, flags),
             ino_pool: AtomicUsize::new(1),
             root: LateInit::new(),
         });

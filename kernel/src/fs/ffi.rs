@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+use core::fmt::Display;
 use core::mem::size_of;
 use bitflags::bitflags;
 use lazy_static::lazy_static;
@@ -82,6 +84,52 @@ bitflags! {
         const ST_RELATIME    = 1 << 12;
         /// Do not follow symlinks
         const ST_NOSYMFOLLOW = 1 << 13;
+    }
+}
+
+impl Display for VfsFlags {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut flags = Vec::new();
+        if self.contains(VfsFlags::ST_RDONLY) {
+            flags.push("ro");
+        }
+        if self.contains(VfsFlags::ST_NOSUID) {
+            flags.push("nosuid");
+        }
+        if self.contains(VfsFlags::ST_NODEV) {
+            flags.push("nodev");
+        }
+        if self.contains(VfsFlags::ST_NOEXEC) {
+            flags.push("noexec");
+        }
+        if self.contains(VfsFlags::ST_SYNCHRONOUS) {
+            flags.push("sync");
+        }
+        if self.contains(VfsFlags::ST_MANDLOCK) {
+            flags.push("mand");
+        }
+        if self.contains(VfsFlags::ST_WRITE) {
+            flags.push("rw");
+        }
+        if self.contains(VfsFlags::ST_APPEND) {
+            flags.push("append");
+        }
+        if self.contains(VfsFlags::ST_IMMUTABLE) {
+            flags.push("immutable");
+        }
+        if self.contains(VfsFlags::ST_NOATIME) {
+            flags.push("noatime");
+        }
+        if self.contains(VfsFlags::ST_NODIRATIME) {
+            flags.push("nodiratime");
+        }
+        if self.contains(VfsFlags::ST_RELATIME) {
+            flags.push("relatime");
+        }
+        if self.contains(VfsFlags::ST_NOSYMFOLLOW) {
+            flags.push("nosymfollow");
+        }
+        write!(f, "{}", flags.join(","))
     }
 }
 
