@@ -11,7 +11,6 @@ use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::page_cache::PageCache;
-use crate::fs::path::append_path;
 use crate::fs::tmpfs::TmpFileSystem;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::time::real_time;
@@ -36,8 +35,8 @@ impl TmpfsInode {
                 fs.ino_pool.fetch_add(1, Ordering::Relaxed),
                 0,
                 InodeMode::IFDIR,
-                "/".to_string(),
-                "/".to_string(),
+                String::new(),
+                String::new(),
                 parent,
                 None,
                 Default::default(),
@@ -159,7 +158,7 @@ impl InodeInternal for TmpfsInode {
                 metadata: InodeMeta::movein(
                     inode.as_ref(),
                     name.to_string(),
-                    append_path(&self.metadata.path, &name),
+                    format!("{}/{}", self.metadata.path, name),
                     self.clone(),
                 ),
                 fs: Arc::downgrade(&fs),

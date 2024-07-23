@@ -1,5 +1,4 @@
 use alloc::ffi::CString;
-use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
@@ -285,8 +284,11 @@ pub async fn sys_faccessat(fd: FdNum, path: usize, _mode: u32, _flags: u32) -> S
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     let path = current_process().inner.lock()
         .addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
-    resolve_path(AT_FDCWD, path, true).await?;
-    current_process().inner.lock().cwd = path.to_string();
+    let inode = resolve_path(AT_FDCWD, path, true).await?;
+    if inode.metadata().mode != InodeMode::IFDIR {
+        return Err(Errno::ENOTDIR);
+    }
+    current_process().inner.lock().cwd = inode.mnt_ns_path()?;
     Ok(0)
 }
 

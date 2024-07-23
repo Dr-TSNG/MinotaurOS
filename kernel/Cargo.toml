@@ -17,6 +17,7 @@ bytemuck = { version = "1.14", features = ["derive"] }
 downcast-rs = { version = "1.2", default-features = false }
 fdt-rs = { version = "0.4", default-features = false }
 futures = { version = "0.3", default-features = false }
+hashbrown = "0.14"
 lazy_static = { version = "1.4", features = ["spin_no_std"] }
 log = "0.4"
 lru = "0.12"

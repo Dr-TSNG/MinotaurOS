@@ -553,6 +553,7 @@ dependencies = [
  "downcast-rs",
  "fdt-rs",
  "futures",
+ "hashbrown",
  "lazy_static",
  "log",
  "lru",

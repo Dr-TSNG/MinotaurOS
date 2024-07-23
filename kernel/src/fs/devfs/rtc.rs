@@ -21,7 +21,7 @@ impl RtcInode {
             0,
             InodeMode::IFCHR,
             "rtc".to_string(),
-            "/rtc".to_string(),
+            "rtc".to_string(),
             Some(parent),
             None,
             TimeSpec::default(),

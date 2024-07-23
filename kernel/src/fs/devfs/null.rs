@@ -19,7 +19,7 @@ impl NullInode {
             0,
             InodeMode::IFCHR,
             "null".to_string(),
-            "/null".to_string(),
+            "null".to_string(),
             Some(parent),
             None,
             TimeSpec::default(),

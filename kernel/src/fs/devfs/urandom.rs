@@ -22,7 +22,7 @@ impl UrandomInode {
             0,
             InodeMode::IFCHR,
             "urandom".to_string(),
-            "/urandom".to_string(),
+            "urandom".to_string(),
             Some(parent),
             None,
             TimeSpec::default(),

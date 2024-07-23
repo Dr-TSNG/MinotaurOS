@@ -70,7 +70,7 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
         let fd_impl = proc_inner.fd_table.get(fd)?;
         let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENODEV)?;
         inode.metadata().page_cache.as_ref().ok_or(Errno::ENODEV)?;
-        let name = inode.metadata().path.clone();
+        let name = inode.mnt_ns_path()?;
         proc_inner.addr_space.mmap(Some(name), start, len.div_ceil(PAGE_SIZE), prot.into(), Some(inode), offset / PAGE_SIZE, is_shared)
     } else {
         proc_inner.addr_space.mmap(None, start, len.div_ceil(PAGE_SIZE), prot.into(), None, 0, is_shared)

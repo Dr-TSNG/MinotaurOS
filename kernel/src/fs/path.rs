@@ -120,14 +120,6 @@ fn normalize_path(path: &str) -> String {
     normalized
 }
 
-pub fn append_path(base: &str, path: &str) -> String {
-    if base.ends_with('/') {
-        format!("{}{}", base, path)
-    } else {
-        format!("{}/{}", base, path)
-    }
-}
-
 pub fn path_test() {
     assert_eq!(normalize_path(""), ".");
     assert_eq!(normalize_path("/a/.//."), "/a");

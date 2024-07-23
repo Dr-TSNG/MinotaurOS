@@ -21,7 +21,7 @@ impl NetInode {
                 0,
                 InodeMode::IFDIR,
                 "net".to_string(),
-                "/net".to_string(),
+                "net".to_string(),
                 Some(parent),
                 None,
                 TimeSpec::default(),

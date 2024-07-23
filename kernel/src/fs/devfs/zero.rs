@@ -19,7 +19,7 @@ impl ZeroInode {
             0,
             InodeMode::IFCHR,
             "zero".to_string(),
-            "/zero".to_string(),
+            "zero".to_string(),
             Some(parent),
             None,
             TimeSpec::default(),

@@ -1,5 +1,6 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -9,6 +10,7 @@ use crate::fs::ffi::{InodeMode, OpenFlags};
 use crate::fs::file::{CharacterFile, DirFile, File, FileMeta, RegularFile};
 use crate::fs::file_system::FileSystem;
 use crate::fs::page_cache::PageCache;
+use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
@@ -304,5 +306,10 @@ impl dyn Inode {
             return Err(Errno::EINVAL);
         }
         self.do_readlink().await
+    }
+
+    pub fn mnt_ns_path(&self) -> SyscallResult<String> {
+        let pre = current_process().inner.lock().mnt_ns.get_inode_snapshot(self)?.1;
+        Ok(format!("{}{}", pre, self.metadata().path))
     }
 }

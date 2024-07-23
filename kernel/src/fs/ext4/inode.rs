@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
-use alloc::vec;
+use alloc::{format, vec};
 use core::cell::SyncUnsafeCell;
 use core::time::Duration;
 use async_trait::async_trait;
@@ -16,7 +16,6 @@ use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::page_cache::PageCache;
-use crate::fs::path::append_path;
 use crate::result::{Errno, SyscallResult};
 
 pub struct Ext4Inode {
@@ -54,8 +53,8 @@ impl Ext4Inode {
                 2,
                 fs.device.metadata().dev_id,
                 InodeMode::IFDIR,
-                "/".to_string(),
-                "/".to_string(),
+                String::new(),
+                String::new(),
                 parent,
                 None,
                 Duration::from_secs(inode_ref.access_time as u64).into(),
@@ -81,7 +80,7 @@ impl Ext4Inode {
             if dirent.name == "." || dirent.name == ".." {
                 continue;
             }
-            let path = append_path(&self.metadata.path, dirent.name);
+            let path = format!("{}/{}", self.metadata.path, dirent.name);
             let inode_ref = fs.ext4.ext4_get_inode_ref(dirent.inode).map_err(i32_to_err)?;
             let mode = InodeMode::try_from(inode_ref.mode & 0xf000).unwrap();
             let file = match mode {
@@ -206,7 +205,7 @@ impl InodeInternal for Ext4Inode {
         let _guard = fs.driver_lock.lock().await;
         self.clone().check_exists(name, false)?;
 
-        let path = append_path(&self.metadata.path, &name);
+        let path = format!("{}/{}", self.metadata.path, name);
         let file = if mode == InodeMode::IFDIR {
             Ext4File::open_dir(&path, true).map_err(i32_to_err)?
         } else {
@@ -223,7 +222,7 @@ impl InodeInternal for Ext4Inode {
                 fs.device.metadata().dev_id,
                 mode,
                 name.to_string(),
-                append_path(&self.metadata.path, &name),
+                path,
                 Some(self.clone()),
                 page_cache,
                 Duration::from_secs(inode_ref.access_time as u64).into(),
@@ -244,7 +243,7 @@ impl InodeInternal for Ext4Inode {
         let _guard = fs.driver_lock.lock().await;
         self.clone().check_exists(name, false)?;
 
-        let path = append_path(&self.metadata.path, &name);
+        let path = format!("{}/{}", self.metadata.path, name);
         lwext4_symlink(&path, target).map_err(i32_to_err)?;
         let inode = fs.ext4.ext4_get_ino_by_path(&path).map_err(i32_to_err)?;
         let inode_ref = fs.ext4.ext4_get_inode_ref(inode).map_err(i32_to_err)?;
@@ -254,7 +253,7 @@ impl InodeInternal for Ext4Inode {
                 fs.device.metadata().dev_id,
                 InodeMode::IFLNK,
                 name.to_string(),
-                append_path(&self.metadata.path, &name),
+                path,
                 Some(self.clone()),
                 None,
                 Duration::from_secs(inode_ref.access_time as u64).into(),
@@ -276,7 +275,7 @@ impl InodeInternal for Ext4Inode {
 
         if let Ok(inode) = inode.downcast_arc::<Ext4Inode>() {
             let old_path = inode.metadata().path.as_str();
-            let new_path = append_path(&self.metadata.path, &name);
+            let new_path = format!("{}/{}", self.metadata.path, name);
             if self.metadata.mode == InodeMode::IFDIR {
                 lwext4_movedir(&old_path, &new_path).map_err(i32_to_err)?;
             } else {

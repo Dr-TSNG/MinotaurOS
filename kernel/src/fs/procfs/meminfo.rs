@@ -24,7 +24,7 @@ impl MeminfoInode {
                 0,
                 InodeMode::IFREG,
                 "mounts".to_string(),
-                "/mounts".to_string(),
+                "mounts".to_string(),
                 Some(parent),
                 None,
                 TimeSpec::default(),

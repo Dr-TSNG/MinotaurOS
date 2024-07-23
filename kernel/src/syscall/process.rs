@@ -248,8 +248,7 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
 
     let file = inode.clone().open(OpenFlags::O_RDONLY)?;
     let elf_data = file.read_all().await?;
-    // TODO: Here path is incorrect, we should update resolve_path
-    current_process().execve(inode.metadata().path.clone(), &elf_data, &args_vec, &envs_vec).await
+    current_process().execve(inode.mnt_ns_path()?, &elf_data, &args_vec, &envs_vec).await
 }
 
 pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {
