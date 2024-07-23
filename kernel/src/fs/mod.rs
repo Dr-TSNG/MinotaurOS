@@ -14,7 +14,6 @@ pub mod ffi;
 pub mod file;
 pub mod file_system;
 pub mod inode;
-pub mod inode_cache;
 pub mod path;
 pub mod page_cache;
 pub mod pipe;
