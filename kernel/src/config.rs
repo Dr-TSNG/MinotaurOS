@@ -2,7 +2,7 @@ use lazy_static::lazy_static;
 use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 
 pub const MAX_HARTS: usize = 4;
-pub const MAX_ASID: usize = 16;
+pub const MAX_ASID: usize = 256;
 
 pub const KERNEL_PADDR_BASE: PhysAddr = PhysAddr(0x8020_0000);
 pub const KERNEL_VADDR_BASE: VirtAddr = VirtAddr(0xFFFF_FFFF_8020_0000);

@@ -82,7 +82,7 @@ impl DirectRegion {
                 if !overwrite && pte.valid() {
                     panic!("Page already mapped: {:?}", pte.ppn());
                 }
-                let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D;
+                let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::G;
                 if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
                 if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
                 if self.metadata.perms.contains(ASPerms::X) { flags |= PTEFlags::X; }

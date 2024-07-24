@@ -12,7 +12,7 @@ use core::time::Duration;
 use pin_project::pin_project;
 use crate::process::thread::event_bus::Event;
 use crate::process::thread::Thread;
-use crate::processor::context::{HartContext, UserTask};
+use crate::processor::context::HartContext;
 use crate::processor::current_thread;
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
@@ -29,16 +29,12 @@ struct HartTaskFuture<F: Future<Output=()> + Send + 'static> {
 
 impl<F: Future<Output=()> + Send + 'static> HartTaskFuture<F> {
     fn new_kernel(fut: F) -> Self {
-        let ctx = HartContext::new(None);
+        let ctx = HartContext::kernel();
         Self { ctx, fut }
     }
 
     fn new_user(thread: Arc<Thread>, fut: F) -> Self {
-        let task = UserTask {
-            thread: thread.clone(),
-            root_pt: thread.process.inner.lock().addr_space.root_pt,
-        };
-        let ctx = HartContext::new(Some(task));
+        let ctx = HartContext::user(thread);
         Self { ctx, fut }
     }
 }

@@ -46,7 +46,7 @@ pub struct AddressSpace {
     /// 根页表
     pub root_pt: PageTable,
     /// 与地址空间关联的 ASID
-    asid: Weak<ASID>,
+    pub asid: Weak<ASID>,
     /// 地址空间中的区域
     regions: BTreeMap<VirtPageNum, Box<dyn ASRegion>>,
     /// 该地址空间关联的页表帧
@@ -208,6 +208,11 @@ impl AddressSpace {
         forked
     }
 
+    pub unsafe fn activate_pt_with_asid(root_pt: PageTable, asid: ASID) {
+        satp::set(satp::Mode::Sv39, asid as usize, root_pt.ppn.0);
+        asm!("sfence.vma x0, {}", in(reg) asid);
+    }
+
     pub unsafe fn activate(&mut self) {
         let _guard = KIntrGuard::new();
         let asid = match local_hart().asid_manager.as_mut() {
@@ -223,8 +228,7 @@ impl AddressSpace {
                 }
             }
         };
-        satp::set(satp::Mode::Sv39, asid as usize, self.root_pt.ppn.0);
-        asm!("sfence.vma x0, {}", in(reg) asid);
+        Self::activate_pt_with_asid(self.root_pt, asid);
     }
 
     pub fn map_region(&mut self, region: Box<dyn ASRegion>) {

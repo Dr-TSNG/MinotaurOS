@@ -5,6 +5,7 @@ use riscv::register::sstatus;
 use riscv::register::sstatus::FS;
 use crate::arch;
 use crate::config::{KERNEL_STACK_SIZE, MAX_HARTS};
+use crate::mm::addr_space::AddressSpace;
 use crate::mm::asid::ASIDManager;
 use crate::mm::KERNEL_SPACE;
 use crate::process::thread::Thread;
@@ -40,7 +41,7 @@ impl Hart {
     const fn new() -> Self {
         Self {
             id: 0,
-            ctx: HartContext::new(None),
+            ctx: HartContext::kernel(),
             asid_manager: None,
             on_kintr: false,
             on_page_test: false,
@@ -55,22 +56,30 @@ impl Hart {
 
     pub fn switch_ctx(&mut self, another: &mut HartContext) {
         self.disable_kintr();
-        let (thread_now, thread_next) = (
+        let (thread_now, task_next) = (
             self.current_thread(),
-            another.user_task.as_ref().map(|t| &t.thread),
+            another.user_task.as_mut(),
         );
         if let Some(now) = thread_now {
             now.inner().trap_ctx.fctx.sched_out();
             now.inner().rusage.sched_out();
         }
-        if let Some(next) = thread_next {
-            next.inner().rusage.sched_in();
+        if let Some(next) = task_next {
+            next.thread.inner().rusage.sched_in();
             let switch_pt = match thread_now {
-                Some(now) => now.tid != next.tid,
+                Some(now) => now.tid != next.thread.tid,
                 None => true,
             };
             if switch_pt {
-                unsafe { next.process.inner.lock().addr_space.activate(); }
+                if let Some(asid) = next.asid.upgrade() {
+                    // Fast path
+                    unsafe { AddressSpace::activate_pt_with_asid(next.root_pt, *asid); }
+                } else {
+                    // Slow path
+                    let mut proc_inner = next.thread.process.inner.lock();
+                    unsafe { proc_inner.addr_space.activate(); }
+                    next.asid = proc_inner.addr_space.asid.clone();
+                }
             }
         } else {
             if thread_now.is_some() {
