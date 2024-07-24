@@ -1,16 +1,14 @@
 use alloc::boxed::Box;
 use alloc::sync::{Arc, Weak};
-use core::mem::size_of;
 use core::task::Waker;
 use async_trait::async_trait;
 use num_enum::TryFromPrimitive;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
-use crate::arch::VirtAddr;
 use crate::driver::CharacterDevice;
 use crate::fs::file::{File, FileMeta};
+use crate::mm::protect::{user_transmute_r, user_transmute_w};
 use crate::process::monitor::MONITORS;
 use crate::process::Pid;
-use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 use crate::signal::ffi::Signal;
 use crate::sync::mutex::Mutex;
@@ -93,34 +91,28 @@ impl File for TtyFile {
         let request = TermiosType::try_from(request).map_err(|_| Errno::EINVAL)?;
         match request {
             TermiosType::TCGETS => {
-                let value = current_process().inner.lock().addr_space
-                    .user_slice_w(VirtAddr(value), size_of::<Termios>())?;
-                value.copy_from_slice(self.inner.lock().termios.as_bytes());
+                let value = user_transmute_w(value)?.ok_or(Errno::EINVAL)?;
+                *value = self.inner.lock().termios.clone();
             }
             TermiosType::TCSETS | TermiosType::TCSETSW | TermiosType::TCSETSF => {
-                let value = current_process().inner.lock().addr_space
-                    .user_slice_r(VirtAddr(value), size_of::<Termios>())?;
-                self.inner.lock().termios = Termios::ref_from(value).unwrap().clone();
+                let value = user_transmute_r::<Termios>(value)?.ok_or(Errno::EINVAL)?;
+                self.inner.lock().termios = value.clone();
             }
             TermiosType::TIOCGPGRP => {
-                let value = current_process().inner.lock().addr_space
-                    .user_slice_w(VirtAddr(value), size_of::<Pid>())?;
-                value.copy_from_slice(&self.inner.lock().fg_pgid.to_ne_bytes());
+                let value = user_transmute_w(value)?.ok_or(Errno::EINVAL)?;
+                *value = self.inner.lock().fg_pgid;
             }
             TermiosType::TIOCSPGRP => {
-                let value = current_process().inner.lock().addr_space
-                    .user_slice_r(VirtAddr(value), size_of::<Pid>())?;
-                self.inner.lock().fg_pgid = Pid::from_ne_bytes(value.try_into().unwrap());
+                let value = user_transmute_r(value)?.ok_or(Errno::EINVAL)?;
+                self.inner.lock().fg_pgid = *value;
             }
             TermiosType::TIOCGWINSZ => {
-                let value = current_process().inner.lock().addr_space
-                    .user_slice_w(VirtAddr(value), size_of::<WinSize>())?;
-                value.copy_from_slice(self.inner.lock().win_size.as_bytes());
+                let value = user_transmute_w(value)?.ok_or(Errno::EINVAL)?;
+                *value = self.inner.lock().win_size;
             }
             TermiosType::TIOCSWINSZ => {
-                let value = current_process().inner.lock().addr_space
-                    .user_slice_r(VirtAddr(value), size_of::<WinSize>())?;
-                self.inner.lock().win_size = WinSize::ref_from(value).unwrap().clone();
+                let value = user_transmute_r(value)?.ok_or(Errno::EINVAL)?;
+                self.inner.lock().win_size = *value;
             }
             TermiosType::RTC_RD_TIME => {}
         }
@@ -166,7 +158,7 @@ enum TermiosType {
 }
 
 #[repr(C)]
-#[derive(Clone, AsBytes, FromZeroes, FromBytes)]
+#[derive(Copy, Clone, AsBytes, FromZeroes, FromBytes)]
 struct WinSize {
     ws_row: u16,
     ws_col: u16,

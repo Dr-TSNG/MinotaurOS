@@ -1,6 +1,6 @@
 use bitflags::bitflags;
 use num_enum::TryFromPrimitive;
-use zerocopy::{FromBytes, FromZeroes};
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::trap::context::TrapContext;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, TryFromPrimitive)]
@@ -53,7 +53,8 @@ impl Signal {
 }
 
 bitflags! {
-    #[derive(Default, FromBytes, FromZeroes)]
+    #[repr(transparent)]
+    #[derive(Default, AsBytes, FromBytes, FromZeroes)]
     pub struct SigSet: u64 {
         const SIGHUP    = Signal::SIGHUP.sigset_val();
         const SIGINT    = Signal::SIGINT.sigset_val();
@@ -105,17 +106,19 @@ pub enum SigSetOp {
     SETMASK = 2,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, AsBytes, FromZeroes, FromBytes)]
 #[repr(C)]
 pub struct SigAction {
     pub sa_handler: usize,
     pub sa_flags: SigActionFlags,
+    _pad: u32,
     pub sa_restorer: usize,
     pub sa_mask: SigSet,
 }
 
 bitflags! {
-    #[derive(Default)]
+    #[repr(transparent)]
+    #[derive(Default, AsBytes, FromZeroes, FromBytes)]
     pub struct SigActionFlags: u32 {
         const SA_NOCLDSTOP = 1;
         const SA_NOCLDWAIT = 2;

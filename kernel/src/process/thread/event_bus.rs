@@ -1,12 +1,11 @@
 use alloc::vec::Vec;
 use core::future::Future;
-use core::mem::size_of;
 use core::ops::DerefMut;
 use core::pin::{Pin, pin};
 use core::task::{Context, Poll, Waker};
 use bitflags::bitflags;
 use futures::future::{Either, select};
-use crate::arch::VirtAddr;
+use crate::mm::protect::user_transmute_w;
 use crate::process::ffi::WaitOptions;
 use crate::process::monitor::MONITORS;
 use crate::process::Pid;
@@ -52,11 +51,10 @@ impl EventBus {
     }
 
     pub(super) fn recv_event(&self, event: Event) {
-        let mut inner = self.0.lock();
+        let inner = &mut *self.0.lock();
         inner.event |= event;
-        let new_event = inner.event;
         inner.callbacks.retain(|(e, waker)| {
-            if new_event.intersects(*e) {
+            if inner.event.intersects(*e) {
                 waker.wake_by_ref();
                 false
             } else {
@@ -140,12 +138,11 @@ impl Future for WaitPidFuture {
         if let Some((idx, _)) = proc_inner.children.iter().enumerate()
             .find(|p| p.1.inner.lock().exit_code.is_some() && (self.pid as isize == -1 || self.pid == p.1.pid.0)) {
             let child = proc_inner.children.swap_remove(idx);
+            drop(proc_inner);
             if self.wstatus != 0 {
-                let addr = proc_inner.addr_space.user_slice_w(VirtAddr(self.wstatus), size_of::<i32>())?;
-                drop(proc_inner);
+                let addr = user_transmute_w::<i32>(self.wstatus)?.ok_or(Errno::EINVAL)?;
                 let exit_status = (child.inner.lock().exit_code.unwrap() as i32) << 8;
-                let exit_status: &[u8; size_of::<i32>()] = bytemuck::cast_ref(&exit_status);
-                addr.copy_from_slice(exit_status);
+                *addr = exit_status;
             }
             Poll::Ready(Ok(child.pid.0))
         } else {

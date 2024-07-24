@@ -6,7 +6,7 @@ use crate::result::{Errno, SyscallResult};
 use log::{debug, info, warn};
 use smoltcp::wire::IpListenEndpoint;
 use macros::suspend;
-use crate::arch::VirtAddr;
+use crate::mm::protect::{user_slice_r, user_slice_w};
 
 /// socket level
 const SOL_SOCKET: u32 = 1;
@@ -34,7 +34,7 @@ pub fn sys_socket(domain: u32, socket_type: u32, protocol: u32) -> SyscallResult
 
 pub fn sys_bind(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
-    let addr_buf = proc_inner.addr_space.user_slice_r(VirtAddr(addr), addrlen as usize)?;
+    let addr_buf = user_slice_r(addr, addrlen as usize)?;
     let socket = proc_inner.fd_table.get(sockfd)?.file.as_socket()?;
     let endpoint = listen_endpoint(addr_buf)?;
     info!("[sys_bind] sockfd: {}, ep: {}", sockfd, endpoint);
@@ -318,10 +318,10 @@ pub fn sys_socketpair(
         "[sys_socketpair] domain {}, type {}, protocol {}, sv {}",
         domain, socket_type, protocol, sv,
     );
-    let mut proc_inner = current_process().inner.lock();
-    let sv = proc_inner.addr_space.user_slice_w(VirtAddr(sv), size_of::<FdNum>())?;
+    let sv = user_slice_w(sv, 2 * size_of::<FdNum>())?;
     let sv = bytemuck::cast_slice_mut(sv);
     let (socket1, socket2) = make_unix_socket_pair();
+    let mut proc_inner = current_process().inner.lock();
     let fd1 = proc_inner.fd_table.put(FileDescriptor::new(socket1, false), 0)?;
     let fd2 = proc_inner.fd_table.put(FileDescriptor::new(socket2, false), 0)?;
     sv[0] = fd1;

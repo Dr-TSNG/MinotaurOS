@@ -80,7 +80,7 @@ pub const RUSAGE_SELF: i32 = 0;
 pub const RUSAGE_THREAD: i32 = 1;
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default, AsBytes)]
+#[derive(Copy, Clone, Debug, Default, AsBytes, FromZeroes, FromBytes)]
 pub struct RUsage {
     /// user CPU time used
     pub ru_utime: TimeVal,

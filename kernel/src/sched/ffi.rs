@@ -82,7 +82,7 @@ impl From<TimeVal> for Duration {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Default, AsBytes)]
+#[derive(Copy, Clone, Debug, Default, AsBytes, FromZeroes, FromBytes)]
 pub struct TMS {
     pub tms_utime: u64,
     pub tms_stime: u64,

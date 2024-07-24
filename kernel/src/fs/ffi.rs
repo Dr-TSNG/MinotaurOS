@@ -29,7 +29,7 @@ bitflags! {
         const O_CLOEXEC   =  0o2000000;
         const O_SYNC      =  0o4010000;
         const O_PATH      = 0o10000000;
-        const O_STATUS    = Self::O_APPEND.bits | Self::O_ASYNC.bits | Self::O_DIRECT.bits | Self::O_NOATIME.bits | Self::O_NONBLOCK.bits;
+        const O_STATUS    = Self::O_APPEND.bits() | Self::O_ASYNC.bits() | Self::O_DIRECT.bits() | Self::O_NOATIME.bits() | Self::O_NONBLOCK.bits();
     }
 }
 
@@ -260,7 +260,7 @@ lazy_static! {
 }
 
 #[repr(C)]
-#[derive(Default, AsBytes)]
+#[derive(Default, AsBytes, FromZeroes, FromBytes)]
 pub struct KernelStat {
     pub st_dev: u64,
     pub st_ino: u64,
@@ -280,7 +280,7 @@ pub struct KernelStat {
 }
 
 #[repr(C)]
-#[derive(Default, AsBytes)]
+#[derive(Default, AsBytes, FromZeroes, FromBytes)]
 pub struct KernelStatfs {
     pub f_type: u64,
     pub f_bsize: u64,
@@ -309,7 +309,7 @@ pub struct PollFd {
 
 bitflags! {
     /// Poll events
-    #[repr(C)]
+    #[repr(transparent)]
     #[derive(AsBytes, FromZeroes, FromBytes)]
     pub struct PollEvents: i16 {
         /// There is data to read

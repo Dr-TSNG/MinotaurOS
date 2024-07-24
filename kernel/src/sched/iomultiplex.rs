@@ -6,8 +6,8 @@ use core::task::Context;
 use log::{debug, warn};
 use pin_project::pin_project;
 use zerocopy::FromBytes;
-use crate::arch::VirtAddr;
 use crate::fs::ffi::{FdSet, PollEvents, PollFd};
+use crate::mm::protect::user_slice_w;
 use crate::processor::current_process;
 use crate::result::SyscallResult;
 
@@ -129,8 +129,7 @@ impl Future for IOMultiplexFuture {
             debug!("[IOMultiplexFuture] event happens: {}", cnt);
             match &mut this.ufds {
                 IOFormat::PollFds(pollfd) => {
-                    let slice = current_process().inner.lock()
-                        .addr_space.user_slice_w(VirtAddr(*pollfd), size_of::<PollFd>() * this.fds.len())?;
+                    let slice = user_slice_w(*pollfd, size_of::<PollFd>() * this.fds.len())?;
                     PollFd::mut_slice_from(slice).unwrap().copy_from_slice(&this.fds);
                 }
                 IOFormat::FdSets(fdset) => {

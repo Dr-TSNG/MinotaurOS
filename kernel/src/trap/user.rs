@@ -6,6 +6,7 @@ use riscv::register::sstatus::FS;
 use crate::arch::VirtAddr;
 use crate::config::TRAMPOLINE_BASE;
 use crate::mm::addr_space::ASPerms;
+use crate::mm::protect::user_slice_w;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::result::Errno;
 use crate::sched::time::set_next_trigger;
@@ -92,18 +93,16 @@ pub fn check_signal() {
                 debug!("Switch pc to {:#x}", sig_action.sa_handler);
                 trap_ctx.fctx.signal_enter();
                 let ucontext = UContext::new(poll.blocked_before, trap_ctx);
-                let user_sp = VirtAddr(trap_ctx.get_sp()) - size_of::<UContext>();
-                if let Err(e) = current_process()
-                    .inner.lock().addr_space
-                    .user_slice_w(user_sp, size_of::<UContext>()) {
+                let user_sp = trap_ctx.get_sp() - size_of::<UContext>();
+                if let Err(e) = user_slice_w(user_sp, size_of::<UContext>()) {
                     todo!("Stack Overflow: {:?}", e)
                 }
-                unsafe { user_sp.as_ptr().cast::<UContext>().write(ucontext); }
+                unsafe { (user_sp as *mut UContext).write(ucontext); }
 
                 trap_ctx.set_pc(sig_action.sa_handler);
-                trap_ctx.set_sp(user_sp.0);
+                trap_ctx.set_sp(user_sp);
                 trap_ctx.user_x[10] = poll.signal as usize;
-                trap_ctx.user_x[12] = user_sp.0;
+                trap_ctx.user_x[12] = user_sp;
                 trap_ctx.user_x[1] = match sig_action.sa_flags.contains(SigActionFlags::SA_RESTORER) {
                     true => sig_action.sa_restorer,
                     false => TRAMPOLINE_BASE.0,

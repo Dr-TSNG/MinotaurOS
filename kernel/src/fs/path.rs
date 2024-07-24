@@ -1,6 +1,6 @@
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
-use alloc::{format, vec};
+use alloc::vec;
 use log::{debug, info};
 use crate::fs::fd::FdNum;
 use crate::fs::ffi::AT_FDCWD;

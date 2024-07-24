@@ -18,6 +18,7 @@ use crate::config::USER_STACK_TOP;
 use crate::fs::fd::FdTable;
 use crate::fs::file_system::MountNamespace;
 use crate::mm::addr_space::AddressSpace;
+use crate::mm::protect::{user_slice_r, user_transmute_w};
 use crate::process::aux::Aux;
 use crate::process::ffi::{CloneFlags, CpuSet};
 use crate::process::monitor::MONITORS;
@@ -26,7 +27,7 @@ use crate::process::thread::Thread;
 use crate::process::thread::tid::TidTracker;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
 use crate::processor::hart::local_hart;
-use crate::result::SyscallResult;
+use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::ITimerVal;
 use crate::sched::spawn_user_thread;
 use crate::signal::ffi::Signal;
@@ -285,7 +286,7 @@ impl Process {
         ctid: usize,
     ) -> SyscallResult<Tid> {
         let new_thread = self.inner.lock().pipe_ref_mut(|proc_inner| {
-            proc_inner.addr_space.user_slice_r(VirtAddr(stack), size_of::<usize>() * 2)?;
+            user_slice_r(stack, size_of::<usize>() * 2)?;
             let entry = unsafe {
                 *(stack as *const usize)
             };
@@ -310,16 +311,15 @@ impl Process {
             proc_inner.threads.insert(new_tid, Arc::downgrade(&new_thread));
 
             if flags.contains(CloneFlags::CLONE_PARENT_SETTID) {
-                let buf = proc_inner.addr_space.user_slice_w(VirtAddr(ptid), size_of::<usize>())?;
-                buf.copy_from_slice(&new_tid.to_ne_bytes());
+                let ptid = user_transmute_w(ptid)?.ok_or(Errno::EINVAL)?;
+                *ptid = new_tid;
             }
             if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
-                proc_inner.addr_space.user_slice_w(VirtAddr(ctid), size_of::<usize>())?;
+                user_transmute_w::<Tid>(ctid)?.ok_or(Errno::EINVAL)?;
                 new_thread.inner().tid_address.clear = Some(VirtAddr(ctid));
             }
             if flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
-                let buf = proc_inner.addr_space.user_slice_w(VirtAddr(ctid), size_of::<usize>())?;
-                buf.copy_from_slice(&new_tid.to_ne_bytes());
+                user_transmute_w::<Tid>(ctid)?.ok_or(Errno::EINVAL)?;
                 new_thread.inner().tid_address.set = Some(VirtAddr(ctid));
             }
 

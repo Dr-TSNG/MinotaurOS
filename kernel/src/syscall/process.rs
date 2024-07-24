@@ -4,11 +4,11 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::time::Duration;
 use log::{debug, info, warn};
-use zerocopy::{AsBytes, FromBytes};
 use crate::arch::VirtAddr;
 use crate::config::USER_STACK_SIZE;
 use crate::fs::ffi::{AT_FDCWD, InodeMode, OpenFlags, PATH_MAX};
 use crate::fs::path::resolve_path;
+use crate::mm::protect::{user_transmute_r, user_transmute_str, user_transmute_w};
 use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
 use crate::process::{Pid, Tid};
 use crate::process::monitor::MONITORS;
@@ -41,13 +41,12 @@ pub fn sys_sched_setaffinity(pid: usize, cpusetsize: usize, mask: usize) -> Sysc
     if cpusetsize != size_of::<CpuSet>() {
         return Err(Errno::EINVAL);
     }
-    let mask = current_process().inner.lock()
-        .addr_space.user_slice_r(VirtAddr(mask), size_of::<CpuSet>())?;
+    let mask = user_transmute_r::<CpuSet>(mask)?.ok_or(Errno::EINVAL)?;
     let thread = match pid {
         0 => current_thread().clone(),
         _ => MONITORS.lock().thread.get(pid).upgrade().ok_or(Errno::ESRCH)?,
     };
-    *thread.cpu_set.lock() = *CpuSet::ref_from(mask).unwrap();
+    *thread.cpu_set.lock() = *mask;
     Ok(0)
 }
 
@@ -55,13 +54,12 @@ pub fn sys_sched_getaffinity(pid: usize, cpusetsize: usize, mask: usize) -> Sysc
     if cpusetsize != size_of::<CpuSet>() {
         return Err(Errno::EINVAL);
     }
-    let mask = current_process().inner.lock()
-        .addr_space.user_slice_w(VirtAddr(mask), size_of::<CpuSet>())?;
+    let mask = user_transmute_w::<CpuSet>(mask)?.ok_or(Errno::EINVAL)?;
     let thread = match pid {
         0 => current_thread().clone(),
         _ => MONITORS.lock().thread.get(pid).upgrade().ok_or(Errno::ESRCH)?,
     };
-    mask.copy_from_slice(thread.cpu_set.lock().as_bytes());
+    *mask = thread.cpu_set.lock().clone();
     Ok(0)
 }
 
@@ -147,13 +145,12 @@ pub fn sys_setrlimit(resource: u32, rlim: usize) -> SyscallResult<usize> {
 }
 
 pub fn sys_getrusage(who: i32, buf: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<RUsage>())?;
+    let writeback = user_transmute_w(buf)?.ok_or(Errno::EINVAL)?;
     let rusage = match who {
         RUSAGE_SELF => {
             let mut utime = Duration::ZERO;
             let mut stime = Duration::ZERO;
-            for thread in proc_inner.threads.values() {
+            for thread in current_process().inner.lock().threads.values() {
                 if let Some(thread) = thread.upgrade() {
                     utime += thread.inner().rusage.user_time;
                     stime += thread.inner().rusage.sys_time;
@@ -178,7 +175,7 @@ pub fn sys_getrusage(who: i32, buf: usize) -> SyscallResult<usize> {
             return Err(Errno::EINVAL);
         }
     };
-    user_buf.copy_from_slice(rusage.as_bytes());
+    *writeback = rusage;
     Ok(0)
 }
 
@@ -206,8 +203,7 @@ pub fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize)
 }
 
 pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let mut path = proc_inner.addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let mut path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let mut args_vec: Vec<CString> = Vec::new();
     let mut envs_vec: Vec<CString> = Vec::new();
     if path.ends_with(".sh") {
@@ -217,8 +213,8 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     }
     let push_args = |args_vec: &mut Vec<CString>, mut arg_ptr: usize| -> SyscallResult {
         loop {
-            let arg_addr = proc_inner.addr_space.transmute_r::<usize>(arg_ptr)?.ok_or(Errno::EINVAL)?;
-            let arg = match proc_inner.addr_space.transmute_str(*arg_addr, PATH_MAX)? {
+            let arg_addr = user_transmute_r::<usize>(arg_ptr)?.ok_or(Errno::EINVAL)?;
+            let arg = match user_transmute_str(*arg_addr, PATH_MAX)? {
                 None => break,
                 Some(s) if s.is_empty() => break,
                 Some(s) => s,
@@ -239,7 +235,6 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     if !envs_vec.iter().any(|s| s.to_str().unwrap().contains("LD_LIBRARY_PATH=")) {
         envs_vec.push(CString::new("LD_LIBRARY_PATH=/:/lib").unwrap());
     }
-    drop(proc_inner);
 
     let inode = resolve_path(AT_FDCWD, path, true).await?;
     if inode.metadata().mode == InodeMode::IFDIR {
@@ -266,21 +261,20 @@ pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) ->
     let cmd = RlimitCmd::try_from(resource).map_err(|_| Errno::EINVAL)?;
     let mut proc_inner = current_process().inner.lock();
     debug!("[prlimit] pid: {}, cmd: {:?}, nrlim: {}, orlim :{}", pid, cmd, new_rlim, old_rlim);
-    if old_rlim != 0 {
+    if let Some(old_rlim) = user_transmute_w::<Rlimit>(old_rlim)? {
         let limit = match cmd {
             RlimitCmd::RLIMIT_STACK => Rlimit::new(USER_STACK_SIZE, USER_STACK_SIZE),
             RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit.clone(),
             _ => return Ok(0),
         };
-        *proc_inner.addr_space.transmute_w::<Rlimit>(old_rlim)?.unwrap() = limit;
+        *old_rlim = limit;
     }
-    if new_rlim != 0 {
-        let limit = proc_inner.addr_space.transmute_r::<Rlimit>(new_rlim)?.unwrap();
-        if limit.rlim_cur > limit.rlim_max {
+    if let Some(new_rlim) = user_transmute_r::<Rlimit>(new_rlim)? {
+        if new_rlim.rlim_cur > new_rlim.rlim_max {
             return Err(Errno::EINVAL);
         }
         match cmd {
-            RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit = limit.clone(),
+            RlimitCmd::RLIMIT_NOFILE => proc_inner.fd_table.rlimit = new_rlim.clone(),
             _ => return Ok(0),
         };
     }

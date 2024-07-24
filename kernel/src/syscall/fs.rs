@@ -9,7 +9,7 @@ use log::{debug, info, warn};
 use tap::Tap;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use macros::suspend;
-use crate::arch::{PAGE_SIZE, VirtAddr};
+use crate::arch::PAGE_SIZE;
 use crate::fs::devfs::DevFileSystem;
 use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd, VfsFlags, FdSet, FD_SET_LEN, PollEvents, KernelStatfs, AT_SYMLINK_NOFOLLOW};
@@ -18,6 +18,7 @@ use crate::fs::path::{resolve_path, split_last_path};
 use crate::fs::pipe::Pipe;
 use crate::fs::procfs::ProcFileSystem;
 use crate::fs::tmpfs::TmpFileSystem;
+use crate::mm::protect::{user_slice_r, user_slice_w, user_transmute_r, user_transmute_str, user_transmute_w};
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
@@ -31,14 +32,11 @@ pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
     if buf == 0 || size == 0 {
         return Err(Errno::EINVAL);
     }
-    let proc_inner = current_process().inner.lock();
-    let cwd = proc_inner.cwd.clone();
+    let cwd = current_process().inner.lock().cwd.clone();
     if cwd.len() + 1 > size {
         return Err(Errno::ERANGE);
     }
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size)?;
-    drop(proc_inner);
-
+    let user_buf = user_slice_w(buf, size)?;
     user_buf[..cwd.len()].copy_from_slice(cwd.as_bytes());
     user_buf[cwd.len()] = b'\0';
     Ok(buf)
@@ -110,8 +108,7 @@ pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4
 }
 
 pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
-    let path = current_process().inner.lock()
-        .addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     debug!("[mkdirat] fd: {}, path: {:?}, mode: {:?}", dirfd, path, mode);
     let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
     let inode = resolve_path(dirfd, &parent, true).await?;
@@ -126,8 +123,7 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
     if flags & !AT_REMOVEDIR != 0 {
         return Err(Errno::EINVAL);
     }
-    let mut path = current_process().inner.lock()
-        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let mut path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
     debug!("[unlinkat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
 
     // TODO: This hack is just for libctest
@@ -155,10 +151,8 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
 }
 
 pub async fn sys_symlinkat(target: usize, dirfd: FdNum, linkpath: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let target = proc_inner.addr_space.transmute_str(target, PATH_MAX)?.ok_or(Errno::EINVAL)?;
-    let linkpath = proc_inner.addr_space.transmute_str(linkpath, PATH_MAX)?.ok_or(Errno::EINVAL)?;
-    drop(proc_inner);
+    let target = user_transmute_str(target, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let linkpath = user_transmute_str(linkpath, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     debug!("[symlinkat] target: {}, dirfd: {}, linkpath: {}", target, dirfd, linkpath);
     let (parent, name) = split_last_path(linkpath).ok_or(Errno::EINVAL)?;
     let inode = resolve_path(dirfd, &parent, true).await?;
@@ -175,18 +169,17 @@ pub async fn sys_umount2(target: usize, flags: u32) -> SyscallResult<usize> {
 }
 
 pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, data: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let source = proc_inner.addr_space.user_slice_r(VirtAddr(source), PATH_MAX)?;
+    let source = user_slice_r(source, PATH_MAX)?;
     let source = CStr::from_bytes_until_nul(source).map_err(|_| Errno::EINVAL)?.to_str().unwrap();
-    let target = proc_inner.addr_space.user_slice_r(VirtAddr(target), PATH_MAX)?;
+    let target = user_slice_r(target, PATH_MAX)?;
     let target = CStr::from_bytes_until_nul(target).map_err(|_| Errno::EINVAL)?.to_str().unwrap();
-    let fstype = proc_inner.addr_space.user_slice_r(VirtAddr(fstype), PATH_MAX)?;
+    let fstype = user_slice_r(fstype, PATH_MAX)?;
     let fstype = CStr::from_bytes_until_nul(fstype).map_err(|_| Errno::EINVAL)?.to_str().unwrap();
     let flags = VfsFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     let data = match data {
         0 => None,
         _ => {
-            let data = proc_inner.addr_space.user_slice_r(VirtAddr(data), size_of::<usize>())?;
+            let data = user_slice_r(data, size_of::<usize>())?;
             Some(CStr::from_bytes_until_nul(data).map_err(|_| Errno::EINVAL)?.to_str().unwrap())
         }
     };
@@ -195,6 +188,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
         source, target, fstype, flags, data,
     );
 
+    let proc_inner = current_process().inner.lock();
     match fstype {
         "devtmpfs" => {
             proc_inner.mnt_ns.mount(target, |p| {
@@ -218,10 +212,9 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
 }
 
 pub async fn sys_statfs(path: usize, buf: usize) -> SyscallResult<usize> {
-    let path = current_process().inner.lock()
-        .addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let writeback = user_transmute_w(buf)?.ok_or(Errno::EINVAL)?;
     let inode = resolve_path(AT_FDCWD, path, true).await?;
-
     let fs = inode.file_system().upgrade().ok_or(Errno::ENODEV)?;
     let mut stat = KernelStatfs::default();
     stat.f_type = fs.metadata().fstype as u64;
@@ -235,19 +228,15 @@ pub async fn sys_statfs(path: usize, buf: usize) -> SyscallResult<usize> {
     stat.f_namelen = MAX_NAME_LEN as u64;
     stat.f_frsize = 512;
     stat.f_flags = fs.metadata().flags.bits() as u64;
-
-    let user_buf = current_process().inner.lock()
-        .addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStatfs>())?;
-    user_buf.copy_from_slice(&stat.as_bytes());
+    *writeback = stat;
     Ok(0)
 }
 
 pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
+    let writeback = user_transmute_w(buf)?.ok_or(Errno::EINVAL)?;
     let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
     let fs = inode.file_system().upgrade().ok_or(Errno::ENODEV)?;
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStatfs>())?;
     let mut stat = KernelStatfs::default();
     stat.f_type = fs.metadata().fstype as u64;
     stat.f_bsize = 512; // TODO: real data
@@ -260,7 +249,7 @@ pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
     stat.f_namelen = MAX_NAME_LEN as u64;
     stat.f_frsize = 512;
     stat.f_flags = fs.metadata().flags.bits() as u64;
-    user_buf.copy_from_slice(&stat.as_bytes());
+    *writeback = stat;
     Ok(0)
 }
 
@@ -275,15 +264,13 @@ pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
 }
 
 pub async fn sys_faccessat(fd: FdNum, path: usize, _mode: u32, _flags: u32) -> SyscallResult<usize> {
-    let path = current_process().inner.lock()
-        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
     resolve_path(fd, path, false).await?;
     Ok(0)
 }
 
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
-    let path = current_process().inner.lock()
-        .addr_space.transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let inode = resolve_path(AT_FDCWD, path, true).await?;
     if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
@@ -294,8 +281,7 @@ pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
 
 pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, _mode: u32) -> SyscallResult<usize> {
     let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
-    let mut path = current_process().inner.lock()
-        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let mut path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
     debug!("[openat] dirfd: {}, path: {:?}, flags: {:?}", dirfd, path, flags);
 
     // TODO: This hack is just for libctest
@@ -334,13 +320,12 @@ pub fn sys_close(fd: FdNum) -> SyscallResult<usize> {
 
 pub fn sys_pipe2(fds: usize, flags: u32) -> SyscallResult<usize> {
     let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
-    let mut proc_inner = current_process().inner.lock();
-    let user_fds = proc_inner.addr_space.user_slice_w(VirtAddr(fds), size_of::<[FdNum; 2]>())?;
+    let fds = user_slice_w(fds, size_of::<[FdNum; 2]>())?;
     let (reader, writer) = Pipe::new();
+    let mut proc_inner = current_process().inner.lock();
     let reader_fd = proc_inner.fd_table.put(FileDescriptor::new(reader, flags.contains(OpenFlags::O_CLOEXEC)), 0)?;
     let writer_fd = proc_inner.fd_table.put(FileDescriptor::new(writer, flags.contains(OpenFlags::O_CLOEXEC)), 0)?;
-    drop(proc_inner);
-    user_fds.copy_from_slice(AsBytes::as_bytes(&[reader_fd, writer_fd]));
+    fds.copy_from_slice(AsBytes::as_bytes(&[reader_fd, writer_fd]));
     Ok(0)
 }
 
@@ -367,7 +352,7 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
         dirent.d_reclen = dirent_size as u16;
         dirent.d_type = DirentType::from(child.metadata().mode).bits();
         dirent.d_name[..name_bytes.len()].copy_from_slice(name_bytes);
-        let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(cur), dirent_size)?;
+        let user_buf = user_slice_w(cur, dirent_size)?;
         user_buf.copy_from_slice(&dirent.as_bytes()[..dirent_size]);
         cur += dirent_size;
     }
@@ -384,45 +369,39 @@ pub async fn sys_lseek(fd: FdNum, offset: isize, whence: i32) -> SyscallResult<u
 
 #[suspend]
 pub async fn sys_read(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     if !fd_impl.file.metadata().flags.lock().readable() {
         return Err(Errno::EBADF);
     }
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), len)?;
-    drop(proc_inner);
-    let ret = fd_impl.file.read(user_buf).await?;
+    let buf = user_slice_w(buf, len)?;
+    let ret = fd_impl.file.read(buf).await?;
     Ok(ret as usize)
 }
 
 #[suspend]
 pub async fn sys_write(fd: FdNum, buf: usize, len: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EBADF);
     }
-    let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(buf), len)?;
-    drop(proc_inner);
-    let ret = fd_impl.file.write(user_buf).await?;
+    let buf = user_slice_r(buf, len)?;
+    let ret = fd_impl.file.write(buf).await?;
     Ok(ret as usize)
 }
 
 #[suspend]
 pub async fn sys_readv(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     if !fd_impl.file.metadata().flags.lock().readable() {
         return Err(Errno::EBADF);
     }
-    let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(iov), size_of::<IoVec>() * iovcnt)?;
+    let user_buf = user_slice_r(iov, size_of::<IoVec>() * iovcnt)?;
     let iovs: &[IoVec] = unsafe { core::mem::transmute(user_buf) };
-    drop(proc_inner);
 
     let mut ret = 0;
     for i in 0..iovcnt {
         let iov = &iovs[i];
-        let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(iov.base), iov.len)?;
+        let user_buf = user_slice_w(iov.base, iov.len)?;
         ret += fd_impl.file.read(user_buf).await?;
     }
     Ok(ret as usize)
@@ -430,19 +409,17 @@ pub async fn sys_readv(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<us
 
 #[suspend]
 pub async fn sys_writev(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EPERM);
     }
-    let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(iov), size_of::<IoVec>() * iovcnt)?;
+    let user_buf = user_slice_r(iov, size_of::<IoVec>() * iovcnt)?;
     let iovs: &[IoVec] = unsafe { core::mem::transmute(user_buf) };
-    drop(proc_inner);
 
     let mut ret = 0;
     for i in 0..iovcnt {
         let iov = &iovs[i];
-        let user_buf = current_process().inner.lock().addr_space.user_slice_r(VirtAddr(iov.base), iov.len)?;
+        let user_buf = user_slice_r(iov.base, iov.len)?;
         ret += fd_impl.file.write(user_buf).await?;
     }
 
@@ -451,26 +428,22 @@ pub async fn sys_writev(fd: FdNum, iov: usize, iovcnt: usize) -> SyscallResult<u
 
 #[suspend]
 pub async fn sys_pread(fd: FdNum, buf: usize, len: usize, offset: isize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     if !fd_impl.file.metadata().flags.lock().readable() {
         return Err(Errno::EBADF);
     }
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), len)?;
-    drop(proc_inner);
+    let user_buf = user_slice_w(buf, len)?;
     let ret = fd_impl.file.pread(user_buf, offset).await?;
     Ok(ret as usize)
 }
 
 #[suspend]
 pub async fn sys_pwrite(fd: FdNum, buf: usize, len: usize, offset: isize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     if !fd_impl.file.metadata().flags.lock().writable() {
         return Err(Errno::EBADF);
     }
-    let user_buf = proc_inner.addr_space.user_slice_r(VirtAddr(buf), len)?;
-    drop(proc_inner);
+    let user_buf = user_slice_r(buf, len)?;
     let ret = fd_impl.file.pwrite(user_buf, offset).await?;
     Ok(ret as usize)
 }
@@ -480,12 +453,12 @@ pub async fn sys_sendfile(out_fd: FdNum, in_fd: FdNum, offset: usize, count: usi
     let proc_inner = current_process().inner.lock();
     let out_fd_impl = proc_inner.fd_table.get(out_fd)?;
     let in_fd_impl = proc_inner.fd_table.get(in_fd)?;
+    drop(proc_inner);
     let out_flags = out_fd_impl.file.metadata().flags.lock();
     let in_flags = in_fd_impl.file.metadata().flags.lock();
     if !out_flags.writable() || !in_flags.readable() {
         return Err(Errno::EBADF);
     }
-    drop(proc_inner);
     let mut buf = vec![0; PAGE_SIZE];
     if offset == 0 {
         let mut sent = 0;
@@ -500,31 +473,27 @@ pub async fn sys_sendfile(out_fd: FdNum, in_fd: FdNum, offset: usize, count: usi
         }
         Ok(sent)
     } else {
-        let user_buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(offset), size_of::<usize>())?;
-        let offset: usize = bytemuck::pod_read_unaligned(user_buf);
+        let offset = user_transmute_w::<usize>(offset)?.ok_or(Errno::EINVAL)?;
         let mut sent = 0;
         while sent < count {
             let end = min(count - sent, buf.len());
-            let read = in_fd_impl.file.pread(&mut buf[..end], (offset + sent) as isize).await? as usize;
+            let read = in_fd_impl.file.pread(&mut buf[..end], (*offset + sent) as isize).await? as usize;
             if read == 0 {
                 break;
             }
             out_fd_impl.file.write(&buf[..read]).await?;
             sent += read;
         }
-        let write: [u8; size_of::<usize>()] = bytemuck::cast(offset + sent);
-        user_buf.copy_from_slice(&write);
+        *offset += sent;
         Ok(sent)
     }
 }
 
 pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let slice = proc_inner.addr_space.user_slice_w(VirtAddr(ufds), size_of::<PollFd>() * nfds)?;
+    let slice = user_slice_w(ufds, size_of::<PollFd>() * nfds)?;
     let fds = PollFd::slice_from(slice).unwrap().to_vec();
-    let timeout = proc_inner.addr_space.transmute_r::<TimeSpec>(timeout)?.cloned().map(Duration::from);
-    let sigmask = proc_inner.addr_space.transmute_r::<SigSet>(sigmask)?.cloned();
-    drop(proc_inner);
+    let timeout = user_transmute_r::<TimeSpec>(timeout)?.cloned().map(Duration::from);
+    let sigmask = user_transmute_r::<SigSet>(sigmask)?.cloned();
     debug!("[ppoll] fds: {:?}, timeout: {:?}, sigmask: {:?}", fds, timeout, sigmask);
 
     let mask_bak = current_thread().signals.get_mask();
@@ -544,16 +513,16 @@ pub async fn sys_ppoll(ufds: usize, nfds: usize, timeout: usize, sigmask: usize)
 }
 
 pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfds: usize, timeout: usize, sigmask: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let rfds = proc_inner.addr_space.transmute_w::<FdSet>(readfds)?;
-    let wfds = proc_inner.addr_space.transmute_w::<FdSet>(writefds)?;
-    let efds = proc_inner.addr_space.transmute_w::<FdSet>(exceptfds)?;
-    let timeout = proc_inner.addr_space.transmute_r::<TimeVal>(timeout)?.cloned().map(Duration::from);
-    let sigmask = proc_inner.addr_space.transmute_r::<SigSet>(sigmask)?.cloned();
+    let rfds = user_transmute_w::<FdSet>(readfds)?;
+    let wfds = user_transmute_w::<FdSet>(writefds)?;
+    let efds = user_transmute_w::<FdSet>(exceptfds)?;
+    let timeout = user_transmute_r::<TimeVal>(timeout)?.cloned().map(Duration::from);
+    let sigmask = user_transmute_r::<SigSet>(sigmask)?.cloned();
     debug!(
         "[sys_pselect]: readfds {:?}, writefds {:?}, exceptfds {:?}, timeout {:?}, sigmask {:?}",
         rfds, wfds, efds, timeout, sigmask,
     );
+    let proc_inner = current_process().inner.lock();
     let fd_slot_bits = 8 * size_of::<usize>();
     let mut fds: Vec<PollFd> = Vec::new();
     for fd_slot in 0..FD_SET_LEN {
@@ -645,28 +614,24 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
 }
 
 pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {
-    let path = current_process().inner.lock()
-        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let inode = resolve_path(dirfd, path, false).await?;
     if inode.metadata().mode != InodeMode::IFLNK {
         return Err(Errno::EINVAL);
     }
     let target = inode.readlink().await?.into_bytes();
-    let user_buf = current_process().inner.lock()
-        .addr_space.user_slice_w(VirtAddr(buf), min(target.len(), bufsiz))?;
-    user_buf[..target.len()].copy_from_slice(&target);
+    let buf = user_slice_w(buf, min(target.len(), bufsiz))?;
+    buf[..target.len()].copy_from_slice(&target);
     Ok(target.len())
 }
 
 pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, flags: u32) -> SyscallResult<usize> {
-    let path = current_process().inner.lock()
-        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let writeback = user_transmute_w(buf)?.ok_or(Errno::EINVAL)?;
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
     let inode = resolve_path(dirfd, path, follow_link).await?;
-    let user_buf = current_process().inner.lock()
-        .addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStat>())?;
     let mut stat = KernelStat::default();
-    stat.st_dev = inode.metadata().dev as u64;
+    stat.st_dev = inode.metadata().dev;
     stat.st_ino = inode.metadata().ino as u64;
     stat.st_mode = inode.metadata().mode as u32;
     let inner = inode.metadata().inner.lock();
@@ -675,16 +640,14 @@ pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, flags: u32) -
     stat.st_atim = inner.atime;
     stat.st_mtim = inner.mtime;
     stat.st_ctim = inner.ctime;
-    user_buf.copy_from_slice(stat.as_bytes());
+    *writeback = stat;
     Ok(0)
 }
 
 pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let fd_impl = proc_inner.fd_table.get(fd)?;
+    let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
+    let writeback = user_transmute_w(buf)?.ok_or(Errno::EINVAL)?;
     let inode = fd_impl.file.metadata().inode.clone();
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<KernelStat>())?;
-    drop(proc_inner);
     let mut stat = KernelStat::default();
     if let Some(inode) = inode {
         stat.st_dev = inode.metadata().dev as u64;
@@ -699,7 +662,7 @@ pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
     } else {
         stat.st_mode = InodeMode::IFCHR as u32;
     }
-    user_buf.copy_from_slice(stat.as_bytes());
+    *writeback = stat;
     Ok(0)
 }
 
@@ -711,16 +674,14 @@ pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {
 
 #[suspend]
 pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) -> SyscallResult<usize> {
-    let path = current_process().inner.lock()
-        .addr_space.transmute_str(path, PATH_MAX)?.unwrap_or(".");
+    let path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
     let inode = resolve_path(dirfd, path, follow_link).await?;
     let now = TimeSpec::from(real_time());
     let (atime, mtime) = match times {
         0 => (Some(now), Some(now)),
         _ => {
-            let times = current_process().inner.lock()
-                .addr_space.user_slice_r(VirtAddr(times), 2 * size_of::<TimeSpec>())?;
+            let times = user_slice_r(times, 2 * size_of::<TimeSpec>())?;
             let atime = TimeSpec::ref_from(&times[0..size_of::<TimeSpec>()]).unwrap();
             let mtime = TimeSpec::ref_from(&times[size_of::<TimeSpec>()..]).unwrap();
             let atime = match atime.nsec {
@@ -750,10 +711,8 @@ pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) 
 
 pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, new_path: usize, flags: u32) -> SyscallResult<usize> {
     let flags = RenameFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
-    let proc_inner = current_process().inner.lock();
-    let old_path = proc_inner.addr_space.transmute_str(old_path, PATH_MAX)?.unwrap_or(".");
-    let new_path = proc_inner.addr_space.transmute_str(new_path, PATH_MAX)?.unwrap_or(".");
-    drop(proc_inner);
+    let old_path = user_transmute_str(old_path, PATH_MAX)?.unwrap_or(".");
+    let new_path = user_transmute_str(new_path, PATH_MAX)?.unwrap_or(".");
     debug!(
         "[renameat] old_dirfd: {}, old_path: {:?}, new_dirfd: {}, new_path: {:?}, flags: {:?}",
         old_dirfd, old_path, new_dirfd, new_path, flags,

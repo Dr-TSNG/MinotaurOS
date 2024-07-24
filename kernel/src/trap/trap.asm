@@ -123,6 +123,9 @@ __trap_from_kernel:
     sd t6, 15*8(sp)
     call trap_from_kernel
     ld ra, 0*8(sp)
+    beqz a0, __no_test
+    csrw sepc, ra
+__no_test:
     ld a0, 1*8(sp)
     ld a1, 2*8(sp)
     ld a2, 3*8(sp)

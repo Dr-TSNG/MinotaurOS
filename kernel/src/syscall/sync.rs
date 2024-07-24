@@ -5,6 +5,7 @@ use log::debug;
 use num_enum::TryFromPrimitive;
 use tap::Tap;
 use crate::arch::VirtAddr;
+use crate::mm::protect::{user_slice_r, user_transmute_r};
 use crate::process::thread::event_bus::Event;
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
@@ -14,15 +15,13 @@ use crate::sync::ffi::FutexOp;
 use crate::sync::futex::FutexFuture;
 
 pub async fn sys_futex(uaddr: usize, op: i32, val: u32, timeout: usize, uaddr2: usize, _val3: usize) -> SyscallResult<usize> {
-    let mut proc_inner = current_process().inner.lock();
-    let cval = proc_inner.addr_space.user_slice_r(VirtAddr(uaddr), size_of::<u32>())?;
+    let cval = user_slice_r(uaddr, size_of::<u32>())?;
     let cval = unsafe { AtomicU32::from_ptr(cval.as_ptr().cast::<u32>().cast_mut()).load(Ordering::Relaxed) };
     let op = FutexOp::try_from_primitive(op % 128).map_err(|_| Errno::EINVAL)?;
     match op {
         FutexOp::Wait => {
             if cval == val {
-                let timeout = proc_inner.addr_space.transmute_r::<TimeSpec>(timeout)?.cloned().map(Duration::from);
-                drop(proc_inner);
+                let timeout = user_transmute_r::<TimeSpec>(timeout)?.cloned().map(Duration::from);
                 suspend_now(timeout, Event::all(), FutexFuture::new(VirtAddr(uaddr), val)).await
                     .tap_mut(|it| {
                     if matches!(it, Err(Errno::ETIMEDOUT)) {
@@ -34,13 +33,15 @@ pub async fn sys_futex(uaddr: usize, op: i32, val: u32, timeout: usize, uaddr2: 
             }
         }
         FutexOp::Wake => {
-            let cnt = proc_inner.futex_queue.wake(VirtAddr(uaddr), val as usize);
+            let cnt = current_process().inner.lock()
+                .futex_queue.wake(VirtAddr(uaddr), val as usize);
             return Ok(cnt);
         }
         FutexOp::Requeue | FutexOp::CmpRequeue => {
             let val2 = timeout;
-            proc_inner.addr_space.user_slice_r(VirtAddr(uaddr2), size_of::<u32>())?;
-            let cnt = proc_inner.futex_queue.requeue(VirtAddr(uaddr), VirtAddr(uaddr2), val as usize, val2);
+            user_slice_r(uaddr2, size_of::<u32>())?;
+            let cnt = current_process().inner.lock()
+                .futex_queue.requeue(VirtAddr(uaddr), VirtAddr(uaddr2), val as usize, val2);
             return Ok(cnt);
         }
         _ => {}

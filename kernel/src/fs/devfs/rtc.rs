@@ -8,7 +8,7 @@ use crate::fs::devfs::DevFileSystem;
 use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
-use crate::processor::current_process;
+use crate::mm::protect::user_transmute_w;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 
@@ -54,8 +54,7 @@ impl Inode for RtcInode {
     }
 
     fn ioctl(&self, _: usize, value: usize, _: usize, _: usize, _: usize) -> SyscallResult<i32> {
-        let value = current_process().inner.lock().addr_space
-            .transmute_w::<RtcTime>(value)?.ok_or(Errno::EINVAL)?;
+        let value = user_transmute_w::<RtcTime>(value)?.ok_or(Errno::EINVAL)?;
         *value = RtcTime::default();
         Ok(0)
     }

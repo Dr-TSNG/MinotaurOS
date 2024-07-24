@@ -15,6 +15,7 @@ pub mod addr_space;
 pub mod allocator;
 pub mod ffi;
 pub mod page_table;
+pub mod protect;
 pub mod region;
 mod sysv_shm;
 

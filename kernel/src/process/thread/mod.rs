@@ -1,7 +1,8 @@
 use alloc::sync::Arc;
 use core::cell::SyncUnsafeCell;
-use log::{debug, info};
+use log::{debug, info, warn};
 use crate::arch::VirtAddr;
+use crate::mm::protect::user_transmute_w;
 use crate::process::ffi::CpuSet;
 use crate::process::Process;
 use crate::process::thread::event_bus::{Event, EventBus};
@@ -96,9 +97,10 @@ impl Thread {
 
     pub fn on_exit(self: Arc<Self>) {
         if let Some(tid_address) = self.inner().tid_address.clear {
-            if let Ok(buf) = self.process.inner.lock().addr_space.user_slice_w(tid_address, 4) {
-                buf.copy_from_slice(&0u32.to_ne_bytes());
-            }
+            match user_transmute_w::<u32>(tid_address.0) {
+                Ok(addr) => *addr.unwrap() = 0,
+                Err(_) => warn!("[futex] Invalid clear tid address {:?}", tid_address),
+            };
             debug!("[futex] Wake up clear tid address {:?}", tid_address);
             self.process.inner.lock().futex_queue.wake(tid_address, 1);
         }

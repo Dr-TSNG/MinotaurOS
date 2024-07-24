@@ -7,12 +7,10 @@ use alloc::vec::Vec;
 use core::arch::asm;
 use core::cmp::{max, min};
 use core::ffi::CStr;
-use core::mem::size_of;
 use bitflags::bitflags;
 use log::{debug, info};
 use riscv::register::satp;
 use xmas_elf::ElfFile;
-use zerocopy::{AsBytes, FromBytes};
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::driver::GLOBAL_MAPPINGS;
@@ -256,88 +254,6 @@ impl AddressSpace {
         };
         unsafe { self.activate(); }
         result
-    }
-
-    pub fn check_addr_valid(&self, start: VirtAddr, end: VirtAddr, perms: ASPerms) -> SyscallResult<()> {
-        let vpn_start = start.floor();
-        let vpn_end = end.ceil();
-        let mut cur = vpn_start;
-        for region in self.regions.values() {
-            let metadata = region.metadata();
-            if metadata.start > cur {
-                return Err(Errno::EFAULT);
-            } else if cur < metadata.end() {
-                if metadata.perms.contains(perms) {
-                    cur = metadata.end();
-                    if cur >= vpn_end {
-                        return Ok(());
-                    }
-                } else {
-                    return Err(Errno::EFAULT);
-                }
-            }
-        }
-        Err(Errno::EFAULT)
-    }
-
-    pub fn user_slice_r(&self, addr: VirtAddr, len: usize) -> SyscallResult<&'static [u8]> {
-        if len == 0 {
-            return Ok(&mut []);
-        }
-        self.check_addr_valid(addr, addr + len, ASPerms::R | ASPerms::U)?;
-        let data = unsafe { core::slice::from_raw_parts(addr.as_ptr(), len) };
-        Ok(data)
-    }
-
-    pub fn user_slice_w(&self, addr: VirtAddr, len: usize) -> SyscallResult<&'static mut [u8]> {
-        if len == 0 {
-            return Ok(&mut []);
-        }
-        self.check_addr_valid(addr, addr + len, ASPerms::W | ASPerms::U)?;
-        let data = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), len) };
-        Ok(data)
-    }
-
-    pub fn transmute_r<T: FromBytes>(&self, addr: usize) -> SyscallResult<Option<&'static T>> {
-        match addr {
-            0 => Ok(None),
-            _ => {
-                let addr = VirtAddr(addr);
-                self.check_addr_valid(addr, addr + size_of::<T>(), ASPerms::R | ASPerms::U)?;
-                let bytes = unsafe { core::slice::from_raw_parts(addr.as_ptr(), size_of::<T>()) };
-                Ok(Some(T::ref_from(bytes).unwrap()))
-            }
-        }
-    }
-
-    pub fn transmute_w<T: AsBytes + FromBytes>(&self, addr: usize) -> SyscallResult<Option<&'static mut T>> {
-        match addr {
-            0 => Ok(None),
-            _ => {
-                let addr = VirtAddr(addr);
-                self.check_addr_valid(addr, addr + size_of::<T>(), ASPerms::W | ASPerms::U)?;
-                let bytes = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), size_of::<T>()) };
-                Ok(Some(T::mut_from(bytes).unwrap()))
-            }
-        }
-    }
-
-    pub fn transmute_str(&self, addr: usize, max_len: usize) -> SyscallResult<Option<&'static str>> {
-        match addr {
-            0 => Ok(None),
-            _ => {
-                let addr = VirtAddr(addr);
-                let mut cur_len = min(max_len, PAGE_SIZE - addr.page_offset(2));
-                while cur_len <= max_len {
-                    let data = self.user_slice_r(addr, cur_len)?;
-                    if let Ok(cstr) = CStr::from_bytes_until_nul(data) {
-                        return Ok(Some(cstr.to_str().map_err(|_| Errno::EINVAL)?));
-                    }
-                    cur_len = min(cur_len + PAGE_SIZE, max_len);
-                }
-                Err(Errno::EINVAL)
-            }
-        }
     }
 
     pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult<usize> {

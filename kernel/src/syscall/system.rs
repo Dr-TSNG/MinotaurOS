@@ -1,22 +1,21 @@
 use alloc::vec;
-use core::mem::size_of;
 use log::{debug, info};
 use tap::Tap;
 use zerocopy::AsBytes;
-use crate::arch::{shutdown, VirtAddr};
+use crate::arch::shutdown;
 use crate::debug::console::DMESG;
 use crate::driver::total_memory;
 use crate::fs::ffi::UTS_NAME;
 use crate::mm::allocator::free_user_memory;
+use crate::mm::protect::{user_slice_w, user_transmute_w};
 use crate::process::monitor::MONITORS;
-use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::time::cpu_time;
 use crate::syscall::system::ffi::{SysInfo, SyslogCmd};
 
 mod ffi {
     use num_enum::TryFromPrimitive;
-    use zerocopy::AsBytes;
+    use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
     #[allow(non_camel_case_types)]
     #[derive(Debug, TryFromPrimitive)]
@@ -35,7 +34,7 @@ mod ffi {
         SYSLOG_ACTION_SIZE_BUFFER = 10,
     }
 
-    #[derive(Default, AsBytes)]
+    #[derive(Default, AsBytes, FromZeroes, FromBytes)]
     #[repr(C)]
     pub struct SysInfo {
         /// Seconds since boot
@@ -91,7 +90,7 @@ pub fn sys_syslog(cmd: i32, buf: usize, len: usize) -> SyscallResult<usize> {
                 }
             });
 
-            let buf = current_process().inner.lock().addr_space.user_slice_w(VirtAddr(buf), len)?;
+            let buf = user_slice_w(buf, len)?;
             let mut size = 0;
             for line in lines {
                 buf[size..size + line.len()].copy_from_slice(line.as_bytes());
@@ -104,21 +103,18 @@ pub fn sys_syslog(cmd: i32, buf: usize, len: usize) -> SyscallResult<usize> {
 }
 
 pub fn sys_uname(buf: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let user_buf = proc_inner.addr_space
-        .user_slice_w(VirtAddr(buf), UTS_NAME.as_bytes().len())?;
+    let user_buf = user_slice_w(buf, UTS_NAME.as_bytes().len())?;
     user_buf.copy_from_slice(UTS_NAME.as_bytes());
     Ok(0)
 }
 
 pub fn sys_sysinfo(buf: usize) -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    let user_buf = proc_inner.addr_space.user_slice_w(VirtAddr(buf), size_of::<SysInfo>())?;
+    let writeback = user_transmute_w::<SysInfo>(buf)?.ok_or(Errno::EINVAL)?;
     let mut sys_info = SysInfo::default();
     sys_info.uptime = cpu_time().as_secs() as isize;
     sys_info.totalram = total_memory();
     sys_info.freeram = free_user_memory();
     sys_info.procs = MONITORS.lock().process.count() as u16;
-    user_buf.copy_from_slice(sys_info.as_bytes());
+    *writeback = sys_info;
     Ok(0)
 }
