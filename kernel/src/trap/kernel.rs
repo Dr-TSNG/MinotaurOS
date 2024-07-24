@@ -1,4 +1,3 @@
-use core::arch::asm;
 use log::{debug, error};
 use riscv::register::{scause, sepc, stval};
 use riscv::register::scause::{Exception, Trap};

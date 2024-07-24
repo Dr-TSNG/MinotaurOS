@@ -137,8 +137,7 @@ fn start_secondary_hart(hart_id: usize) -> SyscallResult<!> {
 
 #[naked]
 #[no_mangle]
-#[allow(undefined_naked_function_abi)]
-pub unsafe fn pspace_main() {
+pub unsafe extern "C" fn pspace_main() {
     asm! {
     "la t0, {0}",
     "li t1, {1}",
