@@ -36,9 +36,9 @@ use crate::sync::futex::FutexQueue;
 use crate::sync::mutex::IrqReMutex;
 use crate::trap::context::TrapContext;
 
-pub type Tid = usize;
-pub type Pid = usize;
-pub type Gid = usize;
+pub type Tid = i32;
+pub type Pid = i32;
+pub type Gid = i32;
 
 pub struct Process {
     /// 进程的 pid

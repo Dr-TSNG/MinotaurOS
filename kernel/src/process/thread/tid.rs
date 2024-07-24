@@ -10,7 +10,7 @@ pub struct TidTracker(pub Tid);
 
 impl TidTracker {
     pub fn new() -> Self {
-        Self(TID_ALLOCATOR.lock().alloc())
+        Self(TID_ALLOCATOR.lock().alloc() as i32)
     }
 }
 
@@ -20,6 +20,6 @@ impl Drop for TidTracker {
         monitors.thread.remove(self.0);
         monitors.process.remove(self.0);
         monitors.group.remove_group(self.0);
-        TID_ALLOCATOR.lock().dealloc(self.0)
+        TID_ALLOCATOR.lock().dealloc(self.0 as usize)
     }
 }

@@ -10,7 +10,7 @@ use crate::fs::ffi::{AT_FDCWD, InodeMode, OpenFlags, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::mm::protect::{user_transmute_r, user_transmute_str, user_transmute_w};
 use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
-use crate::process::{Pid, Tid};
+use crate::process::{Gid, Pid, Tid};
 use crate::process::monitor::MONITORS;
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
@@ -34,30 +34,30 @@ pub fn sys_set_tid_address(tid: usize) -> SyscallResult<usize> {
         0 => None,
         _ => Some(VirtAddr(tid)),
     };
-    Ok(current_thread().tid.0)
+    Ok(current_thread().tid.0 as usize)
 }
 
-pub fn sys_sched_setaffinity(pid: usize, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
+pub fn sys_sched_setaffinity(tid: Tid, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
     if cpusetsize != size_of::<CpuSet>() {
         return Err(Errno::EINVAL);
     }
     let mask = user_transmute_r::<CpuSet>(mask)?.ok_or(Errno::EINVAL)?;
-    let thread = match pid {
+    let thread = match tid {
         0 => current_thread().clone(),
-        _ => MONITORS.lock().thread.get(pid).upgrade().ok_or(Errno::ESRCH)?,
+        _ => MONITORS.lock().thread.get(tid).upgrade().ok_or(Errno::ESRCH)?,
     };
     *thread.cpu_set.lock() = *mask;
     Ok(0)
 }
 
-pub fn sys_sched_getaffinity(pid: usize, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
+pub fn sys_sched_getaffinity(tid: Tid, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
     if cpusetsize != size_of::<CpuSet>() {
         return Err(Errno::EINVAL);
     }
     let mask = user_transmute_w::<CpuSet>(mask)?.ok_or(Errno::EINVAL)?;
-    let thread = match pid {
+    let thread = match tid {
         0 => current_thread().clone(),
-        _ => MONITORS.lock().thread.get(pid).upgrade().ok_or(Errno::ESRCH)?,
+        _ => MONITORS.lock().thread.get(tid).upgrade().ok_or(Errno::ESRCH)?,
     };
     *mask = thread.cpu_set.lock().clone();
     Ok(0)
@@ -104,7 +104,7 @@ pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
     Err(Errno::EINVAL)
 }
 
-pub fn sys_setpgid(pid: usize, pgid: usize) -> SyscallResult<usize> {
+pub fn sys_setpgid(pid: Pid, pgid: Gid) -> SyscallResult<usize> {
     let mut monitors = MONITORS.lock();
     let proc = match pid {
         0 => current_process().clone(),
@@ -122,13 +122,13 @@ pub fn sys_setpgid(pid: usize, pgid: usize) -> SyscallResult<usize> {
     Ok(0)
 }
 
-pub fn sys_getpgid(pid: usize) -> SyscallResult<usize> {
+pub fn sys_getpgid(pid: Pid) -> SyscallResult<usize> {
     let proc = match pid {
         0 => current_process().clone(),
         _ => MONITORS.lock().process.get(pid).upgrade().ok_or(Errno::ESRCH)?,
     };
     let pgid = proc.inner.lock().pgid.0;
-    Ok(pgid)
+    Ok(pgid as usize)
 }
 
 pub fn sys_setsid() -> SyscallResult<usize> {
@@ -180,26 +180,27 @@ pub fn sys_getrusage(who: i32, buf: usize) -> SyscallResult<usize> {
 }
 
 pub fn sys_getpid() -> SyscallResult<usize> {
-    Ok(current_process().pid.0)
+    Ok(current_process().pid.0 as usize)
 }
 
 pub fn sys_getppid() -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     // SAFETY: 由于我们将 init 进程的 parent 设置为自己，所以这里可以直接 unwrap
-    Ok(proc_inner.parent.upgrade().unwrap().pid.0)
+    Ok(proc_inner.parent.upgrade().unwrap().pid.0 as usize)
 }
 
 pub fn sys_gettid() -> SyscallResult<usize> {
-    Ok(current_thread().tid.0)
+    Ok(current_thread().tid.0 as usize)
 }
 
 pub fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize) -> SyscallResult<usize> {
     let flags = CloneFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
-    if flags.contains(CloneFlags::CLONE_VM) {
+    let ret = if flags.contains(CloneFlags::CLONE_VM) {
         current_process().clone_thread(flags, stack, tls, ptid, ctid)
     } else {
         current_process().fork_process(flags, stack)
-    }
+    };
+    ret.map(|tid| tid as usize)
 }
 
 pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<usize> {
@@ -254,7 +255,7 @@ pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -
     let ret = suspend_now(None, Event::all().difference(Event::CHILD_EXIT), fut).await;
     current_thread().signals.set_waiting_child(false);
     info!("[wait4] ret: {:?}", ret);
-    ret
+    ret.map(|pid| pid as usize)
 }
 
 pub fn sys_prlimit(pid: Pid, resource: u32, new_rlim: usize, old_rlim: usize) -> SyscallResult<usize> {
