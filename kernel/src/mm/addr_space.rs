@@ -27,7 +27,7 @@ use crate::mm::region::lazy::LazyRegion;
 use crate::mm::region::shared::SharedRegion;
 use crate::mm::sysv_shm::SysVShm;
 use crate::process::aux::{self, Aux};
-use crate::processor::hart::local_hart;
+use crate::processor::hart::{KIntrGuard, local_hart};
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
@@ -209,6 +209,7 @@ impl AddressSpace {
     }
 
     pub unsafe fn activate(&mut self) {
+        let _guard = KIntrGuard::new();
         let asid = match local_hart().asid_manager.as_mut() {
             None => 0,
             Some(manager) => {

@@ -21,7 +21,7 @@ use crate::fs::devfs::tty::{DEFAULT_TTY, TtyFile};
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::FileMeta;
 use crate::mm::addr_space::ASPerms;
-use crate::println;
+use crate::{arch, println};
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
@@ -176,6 +176,7 @@ pub fn init_driver() -> SyscallResult<()> {
         NET_DEVICE.lock().replace(dev);
         crate::net::init();
     }
+    arch::enable_external_interrupt();
     Ok(())
 }
 

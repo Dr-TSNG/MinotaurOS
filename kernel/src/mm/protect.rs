@@ -4,7 +4,7 @@ use core::ffi::CStr;
 use core::mem::size_of;
 use zerocopy::{AsBytes, FromBytes};
 use crate::arch::{PAGE_SIZE, VirtAddr};
-use crate::processor::hart::local_hart;
+use crate::processor::hart::{KIntrGuard, local_hart};
 use crate::result::{Errno, SyscallResult};
 
 pub fn user_transmute_r<T: FromBytes>(addr: usize) -> SyscallResult<Option<&'static T>> {
@@ -69,30 +69,32 @@ pub fn user_slice_w(addr: usize, len: usize) -> SyscallResult<&'static mut [u8]>
 }
 
 fn check_slice_readable(addr: VirtAddr, len: usize) -> SyscallResult {
-    local_hart().ctx.page_test = true;
+    let _guard = KIntrGuard::new();
+    local_hart().on_page_test = true;
     let start = addr.floor();
     let end = (addr + len).ceil();
     for vpn in start..end {
         if unsafe { try_read_u8(VirtAddr::from(vpn).as_ptr()) } {
-            local_hart().ctx.page_test = false;
-            return local_hart().ctx.last_kernel_trap;
+            local_hart().on_page_test = false;
+            return local_hart().last_page_fault;
         }
     }
-    local_hart().ctx.page_test = false;
+    local_hart().on_page_test = false;
     Ok(())
 }
 
 fn check_slice_writable(addr: VirtAddr, len: usize) -> SyscallResult {
-    local_hart().ctx.page_test = true;
+    let _guard = KIntrGuard::new();
+    local_hart().on_page_test = true;
     let start = addr.floor();
     let end = (addr + len).ceil();
     for vpn in start..end {
         if unsafe { try_write_u8(VirtAddr::from(vpn).as_ptr()) } {
-            local_hart().ctx.page_test = false;
-            return local_hart().ctx.last_kernel_trap;
+            local_hart().on_page_test = false;
+            return local_hart().last_page_fault;
         }
     }
-    local_hart().ctx.page_test = false;
+    local_hart().on_page_test = false;
     Ok(())
 }
 

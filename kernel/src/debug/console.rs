@@ -8,7 +8,7 @@ use tap::Tap;
 use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::fs::file::File;
 use crate::sync::block_on;
-use crate::sync::mutex::Mutex;
+use crate::sync::mutex::IrqMutex;
 
 const MAX_LINES: usize = 80;
 
@@ -20,7 +20,7 @@ pub struct DiagMessage {
 }
 
 lazy_static! {
-    pub static ref DMESG: Mutex<DiagMessage> = Mutex::default();
+    pub static ref DMESG: IrqMutex<DiagMessage> = IrqMutex::default();
 }
 
 pub fn print(args: Arguments) {

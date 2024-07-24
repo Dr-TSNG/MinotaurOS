@@ -1,37 +1,49 @@
-use log::{debug, error};
+use log::{debug, error, trace};
 use riscv::register::{scause, sepc, stval};
-use riscv::register::scause::{Exception, Trap};
+use riscv::register::scause::{Exception, Interrupt, Trap};
 use crate::arch::VirtAddr;
+use crate::driver::BOARD_INFO;
 use crate::mm::addr_space::ASPerms;
 use crate::processor::current_thread;
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
+use crate::sched::time::set_next_trigger;
+use crate::sched::timer::query_timer;
 use crate::signal::ffi::Signal;
 
 #[no_mangle]
 fn trap_from_kernel() -> bool {
+    local_hart().on_kintr = true;
     let stval = stval::read();
     let sepc = sepc::read();
     let trap = scause::read().cause();
-    debug!("Trap {:?} from kernel at {:#x} for {:#x}", trap, sepc, stval);
-    local_hart().ctx.last_kernel_trap = match trap {
+    trace!("Trap {:?} from kernel at {:#x} for {:#x}", trap, sepc, stval);
+    match trap {
         | Trap::Exception(Exception::LoadFault)
         | Trap::Exception(Exception::LoadPageFault) => {
-            handle_page_fault(VirtAddr(stval), ASPerms::R)
+            local_hart().last_page_fault = handle_page_fault(VirtAddr(stval), ASPerms::R);
         }
         Trap::Exception(Exception::StoreFault)
         | Trap::Exception(Exception::StorePageFault) => {
-            handle_page_fault(VirtAddr(stval), ASPerms::W)
+            local_hart().last_page_fault = handle_page_fault(VirtAddr(stval), ASPerms::W);
         }
         Trap::Exception(Exception::InstructionFault)
         | Trap::Exception(Exception::InstructionPageFault) => {
-            handle_page_fault(VirtAddr(sepc), ASPerms::X)
+            local_hart().last_page_fault = handle_page_fault(VirtAddr(sepc), ASPerms::X);
+        }
+        Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            query_timer();
+            set_next_trigger();
+        }
+        Trap::Interrupt(Interrupt::SupervisorExternal) => {
+            BOARD_INFO.plic.handle_irq(local_hart().id);
         }
         _ => {
             panic!("Fatal");
         }
-    };
-    local_hart().ctx.page_test
+    }
+    local_hart().on_kintr = false;
+    local_hart().on_page_test
 }
 
 fn handle_page_fault(addr: VirtAddr, perform: ASPerms) -> SyscallResult {

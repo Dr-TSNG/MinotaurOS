@@ -1,4 +1,4 @@
-use riscv::register::sstatus;
+use crate::processor::hart::KIntrGuard;
 
 mod reentrant;
 mod spin;
@@ -26,27 +26,9 @@ impl MutexStrategy for DefaultStrategy {
     fn new_guard() -> Self::GuardData {}
 }
 
-pub struct IrqGuard(bool);
-
-impl IrqGuard {
-    pub fn new() -> Self {
-        let sie = sstatus::read().sie();
-        unsafe { sstatus::clear_sie(); }
-        Self(sie)
-    }
-}
-
-impl Drop for IrqGuard {
-    fn drop(&mut self) {
-        if self.0 {
-            unsafe { sstatus::set_sie(); }
-        }
-    }
-}
-
 impl MutexStrategy for IrqStrategy {
-    type GuardData = IrqGuard;
+    type GuardData = KIntrGuard;
     fn new_guard() -> Self::GuardData {
-        IrqGuard::new()
+        KIntrGuard::new()
     }
 }

@@ -1,10 +1,7 @@
 use alloc::collections::VecDeque;
 use async_task::{Runnable, ScheduleInfo, Task, WithInfo};
 use core::future::Future;
-use crate::driver::BOARD_INFO;
 use crate::process::monitor::MONITORS;
-use crate::processor::hart::local_hart;
-use crate::sched::timer::query_timer;
 use crate::sync::mutex::IrqMutex;
 
 struct TaskQueue {
@@ -56,8 +53,6 @@ pub fn run_executor() {
         } else {
             core::hint::spin_loop();
         }
-        query_timer();
-        BOARD_INFO.plic.handle_irq(local_hart().id);
         if MONITORS.lock().process.init_proc().strong_count() == 0 {
             break;
         }

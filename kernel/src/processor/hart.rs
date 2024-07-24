@@ -3,16 +3,37 @@ use core::arch::asm;
 use aligned::{A16, Aligned};
 use riscv::register::sstatus;
 use riscv::register::sstatus::FS;
+use crate::arch;
 use crate::config::{KERNEL_STACK_SIZE, MAX_HARTS};
 use crate::mm::asid::ASIDManager;
 use crate::mm::KERNEL_SPACE;
 use crate::process::thread::Thread;
 use crate::processor::context::HartContext;
+use crate::result::SyscallResult;
 
 pub struct Hart {
     pub id: usize,
     pub ctx: HartContext,
     pub asid_manager: Option<ASIDManager>,
+    pub on_kintr: bool,
+    pub on_page_test: bool,
+    pub last_page_fault: SyscallResult,
+    kintr_rec: usize,
+}
+
+pub struct KIntrGuard;
+
+impl KIntrGuard {
+    pub fn new() -> Self {
+        local_hart().disable_kintr();
+        Self
+    }
+}
+
+impl Drop for KIntrGuard {
+    fn drop(&mut self) {
+        local_hart().enable_kintr();
+    }
 }
 
 impl Hart {
@@ -21,6 +42,10 @@ impl Hart {
             id: 0,
             ctx: HartContext::new(None),
             asid_manager: None,
+            on_kintr: false,
+            on_page_test: false,
+            last_page_fault: Ok(()),
+            kintr_rec: 0,
         }
     }
 
@@ -29,6 +54,7 @@ impl Hart {
     }
 
     pub fn switch_ctx(&mut self, another: &mut HartContext) {
+        self.disable_kintr();
         let (thread_now, thread_next) = (
             self.current_thread(),
             another.user_task.as_ref().map(|t| &t.thread),
@@ -52,6 +78,21 @@ impl Hart {
             }
         }
         core::mem::swap(&mut self.ctx, another);
+        self.enable_kintr();
+    }
+
+    pub fn enable_kintr(&mut self) {
+        self.kintr_rec -= 1;
+        if self.kintr_rec == 0 && !self.on_kintr {
+            arch::enable_kernel_interrupt();
+        }
+    }
+
+    pub fn disable_kintr(&mut self) {
+        if self.kintr_rec == 0 {
+            arch::disable_kernel_interrupt();
+        }
+        self.kintr_rec += 1;
     }
 }
 

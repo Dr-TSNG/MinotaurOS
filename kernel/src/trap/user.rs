@@ -5,11 +5,14 @@ use riscv::register::scause::{Exception, Interrupt, Trap};
 use riscv::register::sstatus::FS;
 use crate::arch::VirtAddr;
 use crate::config::TRAMPOLINE_BASE;
+use crate::driver::BOARD_INFO;
 use crate::mm::addr_space::ASPerms;
 use crate::mm::protect::user_slice_w;
 use crate::processor::{current_process, current_thread, current_trap_ctx};
+use crate::processor::hart::local_hart;
 use crate::result::Errno;
 use crate::sched::time::set_next_trigger;
+use crate::sched::timer::query_timer;
 use crate::sched::yield_now;
 use crate::signal::ffi::{SigActionFlags, Signal, UContext};
 use crate::signal::SignalHandler;
@@ -17,6 +20,7 @@ use crate::syscall::syscall;
 use crate::trap::{__restore_to_user, set_kernel_trap_entry, set_user_trap_entry};
 
 pub fn trap_return() {
+    local_hart().disable_kintr();
     set_user_trap_entry();
     trace!("Trap return to user, pc: {:#x}", current_trap_ctx().get_pc());
 
@@ -38,7 +42,9 @@ pub async fn trap_from_user() {
     let stval = stval::read();
     let sepc = sepc::read();
     let trap = scause::read().cause();
+    local_hart().enable_kintr();
     trace!("Trap {:?} from user at {:#x} for {:#x}", trap, sepc, stval);
+
     match trap {
         Trap::Exception(Exception::UserEnvCall) => {
             let ctx = current_trap_ctx();
@@ -70,8 +76,12 @@ pub async fn trap_from_user() {
             handle_page_fault(VirtAddr(sepc), ASPerms::X);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            query_timer();
             set_next_trigger();
             yield_now().await;
+        }
+        Trap::Interrupt(Interrupt::SupervisorExternal) => {
+            BOARD_INFO.plic.handle_irq(local_hart().id);
         }
         _ => {
             error!("Unhandled trap: {:?}", trap);

@@ -140,8 +140,7 @@ impl Process {
 
             // 切换页表，复制文件描述符表
             unsafe { addr_space.activate(); }
-            let hart = local_hart();
-            hart.ctx.user_task.as_mut().unwrap().root_pt = addr_space.root_pt;
+            local_hart().ctx.user_task.as_mut().unwrap().root_pt = addr_space.root_pt;
             proc_inner.addr_space = addr_space;
             proc_inner.fd_table.cloexec();
             proc_inner.exe = exe;
