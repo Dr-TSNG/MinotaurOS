@@ -7,8 +7,10 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use hashbrown::HashMap;
 use log::debug;
 use crate::driver::ffi::sep_dev;
+use crate::config::MAX_INODE_CACHE;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::inode::Inode;
+use crate::fs::inode_cache::InodeCache;
 use crate::fs::path::is_absolute_path;
 use crate::result::{Errno, SyscallResult};
 use crate::split_path;
@@ -80,6 +82,7 @@ static MNT_NS_ID_POOL: AtomicUsize = AtomicUsize::new(1);
 /// 挂载命名空间
 pub struct MountNamespace {
     pub mnt_ns_id: usize,
+    pub inode_cache: InodeCache,
     inner: Mutex<NSInner>,
 }
 
@@ -109,6 +112,7 @@ impl MountNamespace {
         let snapshot = (tree.fs.metadata().fsid, (tree.mnt_id, String::new()));
         Self {
             mnt_ns_id: MNT_NS_ID_POOL.fetch_add(1, Ordering::Acquire),
+            inode_cache: InodeCache::new(MAX_INODE_CACHE),
             inner: Mutex::new(NSInner { tree, snapshot: HashMap::from([snapshot]) }),
         }
     }
