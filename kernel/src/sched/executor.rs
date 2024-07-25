@@ -1,46 +1,47 @@
-use alloc::collections::VecDeque;
 use async_task::{Runnable, ScheduleInfo, Task, WithInfo};
 use core::future::Future;
 use core::sync::atomic::Ordering;
+use crossbeam_queue::SegQueue;
 use crate::processor::SYSTEM_SHUTDOWN;
-use crate::sync::mutex::IrqMutex;
 
 struct TaskQueue {
-    queue: IrqMutex<VecDeque<Runnable>>,
+    fifo: SegQueue<Runnable>,
+    prio: SegQueue<Runnable>,
 }
 
 impl TaskQueue {
-    pub const fn new() -> Self {
+    const fn new() -> Self {
         Self {
-            queue: IrqMutex::new(VecDeque::new()),
+            fifo: SegQueue::new(),
+            prio: SegQueue::new(),
         }
     }
 
-    pub fn push_back(&self, runnable: Runnable) {
-        self.queue.lock().push_back(runnable);
+    fn push_fifo(&self, runnable: Runnable) {
+        self.fifo.push(runnable);
     }
 
-    pub fn push_front(&self, runnable: Runnable) {
-        self.queue.lock().push_front(runnable);
+    fn push_prio(&self, runnable: Runnable) {
+        self.prio.push(runnable);
     }
 
-    pub fn take(&self) -> Option<Runnable> {
-        self.queue.lock().pop_front()
+    fn take(&self) -> Option<Runnable> {
+        self.prio.pop().or_else(|| self.fifo.pop())
     }
 }
 
 static TASK_QUEUE: TaskQueue = TaskQueue::new();
 
 pub fn spawn<F>(future: F) -> (Runnable, Task<F::Output>)
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
 {
     let schedule = move |runnable: Runnable, info: ScheduleInfo| {
         if info.woken_while_running {
-            TASK_QUEUE.push_back(runnable);
+            TASK_QUEUE.push_fifo(runnable);
         } else {
-            TASK_QUEUE.push_front(runnable);
+            TASK_QUEUE.push_prio(runnable);
         }
     };
     async_task::spawn(future, WithInfo(schedule))
