@@ -18,6 +18,13 @@ fn run_cmd(cmd: &str) {
     }
 }
 
+extern "C" fn sigchld_handler(signal: i32) {
+    if signal == SIGCHLD {
+        let mut result: i32 = 0;
+        sys_waitpid(-1, &mut result);
+    }
+}
+
 fn init_shell() {
     run_cmd("echo Linking busybox applets...");
     let mut pipes = [0, 0];
@@ -49,12 +56,13 @@ fn main() {
     sys_mkdir("/proc", 0);
     sys_mkdir("/tmp", 0);
     sys_mkdir("/sys", 0);
-    sys_mkdir("/var", 0);
     let flags = VfsFlags::ST_WRITE | VfsFlags::ST_RELATIME;
     mount("dev", "/dev", "devtmpfs", flags, None);
     mount("proc", "/proc", "proc", flags, None);
     mount("tmpfs", "/tmp", "tmpfs", flags, None);
-    mount("tmpfs", "/var", "tmpfs", flags, None);
+    let mut sa = SigAction::default();
+    sa.sa_handler = sigchld_handler as usize;
+    sigaction(SIGCHLD, Some(&sa), None);
     if sys_access("sort.src", 0) != 0 {
         init_shell();
         run_cmd("busybox ln -s /lib/dlopen_dso.so /dlopen_dso.so");
