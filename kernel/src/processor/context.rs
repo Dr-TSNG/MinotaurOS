@@ -1,5 +1,4 @@
-use alloc::sync::{Arc, Weak};
-use crate::mm::asid::ASID;
+use alloc::sync::Arc;
 use crate::mm::page_table::PageTable;
 use crate::process::thread::Thread;
 
@@ -9,8 +8,8 @@ pub struct HartContext {
 
 pub struct UserTask {
     pub thread: Arc<Thread>,
+    pub token: usize,
     pub root_pt: PageTable,
-    pub asid: Weak<ASID>,
 }
 
 impl HartContext {
@@ -24,8 +23,8 @@ impl HartContext {
         let proc_inner = thread.process.inner.lock();
         let user_task = UserTask {
             thread: thread.clone(),
+            token: proc_inner.addr_space.token,
             root_pt: proc_inner.addr_space.root_pt,
-            asid: proc_inner.addr_space.asid.clone(),
         };
         HartContext {
             user_task: Some(user_task),

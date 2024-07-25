@@ -120,7 +120,7 @@ impl Process {
         envs: &[CString],
     ) -> SyscallResult<usize> {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
-        let (mut addr_space, entry, mut auxv) =
+        let (addr_space, entry, mut auxv) =
             AddressSpace::from_elf(&mnt_ns, elf_data).await?;
 
         current_process().inner.lock().tap_mut(|proc_inner| {
@@ -139,10 +139,10 @@ impl Process {
                 });
 
             // 切换页表，复制文件描述符表
-            unsafe { addr_space.activate(); }
+            unsafe { local_hart().switch_page_table(addr_space.token, addr_space.root_pt); }
             let task = local_hart().ctx.user_task.as_mut().unwrap();
+            task.token = addr_space.token;
             task.root_pt = addr_space.root_pt;
-            task.asid = addr_space.asid.clone();
             proc_inner.addr_space = addr_space;
             proc_inner.fd_table.cloexec();
             proc_inner.exe = exe;
@@ -246,8 +246,6 @@ impl Process {
                     exit_code: None,
                 }),
             });
-            // 地址空间 fork 后需要刷新 TLB
-            unsafe { proc_inner.addr_space.activate(); }
 
             let mut trap_ctx = current_trap_ctx().clone();
             trap_ctx.user_x[10] = 0;

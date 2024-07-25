@@ -1,4 +1,3 @@
-use alloc::sync::Arc;
 use core::cmp::min;
 use core::num::NonZeroUsize;
 use lru::LruCache;
@@ -7,7 +6,10 @@ use crate::config::MAX_ASID;
 
 pub type ASID = u16;
 
-pub struct ASIDManager(LruCache<ASID, Arc<ASID>>);
+pub struct ASIDManager {
+    cache: LruCache<usize, ASID>,
+    allocated: usize,
+}
 
 impl ASIDManager {
     pub fn new() -> Self {
@@ -18,17 +20,26 @@ impl ASIDManager {
             satp::set(satp.mode(), satp.asid(), satp.ppn());
             min(cap, MAX_ASID)
         };
-        let mut cache = LruCache::new(NonZeroUsize::new(asid_cap).unwrap());
-        for i in 0..asid_cap as ASID {
-            cache.put(i, Arc::new(i));
+        Self {
+            cache: LruCache::new(NonZeroUsize::new(asid_cap).unwrap()),
+            allocated: 0,
         }
-        Self(cache)
     }
 
-    pub fn alloc(&mut self) -> Arc<ASID> {
-        let asid = self.0.pop_lru().unwrap().0;
-        let tracker = Arc::new(asid);
-        self.0.push(asid, tracker.clone());
-        tracker
+    pub fn get(&mut self, token: usize) -> Option<ASID> {
+        self.cache.get(&token).copied()
+    }
+
+    pub fn assign(&mut self, token: usize) -> ASID {
+        if self.allocated < self.cache.cap().get() {
+            let asid = self.allocated as ASID;
+            self.allocated += 1;
+            self.cache.put(token, asid);
+            asid
+        } else {
+            let recycled = self.cache.pop_lru().unwrap().1;
+            self.cache.put(token, recycled);
+            recycled
+        }
     }
 }

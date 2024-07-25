@@ -2,7 +2,6 @@ use alloc::string::ToString;
 use log::info;
 use crate::arch::{PAGE_SIZE, VirtAddr, VirtPageNum};
 use crate::mm::addr_space::{AddressSpace, ASPerms};
-use crate::mm::asid::ASIDManager;
 use crate::mm::region::ASRegionMeta;
 use crate::mm::region::lazy::LazyRegion;
 use crate::processor::hart::local_hart;
@@ -27,8 +26,8 @@ pub fn vm_init(primary: bool) -> SyscallResult {
         vm_test()?;
         info!("Kernel address space initialized");
     }
-    local_hart().asid_manager.replace(ASIDManager::new());
-    unsafe { KERNEL_SPACE.lock().activate(); }
+    let kernel_space = KERNEL_SPACE.lock();
+    unsafe { local_hart().switch_page_table(kernel_space.token, kernel_space.root_pt); }
     Ok(())
 }
 
@@ -51,7 +50,7 @@ fn vm_test() -> SyscallResult {
         let ptr = VirtAddr::from(VirtPageNum::from(start)).as_ptr();
         core::slice::from_raw_parts_mut(ptr, 4 * PAGE_SIZE)
     };
-    unsafe { kernel_space.activate(); }
+    unsafe { local_hart().switch_page_table(kernel_space.token, kernel_space.root_pt); }
     slice.fill(0x42);
     info!("VM test passed");
     Ok(())

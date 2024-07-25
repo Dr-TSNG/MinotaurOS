@@ -74,8 +74,8 @@ fn clear_bss() {
 
 fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     clear_bss();
-    hart::init(hart_id);
     mm::allocator::init_heap();
+    hart::init(hart_id);
     driver::init_dtb(dtb_paddr);
     mm::allocator::init_user();
     debug::logger::init();

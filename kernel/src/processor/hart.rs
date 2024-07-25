@@ -1,25 +1,27 @@
 use alloc::sync::Arc;
 use core::arch::asm;
 use aligned::{A16, Aligned};
-use riscv::register::sstatus;
+use riscv::asm::fence_i;
+use riscv::register::{satp, sstatus};
 use riscv::register::sstatus::FS;
 use crate::arch;
 use crate::config::{KERNEL_STACK_SIZE, MAX_HARTS};
-use crate::mm::addr_space::AddressSpace;
 use crate::mm::asid::ASIDManager;
 use crate::mm::KERNEL_SPACE;
+use crate::mm::page_table::PageTable;
 use crate::process::thread::Thread;
 use crate::processor::context::HartContext;
 use crate::result::SyscallResult;
+use crate::sync::once::LateInit;
 
 pub struct Hart {
     pub id: usize,
     pub ctx: HartContext,
-    pub asid_manager: Option<ASIDManager>,
     pub on_kintr: bool,
     pub on_page_test: bool,
     pub last_page_fault: SyscallResult,
     kintr_rec: usize,
+    asid_manager: LateInit<ASIDManager>,
 }
 
 pub struct KIntrGuard;
@@ -42,11 +44,11 @@ impl Hart {
         Self {
             id: 0,
             ctx: HartContext::kernel(),
-            asid_manager: None,
             on_kintr: false,
             on_page_test: false,
             last_page_fault: Ok(()),
             kintr_rec: 0,
+            asid_manager: LateInit::new(),
         }
     }
 
@@ -71,19 +73,16 @@ impl Hart {
                 None => true,
             };
             if switch_pt {
-                if let Some(asid) = next.asid.upgrade() {
-                    // Fast path
-                    unsafe { AddressSpace::activate_pt_with_asid(next.root_pt, *asid); }
-                } else {
-                    // Slow path
-                    let mut proc_inner = next.thread.process.inner.lock();
-                    unsafe { proc_inner.addr_space.activate(); }
-                    next.asid = proc_inner.addr_space.asid.clone();
+                unsafe {
+                    self.switch_page_table(next.token, next.root_pt);
                 }
             }
         } else {
             if thread_now.is_some() {
-                unsafe { KERNEL_SPACE.lock().activate(); }
+                let kernel_space = KERNEL_SPACE.lock();
+                unsafe {
+                    self.switch_page_table(kernel_space.token, kernel_space.root_pt);
+                }
             }
         }
         core::mem::swap(&mut self.ctx, another);
@@ -102,6 +101,28 @@ impl Hart {
             arch::disable_kernel_interrupt();
         }
         self.kintr_rec += 1;
+    }
+
+    pub unsafe fn switch_page_table(&mut self, token: usize, root_pt: PageTable) {
+        self.disable_kintr();
+        if let Some(asid) = self.asid_manager.get(token) {
+            fence_i();
+            satp::set(satp::Mode::Sv39, asid as usize, root_pt.ppn.0);
+            fence_i();
+        } else {
+            let asid = self.asid_manager.assign(token);
+            fence_i();
+            satp::set(satp::Mode::Sv39, asid as usize, root_pt.ppn.0);
+            asm!("sfence.vma x0, {}", in(reg) asid);
+        }
+        self.enable_kintr();
+    }
+
+    pub unsafe fn refresh_tlb(&mut self, token: usize) {
+        self.disable_kintr();
+        let asid = self.asid_manager.get(token).unwrap();
+        asm!("sfence.vma x0, {}", in(reg) asid);
+        self.enable_kintr();
     }
 }
 
@@ -124,6 +145,7 @@ pub fn init(hart_id: usize) {
         // 将当前 hart 的 id 保存到 tp 寄存器
         asm!("mv tp, {}", in(reg) hart_id);
         HARTS[hart_id].id = hart_id;
+        HARTS[hart_id].asid_manager.init(ASIDManager::new());
         // 允许内核访问用户态地址空间
         sstatus::set_sum();
         sstatus::set_fs(FS::Clean);

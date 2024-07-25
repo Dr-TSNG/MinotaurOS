@@ -1,15 +1,14 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
-use alloc::sync::{Arc, Weak};
+use alloc::sync::Arc;
 use alloc::{format, vec};
 use alloc::vec::Vec;
-use core::arch::asm;
 use core::cmp::{max, min};
 use core::ffi::CStr;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use bitflags::bitflags;
 use log::{debug, info};
-use riscv::register::satp;
 use xmas_elf::ElfFile;
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
@@ -18,7 +17,6 @@ use crate::fs::ffi::OpenFlags;
 use crate::fs::file_system::MountNamespace;
 use crate::fs::inode::Inode;
 use crate::mm::allocator::{alloc_kernel_frames, HeapFrameTracker};
-use crate::mm::asid::ASID;
 use crate::mm::page_table::PageTable;
 use crate::mm::region::{ASRegion, ASRegionMeta};
 use crate::mm::region::direct::DirectRegion;
@@ -27,7 +25,7 @@ use crate::mm::region::lazy::LazyRegion;
 use crate::mm::region::shared::SharedRegion;
 use crate::mm::sysv_shm::SysVShm;
 use crate::process::aux::{self, Aux};
-use crate::processor::hart::{KIntrGuard, local_hart};
+use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
@@ -40,13 +38,13 @@ bitflags! {
     }
 }
 
-// static ASID_POOL: Mutex<WeakValueHashMap<ASID, AddressSpace>> = Mutex::default();
+static TOKEN_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 pub struct AddressSpace {
+    /// 地址空间标识
+    pub token: usize,
     /// 根页表
     pub root_pt: PageTable,
-    /// 与地址空间关联的 ASID
-    pub asid: Weak<ASID>,
     /// 地址空间中的区域
     regions: BTreeMap<VirtPageNum, Box<dyn ASRegion>>,
     /// 该地址空间关联的页表帧
@@ -62,8 +60,8 @@ impl AddressSpace {
         let root_pt_page = alloc_kernel_frames(1);
         debug!("[addr_space] create root page table {:?}", root_pt_page.ppn);
         let mut addr_space = AddressSpace {
+            token: TOKEN_COUNTER.fetch_add(1, Ordering::Relaxed),
             root_pt: PageTable::new(root_pt_page.ppn),
-            asid: Weak::new(),
             regions: BTreeMap::new(),
             pt_dirs: vec![],
             sysv_shm: Default::default(),
@@ -193,8 +191,8 @@ impl AddressSpace {
         let root_pt_page = alloc_kernel_frames(1);
         debug!("[addr_space] forked root page table {:?}", root_pt_page.ppn);
         let mut forked = AddressSpace {
+            token: TOKEN_COUNTER.fetch_add(1, Ordering::Relaxed),
             root_pt: PageTable::new(root_pt_page.ppn),
-            asid: Weak::new(),
             regions: BTreeMap::new(),
             pt_dirs: vec![],
             sysv_shm: self.sysv_shm.clone(),
@@ -205,30 +203,8 @@ impl AddressSpace {
             let forked_region = region.fork(self.root_pt);
             forked.map_region(forked_region);
         }
+        unsafe { local_hart().refresh_tlb(self.token); }
         forked
-    }
-
-    pub unsafe fn activate_pt_with_asid(root_pt: PageTable, asid: ASID) {
-        satp::set(satp::Mode::Sv39, asid as usize, root_pt.ppn.0);
-        asm!("sfence.vma x0, {}", in(reg) asid);
-    }
-
-    pub unsafe fn activate(&mut self) {
-        let _guard = KIntrGuard::new();
-        let asid = match local_hart().asid_manager.as_mut() {
-            None => 0,
-            Some(manager) => {
-                match self.asid.upgrade() {
-                    Some(asid) => *asid,
-                    None => {
-                        let asid = manager.alloc();
-                        self.asid = Arc::downgrade(&asid);
-                        *asid
-                    }
-                }
-            }
-        };
-        Self::activate_pt_with_asid(self.root_pt, asid);
     }
 
     pub fn map_region(&mut self, region: Box<dyn ASRegion>) {
@@ -257,7 +233,7 @@ impl AddressSpace {
             info!("[addr_space] Page access violation: {:?} - {:?} / {:?}", addr, perform, region.metadata().perms);
             return Err(Errno::EACCES);
         };
-        unsafe { self.activate(); }
+        unsafe { local_hart().refresh_tlb(self.token); }
         result
     }
 
@@ -285,7 +261,7 @@ impl AddressSpace {
         }
         self.brk = addr.ceil().into();
         self.map_region(brk);
-        unsafe { self.activate(); }
+        unsafe { local_hart().refresh_tlb(self.token); }
         Ok(self.brk.0)
     }
 
@@ -321,19 +297,23 @@ impl AddressSpace {
             None => LazyRegion::new_free(metadata),
         };
         self.map_region(region);
-        unsafe { self.activate(); }
+        unsafe { local_hart().refresh_tlb(self.token); }
         Ok(VirtAddr::from(start).0)
     }
 
     pub fn munmap(&mut self, start: VirtPageNum, pages: usize) -> SyscallResult {
-        self.modify_region(start, pages, |_| false)
+        let ret = self.modify_region(start, pages, |_| false);
+        unsafe { local_hart().refresh_tlb(self.token); }
+        ret
     }
 
     pub fn mprotect(&mut self, start: VirtPageNum, pages: usize, perms: ASPerms) -> SyscallResult {
-        self.modify_region(start, pages, |region| {
+        let ret = self.modify_region(start, pages, |region| {
             region.set_perms(perms);
             true
-        })
+        });
+        unsafe { local_hart().refresh_tlb(self.token); }
+        ret
     }
 
     pub fn shmget(&self, pages: usize) -> SyscallResult<usize> {
@@ -365,6 +345,7 @@ impl AddressSpace {
         };
         let region = SharedRegion::new_reffed(metadata, &shm);
         self.map_region(region);
+        unsafe { local_hart().refresh_tlb(self.token); }
         Ok(VirtAddr::from(start).0)
     }
 }
@@ -416,7 +397,6 @@ impl AddressSpace {
         for region in handled {
             self.map_region(region);
         }
-        unsafe { self.activate(); }
         Ok(())
     }
 
