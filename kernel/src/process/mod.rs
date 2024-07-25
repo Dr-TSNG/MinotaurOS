@@ -17,6 +17,7 @@ use crate::arch::VirtAddr;
 use crate::config::USER_STACK_TOP;
 use crate::fs::fd::FdTable;
 use crate::fs::file_system::MountNamespace;
+use crate::fs::inode::Inode;
 use crate::mm::addr_space::AddressSpace;
 use crate::mm::protect::{user_slice_r, user_transmute_w};
 use crate::process::aux::Aux;
@@ -114,16 +115,15 @@ impl Process {
 
     pub async fn execve(
         &self,
-        exe: String,
-        elf_data: &[u8],
+        inode: Arc<dyn Inode>,
         args: &[CString],
         envs: &[CString],
     ) -> SyscallResult<usize> {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
         let (addr_space, entry, mut auxv) =
-            AddressSpace::from_elf(&mnt_ns, elf_data).await?;
+            AddressSpace::from_inode(&mnt_ns, inode.clone()).await?;
 
-        current_process().inner.lock().tap_mut(|proc_inner| {
+        current_process().inner.lock().pipe_ref_mut(|proc_inner| {
             if proc_inner.threads.len() > 1 {
                 warn!("[execve] More than one thread in process when execve");
             }
@@ -145,8 +145,9 @@ impl Process {
             task.root_pt = addr_space.root_pt;
             proc_inner.addr_space = addr_space;
             proc_inner.fd_table.cloexec();
-            proc_inner.exe = exe;
-        });
+            proc_inner.exe = inode.mnt_ns_path(&proc_inner.mnt_ns)?;
+            Ok(())
+        })?;
 
         let mut user_sp = USER_STACK_TOP.0;
 
@@ -246,6 +247,8 @@ impl Process {
                     exit_code: None,
                 }),
             });
+            // 地址空间 fork 后需要刷新 TLB
+            unsafe { local_hart().refresh_tlb(proc_inner.addr_space.token); }
 
             let mut trap_ctx = current_trap_ctx().clone();
             trap_ctx.user_x[10] = 0;

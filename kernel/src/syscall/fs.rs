@@ -275,7 +275,8 @@ pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     if inode.metadata().mode != InodeMode::IFDIR {
         return Err(Errno::ENOTDIR);
     }
-    current_process().inner.lock().cwd = inode.mnt_ns_path()?;
+    let mut proc_inner = current_process().inner.lock();
+    proc_inner.cwd = inode.mnt_ns_path(&proc_inner.mnt_ns)?;
     Ok(0)
 }
 

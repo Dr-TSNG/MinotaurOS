@@ -6,9 +6,12 @@ use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::cmp::{max, min};
 use core::ffi::CStr;
+use core::num::NonZeroUsize;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use bitflags::bitflags;
+use lazy_static::lazy_static;
 use log::{debug, info};
+use lru::LruCache;
 use xmas_elf::ElfFile;
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
@@ -39,6 +42,12 @@ bitflags! {
 }
 
 static TOKEN_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+lazy_static! {
+    static ref EXE_SNAPSHOTS: Mutex<LruCache<String, (AddressSpace, usize, Vec<Aux>)>> = {
+        Mutex::new(LruCache::new(NonZeroUsize::new(4).unwrap()))
+    };
+}
 
 pub struct AddressSpace {
     /// 地址空间标识
@@ -80,6 +89,26 @@ impl AddressSpace {
             info!("[addr_space] {:?} {:x?} - {:x?}", region.metadata().name, start, end)
         }
         addr_space
+    }
+
+    pub async fn from_inode(
+        mnt_ns: &MountNamespace,
+        inode: Arc<dyn Inode>,
+    ) -> SyscallResult<(Self, usize, Vec<Aux>)> {
+        let exe = inode.mnt_ns_path(mnt_ns)?;
+        let mut snapshots = EXE_SNAPSHOTS.lock();
+        if let Some(cached) = snapshots.get_mut(&exe) {
+            return Ok((cached.0.fork(), cached.1, cached.2.clone()));
+        }
+        drop(snapshots);
+
+        let data = inode.open(OpenFlags::O_RDONLY)?.read_all().await?;
+        let mut snapshot = Self::from_elf(mnt_ns, &data).await?;
+        let this = (snapshot.0.fork(), snapshot.1, snapshot.2.clone());
+        let mut snapshots = EXE_SNAPSHOTS.lock();
+        snapshots.put(exe.to_string(), snapshot);
+
+        Ok(this)
     }
 
     pub async fn from_elf(
@@ -196,14 +225,13 @@ impl AddressSpace {
             regions: BTreeMap::new(),
             pt_dirs: vec![],
             sysv_shm: self.sysv_shm.clone(),
-            brk: VirtAddr(0),
+            brk: self.brk,
         };
         forked.pt_dirs.push(root_pt_page);
         for region in self.regions.values_mut() {
             let forked_region = region.fork(self.root_pt);
             forked.map_region(forked_region);
         }
-        unsafe { local_hart().refresh_tlb(self.token); }
         forked
     }
 

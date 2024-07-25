@@ -8,9 +8,8 @@ use async_trait::async_trait;
 use downcast_rs::{DowncastSync, impl_downcast};
 use crate::fs::ffi::{InodeMode, OpenFlags};
 use crate::fs::file::{CharacterFile, DirFile, File, FileMeta, RegularFile};
-use crate::fs::file_system::FileSystem;
+use crate::fs::file_system::{FileSystem, MountNamespace};
 use crate::fs::page_cache::PageCache;
-use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
@@ -308,8 +307,8 @@ impl dyn Inode {
         self.do_readlink().await
     }
 
-    pub fn mnt_ns_path(&self) -> SyscallResult<String> {
-        let pre = current_process().inner.lock().mnt_ns.get_inode_snapshot(self)?.1;
+    pub fn mnt_ns_path(&self, mnt_ns: &MountNamespace) -> SyscallResult<String> {
+        let pre = mnt_ns.get_inode_snapshot(self)?.1;
         Ok(format!("{}{}", pre, self.metadata().path))
     }
 }
