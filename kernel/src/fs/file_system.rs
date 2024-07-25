@@ -82,7 +82,7 @@ static MNT_NS_ID_POOL: AtomicUsize = AtomicUsize::new(1);
 /// 挂载命名空间
 pub struct MountNamespace {
     pub mnt_ns_id: usize,
-    pub inode_cache: InodeCache,
+    pub caches: [InodeCache; 2],
     inner: Mutex<NSInner>,
 }
 
@@ -112,7 +112,7 @@ impl MountNamespace {
         let snapshot = (tree.fs.metadata().fsid, (tree.mnt_id, String::new()));
         Self {
             mnt_ns_id: MNT_NS_ID_POOL.fetch_add(1, Ordering::Acquire),
-            inode_cache: InodeCache::new(MAX_INODE_CACHE),
+            caches: core::array::from_fn(|_| InodeCache::new(MAX_INODE_CACHE)),
             inner: Mutex::new(NSInner { tree, snapshot: HashMap::from([snapshot]) }),
         }
     }
@@ -147,6 +147,7 @@ impl MountNamespace {
         assert!(is_absolute_path(path));
         let root = self.inner.lock().tree.fs.root();
         let inode = self.lookup_relative(root, &path[1..], follow_link).await?;
+        self.caches[follow_link as usize].insert(None, path.to_string(), &inode);
         Ok(inode)
     }
 
@@ -185,6 +186,7 @@ impl MountNamespace {
                     inode = inode.lookup_name(&name).await?;
                 }
             } else {
+                self.caches[follow_link as usize].insert(Some(&parent), path.to_string(), &inode);
                 break Ok(inode);
             }
         }
@@ -202,6 +204,7 @@ impl MountNamespace {
         let mut inner = self.inner.lock();
         let mnt_id = Self::do_mount(&mut inner.tree.sub_trees, fs.clone(), absolute_path)?;
         inner.snapshot.insert(fs.metadata().fsid, (mnt_id, absolute_path.to_string()));
+        self.caches.iter().for_each(|cache| cache.invalidate());
         inode.metadata().inner.lock().mounts.insert(dir_name, fs.root());
         Ok(())
     }
@@ -214,6 +217,7 @@ impl MountNamespace {
         let mut inner = self.inner.lock();
         let tree = Self::do_unmount(&mut inner.tree.sub_trees, absolute_path)?;
         inner.snapshot.remove(&tree.fs.metadata().fsid);
+        self.caches.iter().for_each(|cache| cache.invalidate());
         inode.metadata().inner.lock().mounts.remove(&dir_name);
         Ok(())
     }
