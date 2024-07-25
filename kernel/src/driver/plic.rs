@@ -16,7 +16,7 @@ impl PLIC {
     }
 
     pub(super) fn init(&self, harts: usize) {
-        for context_id in 0..harts {
+        for context_id in 1..harts + 1 {
             self.set_threshold(context_id, 0);
             for intr_id in self.devices.lock().keys() {
                 self.enable_intr(context_id, *intr_id);
@@ -29,7 +29,8 @@ impl PLIC {
         self.devices.lock().insert(intr_id, Arc::downgrade(&device));
     }
 
-    pub fn handle_irq(&self, context_id: usize) {
+    pub fn handle_irq(&self, hart_id: usize) {
+        let context_id = hart_id + 1;
         let intr = self.claim(context_id);
         if intr != 0 {
             if let Some(device) = self.devices.lock().get(&intr) {
