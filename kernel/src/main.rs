@@ -76,6 +76,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     clear_bss();
     mm::allocator::init_heap();
     hart::init(hart_id);
+    trap::init();
     driver::init_dtb(dtb_paddr);
     mm::allocator::init_user();
     debug::logger::init();
@@ -89,7 +90,6 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     println!("╚══════════════════════╩═══════════════╝");
 
     sched::init();
-    trap::init();
     mm::vm_init(true)?;
     driver::init_driver()?;
     builtin::init();
@@ -123,6 +123,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
 
 fn start_secondary_hart(hart_id: usize) -> SyscallResult<!> {
     hart::init(hart_id);
+    trap::init();
     mm::vm_init(false)?;
     info!("Start secondary hart {}", hart_id);
 
