@@ -6,6 +6,7 @@ use crate::arch::{PAGE_SIZE, PhysPageNum};
 use crate::fs::inode::Inode;
 use crate::mm::allocator::{alloc_user_frames, UserFrameTracker};
 use crate::result::SyscallResult;
+use crate::sched::schedule;
 use crate::sync::mutex::ReMutex;
 
 static HOLDERS: AtomicUsize = AtomicUsize::new(0);
@@ -82,8 +83,9 @@ impl PageCache {
 
         let mut cur = 0;
         offset = offset % PAGE_SIZE;
-        let mut inner = self.0.lock();
         for page_num in page_start..page_end {
+            schedule().await;
+            let mut inner = self.0.lock();
             let page = match inner.pages.get(&page_num) {
                 Some(frame) => frame,
                 None => {
@@ -116,8 +118,9 @@ impl PageCache {
 
         let mut cur = 0;
         offset %= PAGE_SIZE;
-        let mut inner = self.0.lock();
         for page_num in page_start..page_end {
+            schedule().await;
+            let mut inner = self.0.lock();
             let page = match inner.pages.get_mut(&page_num) {
                 Some(page) => page,
                 None => {

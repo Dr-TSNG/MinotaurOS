@@ -79,7 +79,6 @@ impl Future for IdleFuture {
 
 async fn thread_loop(thread: Arc<Thread>) {
     loop {
-        thread.event_bus.reset();
         trap_return();
         trap_from_user().await;
         check_signal();
@@ -92,6 +91,12 @@ async fn thread_loop(thread: Arc<Thread>) {
 
 pub async fn yield_now() {
     YieldFuture(false).await;
+}
+
+pub async fn schedule() {
+    if local_hart().timer_during_sys >= 1 {
+        yield_now().await;
+    }
 }
 
 pub async fn suspend_now<T, F>(timeout: Option<Duration>, event: Event, fut: F) -> SyscallResult<T>

@@ -22,6 +22,8 @@ use crate::trap::{__restore_to_user, set_kernel_trap_entry, set_user_trap_entry}
 pub fn trap_return() {
     local_hart().disable_kintr();
     set_user_trap_entry();
+    current_thread().event_bus.reset();
+    local_hart().timer_during_sys = 0;
     trace!("Trap return to user, pc: {:#x}", current_trap_ctx().get_pc());
 
     unsafe {
