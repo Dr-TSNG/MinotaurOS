@@ -11,6 +11,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
+use core::sync::atomic::Ordering;
 use log::{info, warn};
 use tap::{Pipe, Tap};
 use crate::arch::VirtAddr;
@@ -26,7 +27,7 @@ use crate::process::monitor::MONITORS;
 use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::Thread;
 use crate::process::thread::tid::TidTracker;
-use crate::processor::{current_process, current_thread, current_trap_ctx};
+use crate::processor::{current_process, current_thread, current_trap_ctx, SYSTEM_SHUTDOWN};
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::ITimerVal;
@@ -376,4 +377,12 @@ impl Process {
             }
         }
     }
+}
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        if self.pid.0 == 1 {
+            SYSTEM_SHUTDOWN.store(true, Ordering::Relaxed);
+        }
+    }    
 }

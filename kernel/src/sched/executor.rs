@@ -1,7 +1,8 @@
 use alloc::collections::VecDeque;
 use async_task::{Runnable, ScheduleInfo, Task, WithInfo};
 use core::future::Future;
-use crate::process::monitor::MONITORS;
+use core::sync::atomic::Ordering;
+use crate::processor::SYSTEM_SHUTDOWN;
 use crate::sync::mutex::IrqMutex;
 
 struct TaskQueue {
@@ -47,14 +48,11 @@ pub fn spawn<F>(future: F) -> (Runnable, Task<F::Output>)
 
 /// 开始执行任务
 pub fn run_executor() {
-    loop {
+    while !SYSTEM_SHUTDOWN.load(Ordering::Relaxed) {
         if let Some(task) = TASK_QUEUE.take() {
             task.run();
         } else {
             core::hint::spin_loop();
-        }
-        if MONITORS.lock().process.init_proc().strong_count() == 0 {
-            break;
         }
     }
 }

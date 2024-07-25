@@ -108,7 +108,15 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     arch::enable_timer_interrupt();
     run_executor();
 
-    info!("Init process exited, shutdown system");
+    info!("Init process exited, wait for other harts to stop");
+    for secondary in 0..BOARD_INFO.smp {
+        if secondary != hart_id {
+            while sbi::hart_status(secondary).unwrap() != hart_state::STOPPED {
+                core::hint::spin_loop();
+            }
+        }
+    }
+    info!("Shutdown system");
     shutdown();
 }
 
@@ -122,7 +130,7 @@ fn start_secondary_hart(hart_id: usize) -> SyscallResult<!> {
     arch::enable_timer_interrupt();
     run_executor();
 
-    info!("Stop hart {}", hart_id);
+    info!("Init process exited, stop hart {}", hart_id);
     sbi::stop_hart(hart_id).unwrap();
     unreachable!()
 }
