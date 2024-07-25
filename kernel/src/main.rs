@@ -37,7 +37,6 @@ mod trap;
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 use core::sync::atomic::{AtomicBool, Ordering};
-use core::time::Duration;
 use log::{error, info, warn};
 use sbi_spec::hsm::hart_state;
 use arch::shutdown;
@@ -46,16 +45,11 @@ use crate::arch::sbi;
 use crate::config::{KERNEL_PADDR_BASE, KERNEL_STACK_SIZE, LINKAGE_EBSS, LINKAGE_SBSS};
 use crate::debug::console::dmesg_flush_tty;
 use crate::driver::BOARD_INFO;
-use crate::fs::page_cache::PageCache;
-use crate::process::monitor::MONITORS;
 use crate::process::Process;
 use crate::processor::hart;
 use crate::processor::hart::{KERNEL_STACK, local_hart};
 use crate::result::SyscallResult;
 use crate::sched::executor::run_executor;
-use crate::sched::spawn_kernel_thread;
-use crate::sched::time::cpu_time;
-use crate::sched::timer::TimerFuture;
 use crate::sync::block_on;
 
 global_asm!(include_str!("entry.asm"));
@@ -99,9 +93,6 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     let mnt_ns = fs::init()?;
     info!("Spawn init process");
     block_on(Process::new_initproc(mnt_ns, data))?;
-
-    #[cfg(feature = "monitor")]
-    spawn_kernel_thread(TimerFuture::new(Duration::from_secs(1), monitor));
 
     for secondary in 0..BOARD_INFO.smp {
         if secondary != hart_id {
@@ -167,16 +158,6 @@ fn main(hart_id: usize, dtb_paddr: usize) -> ! {
     }
 }
 
-fn monitor() -> Duration {
-    let pc_holder = PageCache::holders();
-    let pc_alloc = PageCache::allocated();
-    println!(
-        "[monitor] procs {}, pc_holder {}, pc_alloc {}",
-        MONITORS.lock().process.count(), pc_holder, pc_alloc,
-    );
-    cpu_time() + Duration::from_secs(1)
-}
-
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     error!("----------------------------------");
@@ -196,6 +177,5 @@ fn panic(info: &PanicInfo) -> ! {
     let pid = thread.map(|t| t.process.pid.0);
     let tid = thread.map(|t| t.tid.0);
     error!("Context: pid {:?}, tid {:?}", pid, tid);
-    monitor();
     shutdown()
 }

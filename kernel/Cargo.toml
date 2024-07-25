@@ -54,7 +54,6 @@ info = []
 debug = []
 trace = []
 strace = []
-monitor = []
 tombstone = []
 
 default = ["error"]
