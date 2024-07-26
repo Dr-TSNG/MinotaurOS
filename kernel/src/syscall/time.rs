@@ -152,6 +152,6 @@ pub fn sys_times(buf: usize) -> SyscallResult<usize> {
 }
 
 pub fn sys_gettimeofday(tv: usize, _tz: usize) -> SyscallResult<usize> {
-    *user_transmute_w::<TimeSpec>(tv)?.ok_or(Errno::EINVAL)? = real_time().into();
+    *user_transmute_w::<TimeVal>(tv)?.ok_or(Errno::EINVAL)? = real_time().into();
     Ok(0)
 }
