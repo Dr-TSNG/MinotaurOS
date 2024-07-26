@@ -1,6 +1,6 @@
-use alloc::vec::Vec;
 use core::cmp::max;
 use bitvec_rs::BitVec;
+use buddy_system_allocator::FrameAllocator;
 use log::warn;
 use crate::arch::{kvaddr_to_paddr, PAGE_SIZE, PhysPageNum};
 use crate::config::LINKAGE_EKERNEL;
@@ -8,8 +8,9 @@ use crate::driver::GLOBAL_MAPPINGS;
 use crate::println;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::IrqMutex;
+use crate::sync::once::LateInit;
 
-static USER_ALLOCATOR: IrqMutex<UserFrameAllocator> = IrqMutex::new(UserFrameAllocator::new());
+static USER_ALLOCATOR: LateInit<IrqMutex<UserFrameAllocator>> = LateInit::new();
 
 pub struct UserFrameTracker {
     pub ppn: PhysPageNum,
@@ -22,35 +23,34 @@ impl Drop for UserFrameTracker {
     }
 }
 
-struct UserFrameAllocator(Vec<Segment>);
+struct UserFrameAllocator(FrameAllocator, usize, usize);
 
 impl UserFrameAllocator {
-    const fn new() -> Self {
-        Self(Vec::new())
+    fn new() -> Self {
+        Self(FrameAllocator::new(), 0, 0)
     }
 
-    fn add_to_heap(&mut self, start: PhysPageNum, end: PhysPageNum) {
-        self.0.push(Segment::new(start, end));
+    fn add_frame(&mut self, start: PhysPageNum, end: PhysPageNum) {
+        self.0.add_frame(start.0, end.0);
+        self.1 += end - start;
     }
 
     fn alloc(&mut self, pages: usize) -> SyscallResult<UserFrameTracker> {
-        for segment in self.0.iter_mut() {
-            if let Some(tracker) = segment.alloc(pages) {
-                return Ok(tracker);
+        match self.0.alloc(pages) {
+            Some(ppn) => {
+                self.2 += pages;
+                Ok(UserFrameTracker { ppn: PhysPageNum(ppn), pages })
+            }
+            None => {
+                warn!("[UserFrameAllocator] Out of memory for {} pages", pages);
+                Err(Errno::ENOSPC)
             }
         }
-        warn!("[UserFrameAllocator] Out of memory for {} pages", pages);
-        Err(Errno::ENOSPC)
     }
 
     fn dealloc(&mut self, tracker: &UserFrameTracker) {
-        for segment in self.0.iter_mut() {
-            if segment.start <= tracker.ppn && tracker.ppn < segment.end {
-                segment.dealloc(tracker);
-                return;
-            }
-        }
-        panic!("Dealloc user frame {:?} for {} pages failed", tracker.ppn, tracker.pages);
+        self.0.dealloc(tracker.ppn.0, tracker.pages);
+        self.2 -= tracker.pages;
     }
 }
 
@@ -59,51 +59,6 @@ struct Segment {
     end: PhysPageNum,
     bitmap: BitVec,
     cur: usize,
-}
-
-impl Segment {
-    fn new(start: PhysPageNum, end: PhysPageNum) -> Self {
-        let bitmap = BitVec::from_elem(end.0 - start.0, false);
-        Self { start, end, bitmap, cur: end.0 - start.0 }
-    }
-
-    fn alloc(&mut self, pages: usize) -> Option<UserFrameTracker> {
-        let mut now = self.cur + 1;
-        let mut count = 0;
-        while now != self.cur {
-            if now >= self.end.0 - self.start.0 {
-                now = 0;
-                count = 0;
-            }
-            if self.bitmap[now] {
-                count = 0;
-            } else {
-                count += 1;
-                if count == pages {
-                    let start = now + 1 - pages;
-                    for i in start..=now {
-                        self.bitmap.set(i, true);
-                    }
-                    self.cur = now;
-                    let tracker = UserFrameTracker {
-                        ppn: PhysPageNum(self.start.0 + start),
-                        pages,
-                    };
-                    return Some(tracker);
-                }
-            }
-            now += 1;
-        }
-        self.cur = self.end.0 - self.start.0;
-        None
-    }
-
-    fn dealloc(&mut self, tracker: &UserFrameTracker) {
-        let start = tracker.ppn.0 - self.start.0;
-        for i in start..start + tracker.pages {
-            self.bitmap.set(i, false);
-        }
-    }
 }
 
 /// 分配连续的用户页帧
@@ -118,20 +73,19 @@ pub fn alloc_user_frames(pages: usize) -> SyscallResult<UserFrameTracker> {
 }
 
 pub fn free_user_memory() -> usize {
-    let pages = USER_ALLOCATOR.lock().0.iter()
-        .flat_map(|seg| seg.bitmap.as_bytes())
-        .fold(0, |acc, byte| acc + byte.count_zeros());
-    pages as usize * PAGE_SIZE
+    let allocator = USER_ALLOCATOR.lock();
+    (allocator.1 - allocator.2) * PAGE_SIZE
 }
 
 pub fn init() {
-    let mut allocator = USER_ALLOCATOR.lock();
+    let mut allocator = UserFrameAllocator::new();
     for map in GLOBAL_MAPPINGS.iter() {
         if map.name.starts_with("[memory") {
             let start = max(map.phys_start, kvaddr_to_paddr(*LINKAGE_EKERNEL));
             let end = map.phys_end();
-            allocator.add_to_heap(start.into(), end.into());
+            allocator.add_frame(start.into(), end.into());
             println!("[kernel] Initialize user memory: {:?} - {:?}", start, end);
         }
     }
+    USER_ALLOCATOR.init(IrqMutex::new(allocator));
 }

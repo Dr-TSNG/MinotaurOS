@@ -7,7 +7,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use hashbrown::HashMap;
 use log::debug;
 use crate::driver::ffi::sep_dev;
-use crate::config::MAX_INODE_CACHE;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::inode::Inode;
 use crate::fs::inode_cache::InodeCache;
