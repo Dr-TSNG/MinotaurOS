@@ -94,7 +94,7 @@ pub async fn yield_now() {
 }
 
 pub async fn schedule() {
-    if local_hart().timer_during_sys >= 1 {
+    if local_hart().ctx.timer_during_sys >= 1 {
         yield_now().await;
     }
 }

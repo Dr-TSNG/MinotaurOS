@@ -20,6 +20,7 @@ use log::{debug, warn};
 use num_enum::FromPrimitive;
 use crate::fs::fd::FdNum;
 use crate::process::{Gid, Pid, Tid};
+use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::strace;
 
@@ -169,6 +170,7 @@ pub enum SyscallCode {
 
 pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
     let scode = SyscallCode::from(code);
+    local_hart().ctx.last_syscall = scode;
     let result = match scode {
         SyscallCode::Shutdown => syscall!(sys_shutdown),
         SyscallCode::Getcwd => syscall!(sys_getcwd, args[0], args[1]),

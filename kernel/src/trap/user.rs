@@ -23,7 +23,16 @@ pub fn trap_return() {
     local_hart().disable_kintr();
     set_user_trap_entry();
     current_thread().event_bus.reset();
-    local_hart().timer_during_sys = 0;
+
+    // if local_hart().ctx.timer_during_sys > 1 {
+    //     warn!(
+    //         "Timer interrupt in kernel: {}, syscall: {:?}",
+    //         local_hart().ctx.timer_during_sys,
+    //         local_hart().ctx.last_syscall,
+    //     );
+    // }
+
+    local_hart().ctx.timer_during_sys = 0;
     trace!("Trap return to user, pc: {:#x}", current_trap_ctx().get_pc());
 
     unsafe {

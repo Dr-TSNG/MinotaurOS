@@ -32,7 +32,7 @@ fn trap_from_kernel() -> bool {
             local_hart().last_page_fault = handle_page_fault(VirtAddr(sepc), ASPerms::X);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
-            local_hart().timer_during_sys += 1;
+            local_hart().ctx.timer_during_sys += 1;
             query_timer();
             set_next_trigger();
         }
