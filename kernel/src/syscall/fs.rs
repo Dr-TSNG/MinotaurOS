@@ -22,7 +22,7 @@ use crate::mm::protect::{user_slice_r, user_slice_w, user_transmute_r, user_tran
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::{TimeSpec, TimeVal, UTIME_NOW, UTIME_OMIT};
+use crate::sched::ffi::{TimeSpec, UTIME_NOW, UTIME_OMIT};
 use crate::sched::iomultiplex::{FdSetRWE, IOFormat, IOMultiplexFuture};
 use crate::sched::suspend_now;
 use crate::sched::time::real_time;
@@ -517,7 +517,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     let rfds = user_transmute_w::<FdSet>(readfds)?;
     let wfds = user_transmute_w::<FdSet>(writefds)?;
     let efds = user_transmute_w::<FdSet>(exceptfds)?;
-    let timeout = user_transmute_r::<TimeVal>(timeout)?.cloned().map(Duration::from);
+    let timeout = user_transmute_r::<TimeSpec>(timeout)?.cloned().map(Duration::from);
     let sigmask = user_transmute_r::<SigSet>(sigmask)?.cloned();
     debug!(
         "[sys_pselect]: readfds {:?}, writefds {:?}, exceptfds {:?}, timeout {:?}, sigmask {:?}",

@@ -31,9 +31,12 @@ pub fn sys_setitimer(which: i32, new_value: usize, old_value: usize) -> SyscallR
 
     let mut proc_inner = current_process().inner.lock();
     if old_value != 0 {
-        let rest_time = Duration::from(proc_inner.timers[which as usize].value)
-            .checked_sub(now).unwrap_or_default();
-        *user_transmute_w::<TimeVal>(old_value)?.ok_or(Errno::EINVAL)? = rest_time.into();
+        let timer = proc_inner.timers[which as usize].clone();
+        let rest_time = Duration::from(timer.value).checked_sub(now).unwrap_or_default();
+        *user_transmute_w::<ITimerVal>(old_value)?.ok_or(Errno::EINVAL)? = ITimerVal {
+            interval: timer.interval,
+            value: rest_time.into(),
+        }
     }
 
     match which {
