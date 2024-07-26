@@ -112,7 +112,7 @@ impl MountNamespace {
         let snapshot = (tree.fs.metadata().fsid, (tree.mnt_id, String::new()));
         Self {
             mnt_ns_id: MNT_NS_ID_POOL.fetch_add(1, Ordering::Acquire),
-            caches: core::array::from_fn(|_| InodeCache::new(MAX_INODE_CACHE)),
+            caches: core::array::from_fn(|_| InodeCache::new()),
             inner: Mutex::new(NSInner { tree, snapshot: HashMap::from([snapshot]) }),
         }
     }
