@@ -1,16 +1,12 @@
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
 use core::cmp::min;
-use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::arch::{PAGE_SIZE, PhysPageNum};
 use crate::fs::inode::Inode;
 use crate::mm::allocator::{alloc_user_frames, UserFrameTracker};
 use crate::result::SyscallResult;
 use crate::sched::schedule;
 use crate::sync::mutex::ReMutex;
-
-static HOLDERS: AtomicUsize = AtomicUsize::new(0);
-static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
 pub struct PageCache(ReMutex<PageCacheInner>);
 
@@ -26,22 +22,12 @@ struct Page {
 
 impl Page {
     fn new(frame: UserFrameTracker) -> Self {
-        ALLOCATED.fetch_add(1, Ordering::Relaxed);
         Self { frame, dirty: false }
     }
 }
 
 impl PageCache {
-    pub fn holders() -> usize {
-        HOLDERS.load(Ordering::Relaxed)
-    }
-
-    pub fn allocated() -> usize {
-        ALLOCATED.load(Ordering::Relaxed)
-    }
-
     pub fn new() -> Arc<Self> {
-        HOLDERS.fetch_add(1, Ordering::Relaxed);
         Arc::new(Self(ReMutex::new(PageCacheInner {
             deleted: false,
             pages: BTreeMap::new(),
@@ -94,11 +80,11 @@ impl PageCache {
                     if !inner.deleted {
                         inode.read_direct(page_buf, (page_num * PAGE_SIZE) as isize).await?;
                     }
-                    inner.pages.insert(page_num, Page::new(frame));
-                    inner.pages.get(&page_num).unwrap()
+                    inner.pages.entry(page_num).or_insert(Page::new(frame))
                 }
             };
             let page_buf = page.frame.ppn.byte_array();
+            drop(inner);
             let len = min(buf.len() - cur, PAGE_SIZE - offset);
             buf[cur..cur + len].copy_from_slice(&page_buf[offset..offset + len]);
             cur += len;
@@ -125,14 +111,14 @@ impl PageCache {
                 Some(page) => page,
                 None => {
                     let frame = alloc_user_frames(1)?;
-                    inner.pages.insert(page_num, Page::new(frame));
-                    inner.pages.get_mut(&page_num).unwrap()
+                    inner.pages.entry(page_num).or_insert(Page::new(frame))
                 }
             };
             let page_buf = page.frame.ppn.byte_array();
+            page.dirty = true;
+            drop(inner);
             let len = min(buf.len() - cur, PAGE_SIZE - offset);
             page_buf[offset..offset + len].copy_from_slice(&buf[cur..cur + len]);
-            page.dirty = true;
             cur += len;
             offset = 0;
         }
@@ -185,15 +171,8 @@ impl PageCache {
     }
 }
 
-impl Drop for Page {
-    fn drop(&mut self) {
-        ALLOCATED.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
 impl Drop for PageCacheInner {
     fn drop(&mut self) {
-        HOLDERS.fetch_sub(1, Ordering::Relaxed);
         if !self.deleted {
             for page in self.pages.values() {
                 if page.dirty {
