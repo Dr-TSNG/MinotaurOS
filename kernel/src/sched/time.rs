@@ -10,7 +10,7 @@ use crate::sched::ffi::CLOCK_REALTIME;
 use crate::sched::timer::sched_timer;
 use crate::sync::mutex::IrqMutex;
 
-const MSEC_PER_SEC: usize = 1000;
+const MICROS_PER_SEC: usize = 1000000;
 const TICKS_PER_SEC: usize = 100;
 
 /// 获取从系统启动到现在的时间
@@ -18,8 +18,8 @@ pub fn cpu_time() -> Duration {
     if !BOARD_INFO.is_initialized() {
         return Duration::ZERO;
     }
-    let ms = arch::hardware_ts() / (BOARD_INFO.freq / MSEC_PER_SEC);
-    Duration::from_millis(ms as u64)
+    let ms = arch::hardware_ts() / (BOARD_INFO.freq / MICROS_PER_SEC);
+    Duration::from_micros(ms as u64)
 }
 
 /// 获取实时时间

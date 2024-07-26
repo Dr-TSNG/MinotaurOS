@@ -115,7 +115,7 @@ pub fn sys_clock_gettime(clock_id: usize, buf: usize) -> SyscallResult<usize> {
 pub fn sys_clock_getres(clock_id: usize, buf: usize) -> SyscallResult<usize> {
     let writeback = user_transmute_w::<TimeSpec>(buf)?.ok_or(Errno::EINVAL)?;
     if matches!(clock_id, CLOCK_PROCESS_CPUTIME_ID | CLOCK_THREAD_CPUTIME_ID) || GLOBAL_CLOCK.get(clock_id).is_some() {
-        *writeback = Duration::from_nanos(1).into();
+        *writeback = Duration::from_micros(1).into();
         Ok(0)
     } else {
         Err(Errno::EINVAL)
