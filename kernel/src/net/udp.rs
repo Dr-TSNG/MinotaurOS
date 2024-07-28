@@ -6,23 +6,21 @@ use core::future::Future;
 use core::ops::DerefMut;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
-use core::time::Duration;
 use log::{error, info, warn};
 use crate::fs::ffi::OpenFlags;
 use smoltcp::iface::SocketHandle;
 use smoltcp::phy::PacketMeta;
 use smoltcp::socket::udp;
-use smoltcp::socket::udp::{PacketMetadata, SendError, UdpMetadata};
+use smoltcp::socket::udp::{PacketMetadata, RecvError, SendError, UdpMetadata};
 use smoltcp::wire::IpEndpoint;
 use crate::fs::file::{File, FileMeta};
 use crate::net::iface::NET_INTERFACE;
-use crate::net::{MAX_BUFFER_SIZE, RecvFromFlags};
+use crate::net::RecvFromFlags;
 use crate::net::netaddress::{SockAddr, SockAddrIn4, specify_ipep, unspecified_ipep};
 use crate::net::socket::{Socket};
 use crate::net::socket::{SocketType, BUFFER_SIZE};
 use crate::result::{Errno, SyscallResult};
 use crate::result::Errno::EOPNOTSUPP;
-use crate::sched::{sleep_for, yield_now};
 use crate::sync::mutex::Mutex;
 
 pub struct UdpSocket {
@@ -42,11 +40,11 @@ impl UdpSocket {
     pub fn new() -> Self {
         let tx_buf = udp::PacketBuffer::new(
             vec![PacketMetadata::EMPTY, PacketMetadata::EMPTY],
-            vec![0u8; MAX_BUFFER_SIZE],
+            vec![0u8; BUFFER_SIZE],
         );
         let rx_buf = udp::PacketBuffer::new(
             vec![PacketMetadata::EMPTY, PacketMetadata::EMPTY],
-            vec![0u8; MAX_BUFFER_SIZE],
+            vec![0u8; BUFFER_SIZE],
         );
         let socket = udp::Socket::new(rx_buf, tx_buf);
         let mut net = NET_INTERFACE.lock();
@@ -214,12 +212,6 @@ impl Socket for UdpSocket {
             self.do_bind(unspecified_ipep())?;
         }
         let len = UdpRecvFuture::new(self.handle, flags, buf, src).await?;
-        if len > MAX_BUFFER_SIZE / 2 {
-            // need to be slow
-            sleep_for(Duration::from_millis(1)).await?;
-        } else {
-            yield_now().await;
-        }
         Ok(len as isize)
     }
 
@@ -237,12 +229,6 @@ impl Socket for UdpSocket {
             None => self.inner.lock().remote_endpoint.ok_or(Errno::ENOTCONN)?,
         };
         let len = UdpSendFuture::new(self.handle, flags, buf, dest).await?;
-        if len > MAX_BUFFER_SIZE / 2 {
-            // need to be slow
-            sleep_for(Duration::from_millis(1)).await?;
-        } else {
-            yield_now().await;
-        }
         Ok(len as isize)
     }
 }
@@ -311,7 +297,10 @@ impl<'a> Future for UdpRecvFuture<'a> {
                 Ok(recv) => recv,
                 Err(e) => {
                     warn!("[udp] (handle {}) recv: recv error {}", this.handle, e);
-                    return Poll::Ready(Err(Errno::ENOTCONN));
+                    return match e {
+                        RecvError::Exhausted => Poll::Ready(Err(Errno::ENOTCONN)),
+                        RecvError::Truncated => Poll::Ready(Err(Errno::EMSGSIZE)),
+                    }
                 }
             };
             (recv.0, recv.1.endpoint)

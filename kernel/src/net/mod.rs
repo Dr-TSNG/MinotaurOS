@@ -6,8 +6,6 @@ mod tcp;
 mod udp;
 mod unix;
 
-const MAX_BUFFER_SIZE: usize = 1 << 17;
-
 pub use crate::net::socket::Socket;
 pub use crate::net::socket::{SocketType, RecvFromFlags};
 pub use crate::net::tcp::TCP_MSS;

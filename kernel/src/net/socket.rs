@@ -16,7 +16,7 @@ pub const AF_INET: u16 = 0x0002;
 pub const AF_INET6: u16 = 0x000a;
 
 
-pub const BUFFER_SIZE: usize = 1 << 17;
+pub const BUFFER_SIZE: usize = 1 << 18;
 
 /// shutdown
 #[allow(unused)]

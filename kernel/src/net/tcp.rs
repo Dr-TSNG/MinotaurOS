@@ -17,14 +17,14 @@ use crate::net::iface::NET_INTERFACE;
 use crate::net::socket::{Socket, SocketType, BUFFER_SIZE};
 use crate::net::netaddress::{SockAddr, SockAddrIn4, specify_ipep, unspecified_ipep};
 use crate::net::socket::{SHUT_WR};
-use crate::net::{MAX_BUFFER_SIZE, RecvFromFlags};
+use crate::net::RecvFromFlags;
 use crate::result::{Errno, SyscallResult};
-use crate::sched::{sleep_for, yield_now};
+use crate::sched::yield_now;
 use crate::sync::mutex::Mutex;
 
 pub const TCP_MSS_DEFAULT: u32 = 1 << 15;
-pub const TCP_MSS: u32 = if TCP_MSS_DEFAULT > MAX_BUFFER_SIZE as u32 {
-    MAX_BUFFER_SIZE as u32
+pub const TCP_MSS: u32 = if TCP_MSS_DEFAULT > BUFFER_SIZE as u32 {
+    BUFFER_SIZE as u32
 } else {
     TCP_MSS_DEFAULT
 };
@@ -45,8 +45,8 @@ struct TcpInner {
 
 impl TcpSocket {
     pub fn new() -> Self {
-        let tx_buf = tcp::SocketBuffer::new(vec![0; MAX_BUFFER_SIZE]);
-        let rx_buf = tcp::SocketBuffer::new(vec![0; MAX_BUFFER_SIZE]);
+        let tx_buf = tcp::SocketBuffer::new(vec![0; BUFFER_SIZE]);
+        let rx_buf = tcp::SocketBuffer::new(vec![0; BUFFER_SIZE]);
         let socket = tcp::Socket::new(rx_buf, tx_buf);
         let mut net = NET_INTERFACE.lock();
         let handle = net.sockets.add(socket);
@@ -192,6 +192,8 @@ impl Socket for TcpSocket {
                         return Err(Errno::EINVAL);
                     }
                     info!("[tcp] (handle {}) Connect start", inner.handle);
+                    drop(net);
+                    yield_now().await;
                 }
                 tcp::State::SynSent => {
                     info!("[tcp] (handle {}) Connecting, state {}", inner.handle, socket.state());
@@ -334,21 +336,11 @@ impl Socket for TcpSocket {
         flags: RecvFromFlags,
         dest: Option<&mut SockAddr>,
     ) -> SyscallResult<isize> {
-        match TcpRecvFuture::new(self, buf, flags).await {
-            Ok(len) => {
-                if len > MAX_BUFFER_SIZE / 2 {
-                    // need to be slow
-                    sleep_for(Duration::from_millis(2)).await?;
-                } else {
-                    yield_now().await;
-                }
-                if let Some(dest) = dest {
-                    *dest = self.peer_name().unwrap();
-                }
-                Ok(len as isize)
-            }
-            Err(e) => Err(e)
+        let len = TcpRecvFuture::new(self, buf, flags).await?;
+        if let Some(dest) = dest {
+            *dest = self.peer_name().unwrap();
         }
+        Ok(len as isize)
     }
 
     async fn send(
@@ -357,20 +349,8 @@ impl Socket for TcpSocket {
         flags: RecvFromFlags,
         _: Option<SockAddr>,
     ) -> SyscallResult<isize> {
-        let future = TcpSendFuture::new(self, buf, flags);
-        let ret = future.await;
-        match ret {
-            Ok(len) => {
-                if len > MAX_BUFFER_SIZE / 2 {
-                    // need to be slow
-                    sleep_for(Duration::from_millis(2)).await.expect("TODO: panic message");
-                } else {
-                    yield_now().await;
-                }
-                Ok(len as isize)
-            }
-            Err(e) => Err(e)
-        }
+        let len = TcpSendFuture::new(self, buf, flags).await?;
+        Ok(len as isize)
     }
 }
 
