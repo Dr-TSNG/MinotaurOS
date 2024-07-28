@@ -385,5 +385,5 @@ impl Drop for Process {
         if self.pid.0 == 1 {
             SYSTEM_SHUTDOWN.store(true, Ordering::Relaxed);
         }
-    }    
+    }
 }

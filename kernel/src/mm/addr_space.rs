@@ -7,6 +7,7 @@ use alloc::vec::Vec;
 use core::cmp::{max, min};
 use core::ffi::CStr;
 use core::num::NonZeroUsize;
+use core::ops::Range;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use bitflags::bitflags;
 use lazy_static::lazy_static;
@@ -14,7 +15,7 @@ use log::{debug, info};
 use lru::LruCache;
 use xmas_elf::ElfFile;
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
-use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_HEAP_SIZE_MAX, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::driver::GLOBAL_MAPPINGS;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file_system::MountNamespace;
@@ -58,10 +59,12 @@ pub struct AddressSpace {
     regions: BTreeMap<VirtPageNum, Box<dyn ASRegion>>,
     /// 该地址空间关联的页表帧
     pt_dirs: Vec<HeapFrameTracker>,
-    /// System V 共享内存 
+    /// System V 共享内存
     sysv_shm: Arc<Mutex<SysVShm>>,
-    /// 当前 brk 指针
-    brk: VirtAddr,
+    /// 堆范围
+    heap: Range<VirtPageNum>,
+    /// 堆最大位置
+    heap_max: VirtPageNum,
 }
 
 impl AddressSpace {
@@ -74,7 +77,8 @@ impl AddressSpace {
             regions: BTreeMap::new(),
             pt_dirs: vec![],
             sysv_shm: Default::default(),
-            brk: VirtAddr(0),
+            heap: VirtPageNum(0)..VirtPageNum(0),
+            heap_max: VirtPageNum(0),
         };
         addr_space.pt_dirs.push(root_pt_page);
         addr_space
@@ -197,7 +201,8 @@ impl AddressSpace {
             pages: uheap_top_vpn - uheap_bottom_vpn,
         });
         addr_space.map_region(region);
-        addr_space.brk = VirtAddr::from(uheap_top_vpn);
+        addr_space.heap = uheap_bottom_vpn..uheap_top_vpn;
+        addr_space.heap_max = uheap_bottom_vpn + USER_HEAP_SIZE_MAX / PAGE_SIZE;
         debug!("[addr_space] Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
 
         let mut auxv: Vec<Aux> = Vec::with_capacity(64);
@@ -225,7 +230,8 @@ impl AddressSpace {
             regions: BTreeMap::new(),
             pt_dirs: vec![],
             sysv_shm: self.sysv_shm.clone(),
-            brk: self.brk,
+            heap: self.heap.clone(),
+            heap_max: self.heap_max,
         };
         forked.pt_dirs.push(root_pt_page);
         for region in self.regions.values_mut() {
@@ -265,32 +271,23 @@ impl AddressSpace {
         result
     }
 
-    pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult<usize> {
-        let heap_start = self.regions
-            .values()
-            .find(|region| region.metadata().name.as_deref() == Some("[heap]"))
-            .map(|region| region.metadata().start)
-            .unwrap();
-        if addr.floor() < heap_start {
-            return Ok(self.brk.0);
+    pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult<VirtPageNum> {
+        if addr.floor() < self.heap.start {
+            return Ok(self.heap.end);
         }
-        if let Some((upper_vpn, _)) = self.regions.range(heap_start..).skip(1).next() {
-            if addr.floor() >= *upper_vpn {
-                return Err(Errno::ENOMEM);
-            }
+        if addr.floor() >= self.heap_max {
+            return Err(Errno::ENOMEM);
         }
-        let mut brk = self.unmap_region(heap_start).unwrap();
-        let heap_end = brk.metadata().start + brk.metadata().pages;
-
-        if addr.ceil() < heap_end {
-            brk.split(0, heap_end - addr.ceil());
-        } else if addr.ceil() > heap_end {
-            brk.extend(addr.ceil() - heap_end);
+        let mut brk = self.unmap_region(self.heap.start).unwrap();
+        if addr.ceil() < self.heap.end {
+            brk.split(0, self.heap.end - addr.ceil());
+        } else if addr.ceil() > self.heap.end {
+            brk.extend(addr.ceil() - self.heap.end);
         }
-        self.brk = addr.ceil().into();
+        self.heap.end = addr.ceil().into();
         self.map_region(brk);
         unsafe { local_hart().refresh_tlb(self.token); }
-        Ok(self.brk.0)
+        Ok(self.heap.end)
     }
 
     pub fn mmap(
@@ -307,16 +304,14 @@ impl AddressSpace {
             self.munmap(start, pages)?;
             start
         } else {
-            let mut iter = self.regions
-                .iter()
-                .skip_while(|(_, region)| region.metadata().name.as_deref() != Some("[heap]"));
-            let mut region_low = iter.next().unwrap().1;
-            let mut region_high = iter.next().unwrap().1;
-            while region_low.metadata().end() + pages > region_high.metadata().start {
-                region_low = region_high;
-                region_high = iter.next().unwrap().1;
+            let mut iter = self.regions.range(self.heap_max..);
+            let mut left = self.heap_max;
+            let (mut right, mut region) = iter.next().unwrap();
+            while left + pages > *right {
+                left = region.metadata().end();
+                (right, region) = iter.next().unwrap();
             }
-            region_low.metadata().end()
+            region.metadata().end()
         };
         let metadata = ASRegionMeta { name, perms, start, pages };
         let region: Box<dyn ASRegion> = match inode {
@@ -354,16 +349,14 @@ impl AddressSpace {
             self.munmap(start, shm.len())?;
             start
         } else {
-            let mut iter = self.regions
-                .iter()
-                .skip_while(|(_, region)| region.metadata().name.as_deref() != Some("[heap]"));
-            let mut region_low = iter.next().unwrap().1;
-            let mut region_high = iter.next().unwrap().1;
-            while region_low.metadata().end() + shm.len() > region_high.metadata().start {
-                region_low = region_high;
-                region_high = iter.next().unwrap().1;
+            let mut iter = self.regions.range(self.heap_max..);
+            let mut left = self.heap_max;
+            let (mut right, mut region) = iter.next().unwrap();
+            while left + shm.len() > *right {
+                left = region.metadata().end();
+                (right, region) = iter.next().unwrap();
             }
-            region_low.metadata().end()
+            region.metadata().end()
         };
         let metadata = ASRegionMeta {
             name: Some(format!("/dev/shm/{}", id)),
