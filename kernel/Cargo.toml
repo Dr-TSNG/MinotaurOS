@@ -7,6 +7,16 @@ edition = "2021"
 macros = { path = "../macros" }
 riscv = { git = "https://github.com/Dr-TSNG/riscv" }
 lwext4_rust = { git = "https://github.com/Dr-TSNG/lwext4_rust" }
+smoltcp = { git = "https://github.com/Dr-TSNG/smoltcp", default-features = false, features = [
+    "alloc",
+    "log",
+    "medium-ip",
+    "proto-ipv4",
+    "proto-ipv6",
+    "socket-udp",
+    "socket-tcp",
+    "async",
+] }
 aligned = "0.4.2"
 async-task = { version = "4.7", default-features = false }
 async-trait = "0.1"
@@ -32,21 +42,6 @@ time = { version = "0.3", default-features = false }
 virtio-drivers = "0.7.4"
 xmas-elf = "0.7.0"
 zerocopy = { version = "0.7", features = ["derive"] }
-smoltcp = { version = "0.10.0", default-features = false, features = [
-    "alloc",
-    "log",
-    "medium-ethernet",
-    "medium-ip",
-    "proto-ipv4",
-    "proto-ipv6",
-    "proto-dhcpv4",
-    "proto-ipv4-fragmentation",
-    "socket-udp",
-    "socket-tcp",
-    "socket-dhcpv4",
-    "async",
-] }
-managed = { version = "0.8", default-features = false, features = ["map"] }
 
 [features]
 error = []

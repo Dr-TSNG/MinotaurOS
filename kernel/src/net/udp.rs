@@ -365,6 +365,7 @@ impl<'a> Future for UdpSendFuture<'a> {
         info!("[udp] (handle {}) send: start", self.handle);
         let meta = UdpMetadata {
             endpoint: self.dest,
+            local_address: None,
             meta: PacketMeta::default(),
         };
         info!("[udp] (handle {}) send: {} -> {}", self.handle, socket.endpoint(), self.dest);

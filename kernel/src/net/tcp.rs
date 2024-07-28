@@ -7,8 +7,7 @@ use core::future::Future;
 use core::ops::DerefMut;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
-use log::{error, info};
-use managed::ManagedSlice;
+use log::{error, info, warn};
 use smoltcp::socket::tcp;
 use smoltcp::wire::IpEndpoint;
 use smoltcp::iface::SocketHandle;
@@ -121,7 +120,7 @@ impl File for TcpSocket {
             || socket.state() == tcp::State::FinWait2
             || socket.state() == tcp::State::TimeWait
             || (inner.last_state == tcp::State::Listen
-                && socket.state() == tcp::State::Established)
+            && socket.state() == tcp::State::Established)
             || socket.state() == tcp::State::SynReceived
         {
             info!("[tcp] (handle {}) state changed from", inner.last_state);
@@ -196,6 +195,10 @@ impl Socket for TcpSocket {
                         return Err(Errno::EINVAL);
                     }
                     drop(net);
+                    yield_now().await;
+                }
+                tcp::State::SynSent => {
+                    info!("[tcp] (handle {}) Connecting, state {}", inner.handle, socket.state());
                     yield_now().await;
                 }
                 tcp::State::Established => {
@@ -417,7 +420,7 @@ impl<'a> Future for TcpAcceptFuture<'a> {
         info!("[tcp] (handle {}) accept: state {}", inner.handle, socket.state());
 
         if !socket.is_open() {
-            error!("[tcp] (handle {}) accept: socket is not open", inner.handle);
+            warn!("[tcp] (handle {}) accept: socket is not open", inner.handle);
             return Poll::Ready(Err(Errno::EINVAL));
         }
         if matches!(socket.state(), tcp::State::SynReceived | tcp::State::Established) {
@@ -435,22 +438,16 @@ impl<'a> Future for TcpAcceptFuture<'a> {
 
 struct TcpRecvFuture<'a> {
     socket: &'a TcpSocket,
-    buf: ManagedSlice<'a, u8>,
+    buf: &'a mut [u8],
     flags: RecvFromFlags,
 }
 
 impl<'a> TcpRecvFuture<'a> {
-    fn new<S>(socket: &'a TcpSocket, buf: S, flags: RecvFromFlags) -> Self
-    where
-        S: Into<ManagedSlice<'a, u8>>,
-    {
-        Self {
-            socket,
-            buf: buf.into(),
-            flags,
-        }
+    fn new(socket: &'a TcpSocket, buf: &'a mut [u8], flags: RecvFromFlags) -> Self {
+        Self { socket, buf, flags }
     }
 }
+
 impl<'a> Future for TcpRecvFuture<'a> {
     type Output = SyscallResult<usize>;
 
@@ -469,7 +466,7 @@ impl<'a> Future for TcpRecvFuture<'a> {
             return Poll::Ready(Ok(0));
         }
         if !socket.may_recv() {
-            error!("[tcp] (handle {}) recv: may_recv false", inner.handle);
+            warn!("[tcp] (handle {}) recv: may_recv false", inner.handle);
             return Poll::Ready(Err(Errno::ENOTCONN));
         }
         if !socket.can_recv() {
@@ -533,7 +530,7 @@ impl<'a> Future for TcpSendFuture<'a> {
         info!("[tcp] (handle {}) send: state {}", inner.handle, socket.state());
 
         if !socket.may_send() {
-            error!("[tcp] (handle {}) send: may_send false", inner.handle);
+            warn!("[tcp] (handle {}) send: may_send false", inner.handle);
             return Poll::Ready(Err(Errno::ENOTCONN));
         }
         if !socket.can_send() {
