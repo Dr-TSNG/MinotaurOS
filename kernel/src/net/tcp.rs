@@ -126,10 +126,7 @@ impl File for TcpSocket {
             info!("[tcp] (handle {}) state changed from {}", inner.handle, inner.last_state);
             Ok(true)
         } else {
-            info!(
-                "[tcp] (handle {}) pollin: nothing to read, last_state {}",
-                inner.handle, inner.last_state,
-            );
+            info!("[tcp] (handle {}) pollin: nothing to read", inner.handle);
             if let Some(waker) = &waker {
                 socket.register_recv_waker(waker);
             }
@@ -194,8 +191,7 @@ impl Socket for TcpSocket {
                         info!("[tcp] (handle {}) Connect error: {}", inner.handle, e);
                         return Err(Errno::EINVAL);
                     }
-                    drop(net);
-                    yield_now().await;
+                    info!("[tcp] (handle {}) Connect start", inner.handle);
                 }
                 tcp::State::SynSent => {
                     info!("[tcp] (handle {}) Connecting, state {}", inner.handle, socket.state());
@@ -208,11 +204,11 @@ impl Socket for TcpSocket {
                     return Ok(());
                 }
                 _ => {
-                    error!(
+                    warn!(
                         "[tcp] (handle {}) Connect: unexpected state {}",
                         inner.handle, socket.state(),
                     );
-                    panic!("unexpected state");
+                    socket.close();
                 }
             }
         }
@@ -483,7 +479,7 @@ impl<'a> Future for TcpRecvFuture<'a> {
         let this = self.get_mut();
         info!(
             "[tcp] (handle {}) Recv: {} <- {}",
-            inner.handle, socket.local_endpoint().unwrap(), socket.remote_endpoint().unwrap(),
+            inner.handle, inner.local_endpoint.unwrap(), inner.remote_endpoint.unwrap(),
         );
         let recv = if this.flags.contains(RecvFromFlags::MSG_PEEK) {
             socket.peek_slice(&mut this.buf)

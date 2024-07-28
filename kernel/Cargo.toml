@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 macros = { path = "../macros" }
 riscv = { git = "https://github.com/Dr-TSNG/riscv" }
-lwext4_rust = { git = "https://github.com/Dr-TSNG/lwext4_rust" }
+lwext4_rust = { git = "https://github.com/Dr-TSNG/lwext4_rust", rev = "a953c7a2" }
 smoltcp = { git = "https://github.com/Dr-TSNG/smoltcp", default-features = false, features = [
     "alloc",
     "log",
