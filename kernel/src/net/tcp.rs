@@ -123,7 +123,7 @@ impl File for TcpSocket {
             && socket.state() == tcp::State::Established)
             || socket.state() == tcp::State::SynReceived
         {
-            info!("[tcp] (handle {}) state changed from", inner.last_state);
+            info!("[tcp] (handle {}) state changed from {}", inner.handle, inner.last_state);
             Ok(true)
         } else {
             info!(
@@ -199,6 +199,7 @@ impl Socket for TcpSocket {
                 }
                 tcp::State::SynSent => {
                     info!("[tcp] (handle {}) Connecting, state {}", inner.handle, socket.state());
+                    drop(net);
                     yield_now().await;
                 }
                 tcp::State::Established => {

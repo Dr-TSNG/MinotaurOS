@@ -65,6 +65,7 @@ pub async fn sys_accept(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallRe
     };
     let new_fd = current_process().inner.lock()
         .fd_table.put(FileDescriptor::new(new_sock, false), 0)?;
+    info!("[sys_accept] new sockfd: {}", new_fd);
     Ok(new_fd as usize)
 }
 
@@ -156,7 +157,7 @@ pub fn sys_getsockopt(
     optval: usize,
     optlen: usize,
 ) -> SyscallResult<usize> {
-    info!("[sys_getsocket] sockfd: {}",sockfd);
+    info!("[sys_getsockopt] sockfd: {}",sockfd);
     match (level, optname) {
         (SOL_TCP, TCP_MAXSEG) => {
             *user_transmute_w::<u32>(optval)?.ok_or(Errno::EINVAL)? = TCP_MSS;
@@ -193,7 +194,7 @@ pub fn sys_setsockopt(
     optval_ptr: usize,
     optlen: u32,
 ) -> SyscallResult<usize> {
-    info!("[sys_setsocket] socketfd: {}",sockfd);
+    info!("[sys_setsockopt] socketfd: {}",sockfd);
     let socket = current_process().inner.lock()
         .fd_table.get(sockfd)?.file.as_socket()?;
 

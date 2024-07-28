@@ -532,59 +532,28 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
             if fd >= nfds as usize {
                 break;
             }
-            if let Some(readfds) = rfds.as_ref() {
-                if readfds.fds_bits[fd_slot] & (1 << offset) != 0 {
-                    if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
-                        warn!("[sys_pselect] bad fd {}", fd);
-                        return Err(Errno::EBADF);
+            let mut find_and_push = |set: &FdSet, event: PollEvents| {
+                if set.fds_bits[fd_slot] & (1 << offset) != 0 {
+                    let find = fds.iter_mut().find(|old_fd| old_fd.fd == fd as FdNum);
+                    if let Some(old_fd) = find {
+                        old_fd.events |= event;
+                    } else {
+                        fds.push(PollFd {
+                            fd: fd as i32,
+                            events: event,
+                            revents: PollEvents::empty(),
+                        });
                     }
-
-                    fds.push(PollFd {
-                        fd: fd as i32,
-                        events: PollEvents::POLLIN,
-                        revents: PollEvents::empty(),
-                    })
                 }
+            };
+            if let Some(readfds) = rfds.as_ref() {
+                find_and_push(readfds, PollEvents::POLLIN);
             }
             if let Some(writefds) = wfds.as_ref() {
-                if writefds.fds_bits[fd_slot] & (1 << offset) != 0 {
-                    if let Some(old_fd) = fds.last() {
-                        if old_fd.fd == fd as i32 {
-                            let events = old_fd.events | PollEvents::POLLOUT;
-                            fds.last_mut().unwrap().events = events;
-                        }
-                    } else {
-                        if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
-                            warn!("[sys_pselect] bad fd {}", fd);
-                            return Err(Errno::EBADF);
-                        }
-                        fds.push(PollFd {
-                            fd: fd as i32,
-                            events: PollEvents::POLLOUT,
-                            revents: PollEvents::empty(),
-                        })
-                    }
-                }
+                find_and_push(writefds, PollEvents::POLLOUT);
             }
             if let Some(exceptfds) = efds.as_ref() {
-                if exceptfds.fds_bits[fd_slot] & (1 << offset) != 0 {
-                    if let Some(old_fd) = fds.last() {
-                        if old_fd.fd == fd as i32 {
-                            let events = old_fd.events | PollEvents::POLLPRI;
-                            fds.last_mut().unwrap().events = events;
-                        }
-                    } else {
-                        if !proc_inner.fd_table.get(fd as FdNum).is_ok() {
-                            warn!("[sys_pselect] bad fd {}", fd);
-                            return Err(Errno::EBADF);
-                        }
-                        fds.push(PollFd {
-                            fd: fd as i32,
-                            events: PollEvents::POLLPRI,
-                            revents: PollEvents::empty(),
-                        })
-                    }
-                }
+                find_and_push(exceptfds, PollEvents::POLLPRI);
             }
         }
     }
