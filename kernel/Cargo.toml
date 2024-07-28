@@ -50,6 +50,7 @@ info = []
 debug = []
 trace = []
 strace = []
+nocolor = []
 tombstone = []
 
 default = ["error"]

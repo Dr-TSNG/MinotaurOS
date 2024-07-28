@@ -15,6 +15,28 @@ const LOG_LEVEL: LevelFilter = LevelFilter::Trace;
 #[cfg(not(any(feature = "error", feature = "warn", feature = "info", feature = "debug", feature = "trace")))]
 const LOG_LEVEL: LevelFilter = LevelFilter::Off;
 
+#[macro_export]
+#[cfg(feature = "nocolor")]
+macro_rules! with_color {
+    ($color_code: expr, $fmt: expr $(, $($arg: tt)+)?) => {
+        use crate::println;
+        println!($fmt, $($($arg)+)?);
+    }
+}
+
+#[macro_export]
+#[cfg(not(feature = "nocolor"))]
+macro_rules! with_color {
+    ($color_code: expr, $fmt: expr $(, $($arg: tt)+)?) => {
+        use crate::println;
+        println!(
+            concat!("\x1b[{}m", $fmt, "\x1b[0m"),
+            $color_code,
+            $($($arg)+)?
+        );
+    }
+}
+
 struct SimpleLogger;
 
 impl log::Log for SimpleLogger {
@@ -25,9 +47,9 @@ impl log::Log for SimpleLogger {
         if self.enabled(record.metadata()) {
             match local_hart().current_thread() {
                 Some(thread) => {
-                    println!(
-                        "\x1b[{}m[{:6?}] [{:5}] [HART {}] [{}, {}] | {}\x1b[0m",
+                    with_color!(
                         level_color(record.level()),
+                        "[{:6?}] [{:5}] [HART {}] [{}, {}] | {}",
                         cpu_time(),
                         record.level(),
                         local_hart().id,
@@ -37,9 +59,9 @@ impl log::Log for SimpleLogger {
                     );
                 }
                 None => {
-                    println!(
-                        "\x1b[{}m[{:6?}] [{:5}] [HART {}] kernel | {}\x1b[0m",
+                    with_color!(
                         level_color(record.level()),
+                        "[{:6?}] [{:5}] [HART {}] kernel | {}",
                         cpu_time(),
                         record.level(),
                         local_hart().id,
@@ -79,14 +101,14 @@ macro_rules! strace {
     ($fmt: literal $(, $($arg: tt)+)?) => {
         use crate::{
             debug::logger::STRACE_COLOR_CODE,
-            println,
+            with_color,
             processor::{current_process, current_thread},
             processor::hart::local_hart,
             sched::time::cpu_time,
         };
-        println!(
-            concat!("\x1b[{}m[{:6?}] [SCALL] [HART {}] [{}, {}] | ", $fmt ,"\x1b[0m"),
+        with_color!(
             STRACE_COLOR_CODE,
+            concat!("[{:6?}] [SCALL] [HART {}] [{}, {}] | ", $fmt),
             cpu_time(),
             local_hart().id,
             current_process().pid.0,
