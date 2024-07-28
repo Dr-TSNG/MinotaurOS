@@ -146,6 +146,7 @@ impl Process {
             task.root_pt = addr_space.root_pt;
             proc_inner.addr_space = addr_space;
             proc_inner.fd_table.cloexec();
+            proc_inner.timers = Default::default();
             proc_inner.exe = inode.mnt_ns_path(&proc_inner.mnt_ns)?;
             Ok(())
         })?;

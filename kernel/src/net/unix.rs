@@ -6,8 +6,8 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use async_trait::async_trait;
 use log::info;
-use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
 use crate::fs::ffi::OpenFlags;
+use crate::net::netaddress::SockAddr;
 
 pub struct UnixSocket {
     metadata: FileMeta,
@@ -43,10 +43,6 @@ impl Socket for UnixSocket {
         todo!()
     }
 
-    fn set_keep_live(&self, enabled: bool) -> SyscallResult {
-        todo!()
-    }
-
     fn dis_connect(&self, how: u32) -> SyscallResult {
         todo!()
     }
@@ -55,12 +51,12 @@ impl Socket for UnixSocket {
         todo!()
     }
 
-    fn local_endpoint(&self) -> IpListenEndpoint {
+    fn sock_name(&self) -> SockAddr {
         todo!()
     }
 
-    fn remote_endpoint(&self) -> Option<IpEndpoint> {
-        None
+    fn peer_name(&self) -> Option<SockAddr> {
+        todo!()
     }
 
     fn shutdown(&self, how: u32) -> SyscallResult<()> {
@@ -76,11 +72,11 @@ impl Socket for UnixSocket {
         todo!()
     }
 
-    fn set_nagle_enabled(&self, enabled: bool) -> SyscallResult<usize> {
-        Err(Errno::EOPNOTSUPP)
+    fn set_keep_alive(&self, enabled: bool) -> SyscallResult {
+        todo!()
     }
 
-    fn set_keep_alive(&self, enabled: bool) -> SyscallResult<usize> {
+    fn set_nagle_enabled(&self, enabled: bool) -> SyscallResult {
         Err(Errno::EOPNOTSUPP)
     }
 }

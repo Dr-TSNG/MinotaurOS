@@ -29,7 +29,7 @@ sbi-spec = "0.0.7"
 spin = "0.9"
 tap = "1.0"
 time = { version = "0.3", default-features = false }
-virtio-drivers = "0.7.1"
+virtio-drivers = "0.7.4"
 xmas-elf = "0.7.0"
 zerocopy = { version = "0.7", features = ["derive"] }
 smoltcp = { version = "0.10.0", default-features = false, features = [

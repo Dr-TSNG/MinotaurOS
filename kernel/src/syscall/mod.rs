@@ -261,7 +261,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Getsockname => syscall!(sys_getsockname, args[0] as FdNum, args[1], args[2]),
         SyscallCode::Getpeername => syscall!(sys_getpeername, args[0] as FdNum, args[1], args[2]),
         SyscallCode::Sendto => async_syscall!(sys_sendto, args[0] as FdNum, args[1], args[2], args[3] as u32, args[4], args[5] as u32),
-        SyscallCode::Recvfrom => async_syscall!(sys_recvfrom, args[0] as FdNum, args[1], args[2] as u32, args[3] as u32, args[4], args[5]),
+        SyscallCode::Recvfrom => async_syscall!(sys_recvfrom, args[0] as FdNum, args[1], args[2], args[3] as u32, args[4], args[5]),
         SyscallCode::Setsockopt => syscall!(sys_setsockopt, args[0] as FdNum, args[1] as u32, args[2] as u32, args[3], args[4] as u32),
         SyscallCode::Getsockopt => syscall!(sys_getsockopt, args[0] as FdNum, args[1] as u32, args[2] as u32, args[3], args[4]),
         SyscallCode::Sockshutdown => syscall!(sys_sockshutdown, args[0] as FdNum, args[1] as u32),

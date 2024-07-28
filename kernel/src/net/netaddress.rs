@@ -1,218 +1,159 @@
+use core::cmp::min;
 use core::mem::size_of;
-use core::slice;
-use smoltcp::wire::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Ipv6Address};
-use crate::net::port::random_port;
-use crate::net::socket::{AF_INET, AF_INET6};
+use smoltcp::wire::{IpAddress, IpEndpoint, Ipv4Address, Ipv6Address};
+use tap::Tap;
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use crate::net::iface::NetInterface;
+use crate::net::socket::{AF_INET, AF_INET6, AF_UNIX};
 use crate::result::{Errno, SyscallResult};
 
-pub type IpAddr = IpAddress;
-
-
-
-/// used when you want trans a socket_address to IpEndPoint or IpListenEndPoint
-pub enum SocketAddress {
-    V4(SocketAddressV4),
-    V6(SocketAddressV6),
+/// sockaddr 大端序
+pub enum SockAddr {
+    Uninit,
+    In4(SockAddrIn4),
+    In6(SockAddrIn6),
+    Un(SockAddrUn),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Debug, Clone, Copy, AsBytes, FromZeroes, FromBytes)]
 #[repr(C)]
-pub struct SocketAddressV4 {
-    port: [u8; 2],
+pub struct SockAddrIn4 {
+    family: u16,
+    port: u16,
     addr_v4: [u8; 4],
+    _zero: [u8; 8],
 }
 
-impl SocketAddressV4 {
-    pub fn new(buf: &[u8]) -> Self {
-        let addr = Self {
-            port: buf[2..4].try_into().expect("ipv4 port len err"),
-            addr_v4: buf[4..8].try_into().expect("ipv4 addr len err"),
-        };
-        addr
-    }
-    pub fn fill(&self, addr_buf: &mut [u8], addrlen: usize) {
-        addr_buf.fill(0);
-        addr_buf[0..2].copy_from_slice(u16::to_ne_bytes(AF_INET).as_slice());
-        addr_buf[2..4].copy_from_slice(self.port.as_slice());
-        addr_buf[4..8].copy_from_slice(self.addr_v4.as_slice());
-        unsafe {
-            *(addrlen as *mut u32) = 8;
-        }
+impl Default for SockAddrIn4 {
+    fn default() -> Self {
+        Self::new_zeroed().tap_mut(|it| it.family = AF_INET)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord)]
+#[derive(Debug, Clone, Copy, AsBytes, FromZeroes, FromBytes)]
 #[repr(C)]
-pub struct SocketAddressV6 {
-    port: [u8; 2],
-    flowinfo: [u8; 4],
+pub struct SockAddrIn6 {
+    family: u16,
+    port: u16,
+    flowinfo: u32,
     addr_v6: [u8; 16],
+    scope_id: u32,
 }
 
-impl SocketAddressV6 {
-    pub fn new(buf: &[u8]) -> Self {
-        let addr = Self {
-            port: buf[2..4].try_into().expect("ipv6 port len err"),
-            flowinfo: buf[4..8].try_into().expect("ipv6 flowinfo len err"),
-            addr_v6: buf[8..24].try_into().expect("ipv6 addr len err"),
-        };
-        addr
+impl Default for SockAddrIn6 {
+    fn default() -> Self {
+        Self::new_zeroed().tap_mut(|it| it.family = AF_INET6)
     }
-    pub fn fill(&self, addr_buf: &mut [u8], addrlen: usize) {
-        addr_buf.fill(0);
-        addr_buf[0..2].copy_from_slice(u16::to_ne_bytes(AF_INET6).as_slice());
-        addr_buf[2..4].copy_from_slice(self.port.as_slice());
-        addr_buf[4..8].copy_from_slice(self.flowinfo.as_slice());
-        addr_buf[8..24].copy_from_slice(self.addr_v6.as_slice());
-        unsafe {
-            *(addrlen as *mut u32) = 24;
+}
+
+#[derive(Debug, Clone, Copy, AsBytes, FromZeroes, FromBytes)]
+#[repr(C)]
+pub struct SockAddrUn {
+    family: u16,
+    path: [u8; 108],
+}
+
+impl Default for SockAddrUn {
+    fn default() -> Self {
+        Self::new_zeroed().tap_mut(|it| it.family = AF_UNIX)
+    }
+}
+
+impl SockAddr {
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            SockAddr::Uninit => &[],
+            SockAddr::In4(addr) => addr.as_bytes(),
+            SockAddr::In6(addr) => addr.as_bytes(),
+            SockAddr::Un(addr) => addr.as_bytes(),
         }
     }
 }
 
-impl From<IpEndpoint> for SocketAddressV4 {
+impl From<IpEndpoint> for SockAddr {
     fn from(value: IpEndpoint) -> Self {
-        Self {
-            port: value.port.to_be_bytes(),
-            addr_v4: value
-                .addr
-                .as_bytes()
-                .try_into()
-                .expect("ipv4 address length error!"),
-        }
-    }
-}
-
-impl From<SocketAddressV4> for IpEndpoint {
-    fn from(value: SocketAddressV4) -> Self {
-        let port = u16::from_be_bytes(value.port);
-        Self::new(IpAddress::Ipv4(Ipv4Address(value.addr_v4)), port)
-    }
-}
-
-impl From<SocketAddressV4> for IpListenEndpoint {
-    fn from(value: SocketAddressV4) -> Self {
-        let port = u16::from_be_bytes(value.port);
-        let addr = Ipv4Address(value.addr_v4);
-        if addr.is_unspecified() {
-            if port != 0 {
-                IpListenEndpoint { addr: None, port }
-            } else {
-                IpListenEndpoint {
-                    addr: None,
-                    port: random_port(),
-                }
+        match value.addr {
+            IpAddress::Ipv4(addr) => {
+                Self::In4(SockAddrIn4 {
+                    family: AF_INET,
+                    port: value.port.to_be(),
+                    addr_v4: addr.0,
+                    ..SockAddrIn4::new_zeroed()
+                })
             }
-        } else {
-            IpListenEndpoint {
-                addr: Some(IpAddress::Ipv4(addr)),
-                port,
+            IpAddress::Ipv6(addr) => {
+                Self::In6(SockAddrIn6 {
+                    family: AF_INET6,
+                    port: value.port.to_be(),
+                    addr_v6: addr.0,
+                    ..SockAddrIn6::new_zeroed()
+                })
             }
         }
     }
 }
 
-impl From<IpEndpoint> for SocketAddressV6 {
-    fn from(value: IpEndpoint) -> Self {
-        Self {
-            port: value.port.to_be_bytes(),
-            flowinfo: [0u8; 4],
-            addr_v6: value
-                .addr
-                .as_bytes()
-                .try_into()
-                .expect("ipv6 addr length error!"),
-        }
-    }
-}
-
-impl From<SocketAddressV6> for IpEndpoint {
-    fn from(value: SocketAddressV6) -> Self {
-        let port = u16::from_be_bytes(value.port);
-        Self::new(IpAddress::Ipv6(Ipv6Address(value.addr_v6)), port)
-    }
-}
-
-impl From<SocketAddressV6> for IpListenEndpoint {
-    fn from(value: SocketAddressV6) -> Self {
-        let port = u16::from_be_bytes(value.port);
-        let addr = Ipv6Address(value.addr_v6);
-        if addr.is_unspecified() {
-            if port != 0 {
-                IpListenEndpoint { addr: None, port }
-            } else {
-                IpListenEndpoint {
-                    addr: None,
-                    port: random_port(),
-                }
-            }
-        } else {
-            IpListenEndpoint {
-                addr: Some(IpAddress::Ipv6(addr)),
-                port,
-            }
-        }
-    }
-}
-
-pub fn to_endpoint(listen_endpoint: IpListenEndpoint) -> IpEndpoint {
-    let addr = if listen_endpoint.addr.is_none() {
-        IpAddress::v4(127, 0, 0, 1)
-    } else {
-        listen_endpoint.addr.unwrap()
-    };
-    IpEndpoint::new(addr, listen_endpoint.port)
-}
-pub fn listen_endpoint(addr_buf: &[u8]) -> SyscallResult<IpListenEndpoint> {
-    let family = u16::from_ne_bytes(addr_buf[0..2].try_into().expect("family size wrong"));
-    match family {
-        AF_INET => {
-            let ipv4 = SocketAddressV4::new(addr_buf);
-            Ok(IpListenEndpoint::from(ipv4))
-        }
-        AF_INET6 => {
-            let ipv6 = SocketAddressV6::new(addr_buf);
-            Ok(IpListenEndpoint::from(ipv6))
-        }
-        _ => {
+impl SockAddr {
+    pub fn from_bytes(buf: &[u8]) -> SyscallResult<Self> {
+        if buf.len() < size_of::<u16>() {
             return Err(Errno::EINVAL);
         }
-    }
-}
-pub fn endpoint(addr_buf: &[u8]) -> SyscallResult<IpEndpoint> {
-    let listen_endpoint = listen_endpoint(addr_buf)?;
-    let addr = if listen_endpoint.addr.is_none() {
-        IpAddress::v4(127, 0, 0, 1)
-    } else {
-        listen_endpoint.addr.unwrap()
-    };
-    Ok(IpEndpoint::new(addr, listen_endpoint.port))
-}
-pub fn fill_with_endpoint(
-    endpoint: IpEndpoint,
-    addr: usize,
-    addrlen: usize,
-) -> SyscallResult<usize> {
-    match endpoint.addr {
-        IpAddress::Ipv4(_) => {
-            let len = size_of::<u16>() + size_of::<SocketAddressV4>();
-            // tos在此处使用UserCheck检查了addr开始处的len长度内存是否支持写入。
-            let addr_buf = unsafe { slice::from_raw_parts_mut(addr as *mut u8, len) };
-            SocketAddressV4::from(endpoint).fill(addr_buf, addrlen);
-        }
-        IpAddress::Ipv6(_) => {
-            let len = size_of::<u16>() + size_of::<SocketAddressV6>();
-            let addr_buf = unsafe { slice::from_raw_parts_mut(addr as *mut u8, len) };
-            SocketAddressV6::from(endpoint).fill(addr_buf, addrlen);
+        let family = u16::from_ne_bytes(buf[0..2].try_into().unwrap());
+        match family {
+            AF_INET => {
+                let addr = SockAddrIn4::read_from(buf).ok_or(Errno::EINVAL)?;
+                Ok(Self::In4(addr))
+            }
+            AF_INET6 => {
+                let addr = SockAddrIn6::read_from(buf).ok_or(Errno::EINVAL)?;
+                Ok(Self::In6(addr))
+            }
+            _ => Err(Errno::EINVAL),
         }
     }
-    Ok(0)
 }
 
-pub fn is_local(endpoint: IpEndpoint) -> bool {
-    if endpoint.addr.is_unicast() && endpoint.addr.as_bytes()[0] != 127 {
-        false
-    } else {
-        true
+impl TryFrom<SockAddr> for IpEndpoint {
+    type Error = Errno;
+
+    fn try_from(value: SockAddr) -> SyscallResult<Self> {
+        match value {
+            SockAddr::In4(addr) => {
+                Ok(Self {
+                    addr: IpAddress::Ipv4(Ipv4Address(addr.addr_v4)),
+                    port: addr.port.to_be(),
+                })
+            }
+            SockAddr::In6(addr) => {
+                Ok(Self {
+                    addr: IpAddress::Ipv6(Ipv6Address(addr.addr_v6)),
+                    port: addr.port.to_be(),
+                })
+            }
+            _ => Err(Errno::EINVAL),
+        }
     }
+}
+
+pub fn unspecified_ipep() -> IpEndpoint {
+    IpEndpoint {
+        addr: Ipv4Address::default().into(),
+        port: 0,
+    }
+}
+
+pub fn specify_ipep(net: &mut NetInterface, ep: &mut IpEndpoint) {
+    if ep.addr.is_unspecified() {
+        ep.addr = Ipv4Address::new(127, 0, 0, 1).into();
+    }
+    if ep.port == 0 {
+        ep.port = net.port_cx.alloc_physical();
+    }
+}
+
+pub fn copy_back_addr(addr: &mut [u8], buf: &SockAddr) -> usize {
+    let bytes = buf.as_bytes();
+    let copy = min(addr.len(), bytes.len());
+    addr[..copy].copy_from_slice(&bytes[..copy]);
+    copy
 }

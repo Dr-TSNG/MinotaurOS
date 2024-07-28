@@ -2,10 +2,9 @@ use alloc::boxed::Box;
 use alloc::sync::Arc;
 use async_trait::async_trait;
 use bitflags::bitflags;
-use smoltcp::wire::{IpEndpoint, IpListenEndpoint};
 use crate::fs::fd::FileDescriptor;
 use crate::fs::file::File;
-use crate::net::netaddress::{fill_with_endpoint, to_endpoint};
+use crate::net::netaddress::SockAddr;
 use crate::net::tcp::TcpSocket;
 use crate::net::udp::UdpSocket;
 use crate::processor::current_process;
@@ -57,11 +56,11 @@ impl Default for RecvFromFlags {
 #[allow(unused)]
 #[async_trait]
 pub trait Socket: File {
-    fn bind(&self, addr: IpListenEndpoint) -> SyscallResult {
+    fn bind(&self, addr: SockAddr) -> SyscallResult {
         Err(Errno::EOPNOTSUPP)
     }
 
-    async fn connect(&self, addr: &[u8]) -> SyscallResult {
+    async fn connect(&self, addr: SockAddr) -> SyscallResult {
         Err(Errno::EOPNOTSUPP)
     }
 
@@ -69,7 +68,7 @@ pub trait Socket: File {
         Err(Errno::EOPNOTSUPP)
     }
 
-    async fn accept(&self, addr: usize, addrlen: usize) -> SyscallResult<usize> {
+    async fn accept(&self, addr: Option<&mut SockAddr>) -> SyscallResult<Arc<dyn Socket>> {
         Err(Errno::EOPNOTSUPP)
     }
 
@@ -77,15 +76,13 @@ pub trait Socket: File {
 
     fn set_recv_buf_size(&self, size: usize) -> SyscallResult;
 
-    fn set_keep_live(&self, enabled: bool) -> SyscallResult;
-
     fn dis_connect(&self, how: u32) -> SyscallResult;
 
     fn socket_type(&self) -> SocketType;
 
-    fn local_endpoint(&self) -> IpListenEndpoint;
+    fn sock_name(&self) -> SockAddr;
 
-    fn remote_endpoint(&self) -> Option<IpEndpoint>;
+    fn peer_name(&self) -> Option<SockAddr>;
 
     fn shutdown(&self, how: u32) -> SyscallResult;
 
@@ -93,17 +90,31 @@ pub trait Socket: File {
 
     fn send_buf_size(&self) -> SyscallResult<usize>;
 
-    fn set_nagle_enabled(&self, enabled: bool) -> SyscallResult<usize> {
+    fn set_keep_alive(&self, enabled: bool) -> SyscallResult {
         Err(Errno::EOPNOTSUPP)
     }
 
-    fn set_keep_alive(&self, enabled: bool) -> SyscallResult<usize> {
+    fn set_nagle_enabled(&self, enabled: bool) -> SyscallResult {
         Err(Errno::EOPNOTSUPP)
     }
 
-    async fn recv(&self, buf: &mut [u8],flags: RecvFromFlags) -> SyscallResult<isize>{Err(Errno::EOPNOTSUPP)}
+    async fn recv(
+        &self,
+        buf: &mut [u8],
+        flags: RecvFromFlags,
+        src: Option<&mut SockAddr>,
+    ) -> SyscallResult<isize> {
+        Err(Errno::EOPNOTSUPP)
+    }
 
-    async fn send(&self,buf: &[u8],flags: RecvFromFlags) -> SyscallResult<isize>{Err(Errno::EOPNOTSUPP)}
+    async fn send(
+        &self,
+        buf: &[u8],
+        flags: RecvFromFlags,
+        dest: Option<SockAddr>,
+    ) -> SyscallResult<isize> {
+        Err(Errno::EOPNOTSUPP)
+    }
 }
 
 
@@ -133,18 +144,6 @@ impl dyn Socket {
                 // todo!()
             }
             _ => Err(Errno::EINVAL),
-        }
-    }
-    pub fn addr(self: &Arc<Self>, addr: usize, addrlen: usize) -> SyscallResult<usize> {
-        let local_endpoint = self.local_endpoint();
-        let local_endpoint = to_endpoint(local_endpoint);
-        fill_with_endpoint(local_endpoint, addr, addrlen)
-    }
-
-    pub fn peer_addr(self: &Arc<Self>, addr: usize, addrlen: usize) -> SyscallResult<usize> {
-        match self.remote_endpoint() {
-            Some(remote_endpoint) => fill_with_endpoint(remote_endpoint, addr, addrlen),
-            None => Err(Errno::ENOTCONN),
         }
     }
 }
