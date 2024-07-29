@@ -100,14 +100,13 @@ pub const STRACE_COLOR_CODE: u8 = 35; // Purple
 macro_rules! strace {
     ($fmt: literal $(, $($arg: tt)+)?) => {
         use crate::{
-            debug::logger::STRACE_COLOR_CODE,
             with_color,
             processor::{current_process, current_thread},
             processor::hart::local_hart,
             sched::time::cpu_time,
         };
         with_color!(
-            STRACE_COLOR_CODE,
+            debug::logger::STRACE_COLOR_CODE,
             concat!("[{:6?}] [SCALL] [HART {}] [{}, {}] | ", $fmt),
             cpu_time(),
             local_hart().id,

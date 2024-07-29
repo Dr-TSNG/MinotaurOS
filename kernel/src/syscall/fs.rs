@@ -2,7 +2,6 @@ use alloc::ffi::CString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
-use core::ffi::CStr;
 use core::mem::size_of;
 use core::time::Duration;
 use log::{debug, info, warn};
@@ -164,25 +163,18 @@ pub async fn sys_symlinkat(target: usize, dirfd: FdNum, linkpath: usize) -> Sysc
 }
 
 pub async fn sys_umount2(target: usize, flags: u32) -> SyscallResult<usize> {
-    warn!("umount2 is not implemented");
+    let target = user_transmute_str(target, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    debug!("[umount2] target: {}, flags: {:#x}", target, flags);
+    current_process().inner.lock().mnt_ns.unmount(target).await?;
     Ok(0)
 }
 
 pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, data: usize) -> SyscallResult<usize> {
-    let source = user_slice_r(source, PATH_MAX)?;
-    let source = CStr::from_bytes_until_nul(source).map_err(|_| Errno::EINVAL)?.to_str().unwrap();
-    let target = user_slice_r(target, PATH_MAX)?;
-    let target = CStr::from_bytes_until_nul(target).map_err(|_| Errno::EINVAL)?.to_str().unwrap();
-    let fstype = user_slice_r(fstype, PATH_MAX)?;
-    let fstype = CStr::from_bytes_until_nul(fstype).map_err(|_| Errno::EINVAL)?.to_str().unwrap();
-    let flags = VfsFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
-    let data = match data {
-        0 => None,
-        _ => {
-            let data = user_slice_r(data, size_of::<usize>())?;
-            Some(CStr::from_bytes_until_nul(data).map_err(|_| Errno::EINVAL)?.to_str().unwrap())
-        }
-    };
+    let source = user_transmute_str(source, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let target = user_transmute_str(target, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let fstype = user_transmute_str(fstype, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let flags = VfsFlags::from_bits_truncate(flags);
+    let data = user_transmute_str(data, PATH_MAX)?;
     info!(
         "[mount] source: {}, target: {}, fstype: {}, flags: {:?}, data: {:?}",
         source, target, fstype, flags, data,
