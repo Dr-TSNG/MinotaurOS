@@ -5,6 +5,7 @@
 #![feature(btree_extract_if)]
 #![feature(const_trait_impl)]
 #![feature(inline_const)]
+#![feature(let_chains)]
 #![feature(naked_functions)]
 #![feature(never_type)]
 #![feature(option_take_if)]

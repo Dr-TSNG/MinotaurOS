@@ -1,10 +1,10 @@
 use alloc::ffi::CString;
 use alloc::vec;
+use alloc::vec::Vec;
 use core::cmp::min;
 use core::ffi::CStr;
 use core::mem::size_of;
 use core::time::Duration;
-use hashbrown::HashMap;
 use log::{debug, info, warn};
 use tap::Tap;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
@@ -525,7 +525,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     );
     let proc_inner = current_process().inner.lock();
     let fd_slot_bits = 8 * size_of::<usize>();
-    let mut fds: HashMap<FdNum, PollFd> = HashMap::new();
+    let mut fds: Vec<PollFd> = Vec::new();
     for fd_slot in 0..FD_SET_LEN {
         for offset in 0..fd_slot_bits {
             let fd = (fd_slot * fd_slot_bits + offset) as FdNum;
@@ -534,25 +534,27 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
             }
             let mut find_and_push = |set: &FdSet, event: PollEvents| {
                 if set.fds_bits[fd_slot] & (1 << offset) != 0 {
-                    if let Some(old_fd) = fds.get_mut(&fd) {
+                    if let Some(old_fd) = fds.last_mut() && fd == old_fd.fd {
                         old_fd.events |= event;
                     } else {
-                        fds.insert(fd, PollFd {
+                        proc_inner.fd_table.get(fd)?;
+                        fds.push(PollFd {
                             fd,
                             events: event,
                             revents: PollEvents::empty(),
                         });
                     }
                 }
+                Ok(())
             };
             if let Some(readfds) = rfds.as_ref() {
-                find_and_push(readfds, PollEvents::POLLIN);
+                find_and_push(readfds, PollEvents::POLLIN)?;
             }
             if let Some(writefds) = wfds.as_ref() {
-                find_and_push(writefds, PollEvents::POLLOUT);
+                find_and_push(writefds, PollEvents::POLLOUT)?;
             }
             if let Some(exceptfds) = efds.as_ref() {
-                find_and_push(exceptfds, PollEvents::POLLPRI);
+                find_and_push(exceptfds, PollEvents::POLLPRI)?;
             }
         }
     }
@@ -570,7 +572,6 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     if let Some(sigmask) = sigmask {
         current_thread().signals.set_mask(sigmask);
     }
-    let fds = fds.into_values().collect();
     let fut = IOMultiplexFuture::new(fds, IOFormat::FdSets(FdSetRWE::new(readfds, writefds, exceptfds)));
     let ret = match suspend_now(timeout, Event::all(), fut).await {
         Err(Errno::ETIMEDOUT) => {
