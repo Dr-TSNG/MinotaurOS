@@ -5,6 +5,7 @@ use riscv::asm::fence_i;
 use riscv::register::{satp, sstatus};
 use riscv::register::sstatus::FS;
 use crate::arch;
+use crate::arch::{VirtAddr, VirtPageNum};
 use crate::config::{KERNEL_STACK_SIZE, MAX_HARTS};
 use crate::mm::asid::ASIDManager;
 use crate::mm::KERNEL_SPACE;
@@ -122,6 +123,16 @@ impl Hart {
         self.disable_kintr();
         let asid = self.asid_manager.get(token).unwrap();
         asm!("sfence.vma x0, {}", in(reg) asid);
+        self.enable_kintr();
+    }
+
+    pub unsafe fn update_tlb(&mut self, token: usize, start: VirtPageNum, end: VirtPageNum) {
+        self.disable_kintr();
+        let asid = self.asid_manager.get(token).unwrap();
+        for vpn in start..end {
+            let addr = VirtAddr::from(vpn);
+            asm!("sfence.vma {}, {}", in(reg) addr.0, in(reg) asid);
+        }
         self.enable_kintr();
     }
 }

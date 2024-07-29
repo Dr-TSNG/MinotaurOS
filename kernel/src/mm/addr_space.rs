@@ -6,6 +6,7 @@ use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::cmp::{max, min};
 use core::ffi::CStr;
+use core::mem::swap;
 use core::num::NonZeroUsize;
 use core::ops::Range;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -267,7 +268,7 @@ impl AddressSpace {
             info!("[addr_space] Page access violation: {:?} - {:?} / {:?}", addr, perform, region.metadata().perms);
             return Err(Errno::EACCES);
         };
-        unsafe { local_hart().refresh_tlb(self.token); }
+        unsafe { local_hart().update_tlb(self.token, region.metadata().start, region.metadata().end()); }
         result
     }
 
@@ -279,14 +280,16 @@ impl AddressSpace {
             return Err(Errno::ENOMEM);
         }
         let mut brk = self.unmap_region(self.heap.start).unwrap();
-        if addr.ceil() < self.heap.end {
-            brk.split(0, self.heap.end - addr.ceil());
-        } else if addr.ceil() > self.heap.end {
-            brk.extend(addr.ceil() - self.heap.end);
+        let (mut us, mut ue) = (addr.ceil(), self.heap.end);
+        if us < ue {
+            brk.split(0, ue - us);
+        } else if us > ue {
+            brk.extend(us - ue);
+            swap(&mut us, &mut ue);
         }
         self.heap.end = addr.ceil().into();
         self.map_region(brk);
-        unsafe { local_hart().refresh_tlb(self.token); }
+        unsafe { local_hart().update_tlb(self.token, us, ue); }
         Ok(self.heap.end)
     }
 
@@ -311,7 +314,7 @@ impl AddressSpace {
                 left = region.metadata().end();
                 (right, region) = iter.next().unwrap();
             }
-            region.metadata().end()
+            left
         };
         let metadata = ASRegionMeta { name, perms, start, pages };
         let region: Box<dyn ASRegion> = match inode {
@@ -320,13 +323,13 @@ impl AddressSpace {
             None => LazyRegion::new_free(metadata),
         };
         self.map_region(region);
-        unsafe { local_hart().refresh_tlb(self.token); }
+        unsafe { local_hart().update_tlb(self.token, start, start + pages); }
         Ok(VirtAddr::from(start).0)
     }
 
     pub fn munmap(&mut self, start: VirtPageNum, pages: usize) -> SyscallResult {
         let ret = self.modify_region(start, pages, |_| false);
-        unsafe { local_hart().refresh_tlb(self.token); }
+        unsafe { local_hart().update_tlb(self.token, start, start + pages); }
         ret
     }
 
@@ -335,7 +338,7 @@ impl AddressSpace {
             region.set_perms(perms);
             true
         });
-        unsafe { local_hart().refresh_tlb(self.token); }
+        unsafe { local_hart().update_tlb(self.token, start, start + pages); }
         ret
     }
 
@@ -356,7 +359,7 @@ impl AddressSpace {
                 left = region.metadata().end();
                 (right, region) = iter.next().unwrap();
             }
-            region.metadata().end()
+            left
         };
         let metadata = ASRegionMeta {
             name: Some(format!("/dev/shm/{}", id)),
@@ -366,7 +369,7 @@ impl AddressSpace {
         };
         let region = SharedRegion::new_reffed(metadata, &shm);
         self.map_region(region);
-        unsafe { local_hart().refresh_tlb(self.token); }
+        unsafe { local_hart().update_tlb(self.token, start, start + shm.len()); }
         Ok(VirtAddr::from(start).0)
     }
 }
