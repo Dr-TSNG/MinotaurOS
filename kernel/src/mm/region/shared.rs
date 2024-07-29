@@ -108,15 +108,14 @@ impl ASRegion for SharedRegion {
         Box::new(self.clone())
     }
 
-    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
+    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult<Vec<HeapFrameTracker>> {
         let id = vpn - self.metadata.start;
         if matches!(self.pages[id].as_ref(), PageState::Free) {
             self.pages[id] = Arc::new(PageState::Framed(alloc_user_frames(1)?));
         } else {
             return Err(Errno::EFAULT);
         }
-        self.map_one(root_pt, &self.pages[id], vpn, true);
-        Ok(())
+        Ok(self.map_one(root_pt, &self.pages[id], vpn, true))
     }
 }
 

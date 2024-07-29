@@ -261,32 +261,34 @@ impl AddressSpace {
             .next()
             .ok_or(Errno::EFAULT)?;
 
-        let result = if region.metadata().perms.contains(perform) {
-            region.fault_handler(self.root_pt, vpn)
+        if region.metadata().perms.contains(perform) {
+            self.pt_dirs.extend(region.fault_handler(self.root_pt, vpn)?);
+            unsafe { local_hart().refresh_tlb(self.token); }
+            Ok(())
         } else {
             info!("[addr_space] Page access violation: {:?} - {:?} / {:?}", addr, perform, region.metadata().perms);
-            return Err(Errno::EACCES);
-        };
-        unsafe { local_hart().refresh_tlb(self.token); }
-        result
+            Err(Errno::EACCES)
+        }
     }
 
     pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult<VirtPageNum> {
+        let heap_end = self.heap.end;
         if addr.floor() < self.heap.start {
-            return Ok(self.heap.end);
+            return Ok(heap_end);
         }
         if addr.floor() >= self.heap_max {
             return Err(Errno::ENOMEM);
         }
-        let mut brk = self.unmap_region(self.heap.start).unwrap();
-        if addr.ceil() < self.heap.end {
-            brk.split(0, self.heap.end - addr.ceil());
-        } else if addr.ceil() > self.heap.end {
-            brk.extend(addr.ceil() - self.heap.end);
+        let brk = self.regions.get_mut(&self.heap.start).unwrap();
+        if addr.ceil() < heap_end {
+            brk.split(0, heap_end - addr.ceil());
+            // 只有减少堆大小时才需要即时更新页表，增加堆大小时会在下次访问时更新
+            self.pt_dirs.extend(brk.map(self.root_pt, true));
+            unsafe { local_hart().refresh_tlb(self.token); }
+        } else if addr.ceil() > heap_end {
+            brk.extend(addr.ceil() - heap_end);
         }
-        self.heap.end = addr.ceil().into();
-        self.map_region(brk);
-        unsafe { local_hart().refresh_tlb(self.token); }
+        self.heap.end = addr.ceil();
         Ok(self.heap.end)
     }
 

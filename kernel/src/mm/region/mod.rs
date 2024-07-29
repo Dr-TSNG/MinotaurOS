@@ -41,7 +41,7 @@ pub trait ASRegion: Send + Sync {
     fn sync(&self) {}
 
     /// 错误处理
-    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
+    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult<Vec<HeapFrameTracker>> {
         Err(Errno::EINVAL)
     }
 }

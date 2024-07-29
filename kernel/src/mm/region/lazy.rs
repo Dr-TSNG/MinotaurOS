@@ -138,7 +138,7 @@ impl ASRegion for LazyRegion {
         Box::new(new_region)
     }
 
-    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
+    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult<Vec<HeapFrameTracker>> {
         let id = vpn - self.metadata.start;
         let mut temp = PageState::Free;
         core::mem::swap(&mut temp, &mut self.pages[id]);
@@ -155,9 +155,9 @@ impl ASRegion for LazyRegion {
                 warn!("Fault already handled");
             }
         }
-        self.map_one(root_pt, &temp, vpn, true);
+        let ret = self.map_one(root_pt, &temp, vpn, true);
         core::mem::swap(&mut temp, &mut self.pages[id]);
-        Ok(())
+        Ok(ret)
     }
 }
 
@@ -259,7 +259,7 @@ impl LazyRegion {
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    _ => panic!("Page not mapped: {:?}", pte.ppn()),
+                    _ => return,
                 }
             }
         }

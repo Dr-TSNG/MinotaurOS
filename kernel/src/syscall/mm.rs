@@ -37,7 +37,9 @@ pub fn sys_shmat(shmid: i32, addr: usize, _flags: u32) -> SyscallResult<usize> {
 
 pub fn sys_brk(addr: usize) -> SyscallResult<usize> {
     let vpn = current_process().inner.lock().addr_space.set_brk(VirtAddr(addr))?;
-    Ok(VirtAddr::from(vpn).0)
+    let va = VirtAddr::from(vpn).0;
+    debug!("[brk] {:#x} -> {:#x}", addr, va);
+    Ok(va)
 }
 
 pub fn sys_munmap(addr: usize, len: usize) -> SyscallResult<usize> {

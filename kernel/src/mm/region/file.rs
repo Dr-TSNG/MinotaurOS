@@ -117,15 +117,14 @@ impl ASRegion for FileRegion {
         block_on(self.inode.upgrade().unwrap().sync()).unwrap();
     }
 
-    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult {
+    fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult<Vec<HeapFrameTracker>> {
         let page_num = vpn - self.metadata.start;
         self.pages[page_num] = match self.pages[page_num] {
             PageState::Free => PageState::Clean,
             PageState::Clean => PageState::Dirty,
             PageState::Dirty => panic!("Page should not be dirty"),
         };
-        self.map_one(root_pt, page_num, vpn, true);
-        Ok(())
+        Ok(self.map_one(root_pt, page_num, vpn, true))
     }
 }
 
