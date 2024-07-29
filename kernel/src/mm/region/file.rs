@@ -42,7 +42,9 @@ impl ASRegion for FileRegion {
         let mut dirs = vec![];
         let mut vpn = self.metadata.start;
         for i in 0..self.pages.len() {
-            dirs.extend(self.map_one(root_pt, i, vpn, overwrite));
+            if overwrite || !matches!(self.pages[i], PageState::Free) {
+                dirs.extend(self.map_one(root_pt, i, vpn, overwrite));
+            }
             vpn = vpn + 1;
         }
         dirs
@@ -50,7 +52,9 @@ impl ASRegion for FileRegion {
 
     fn unmap(&self, root_pt: PageTable) {
         for i in 0..self.pages.len() {
-            self.unmap_one(root_pt, i);
+            if !matches!(self.pages[i], PageState::Free) {
+                self.unmap_one(root_pt, i);
+            }
         }
     }
 
@@ -205,8 +209,8 @@ impl FileRegion {
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    SlotType::Page(ppn) => panic!("Page already mapped: {:?}", ppn),
-                    SlotType::Invalid => panic!("Page not mapped"),
+                    SlotType::Page(_) => panic!("WTF big page"),
+                    SlotType::Invalid => return,
                 }
             }
         }

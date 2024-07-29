@@ -38,7 +38,9 @@ impl ASRegion for SharedRegion {
         let mut dirs = vec![];
         let mut vpn = self.metadata.start;
         for page in self.pages.iter() {
-            dirs.extend(self.map_one(root_pt, page, vpn, overwrite));
+            if overwrite || !matches!(**page, PageState::Free) {
+                dirs.extend(self.map_one(root_pt, page, vpn, overwrite));
+            }
             vpn = vpn + 1;
         }
         dirs
@@ -46,8 +48,10 @@ impl ASRegion for SharedRegion {
 
     fn unmap(&self, root_pt: PageTable) {
         let mut vpn = self.metadata.start;
-        for _ in self.pages.iter() {
-            self.unmap_one(root_pt, vpn);
+        for page in self.pages.iter() {
+            if !matches!(**page, PageState::Free) {
+                self.unmap_one(root_pt, vpn);
+            }
             vpn = vpn + 1;
         }
     }
@@ -202,7 +206,8 @@ impl SharedRegion {
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    _ => panic!("Page not mapped: {:?}", pte.ppn()),
+                    SlotType::Page(_) => panic!("WTF big page"),
+                    SlotType::Invalid => return,
                 }
             }
         }

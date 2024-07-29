@@ -39,7 +39,10 @@ impl ASRegion for LazyRegion {
         let mut dirs = vec![];
         let mut vpn = self.metadata.start;
         for page in self.pages.iter() {
-            dirs.extend(self.map_one(root_pt, page, vpn, overwrite));
+            // 为了减少页面映射耗时，非覆写模式下只处理非空闲页
+            if overwrite || !matches!(page, PageState::Free) {
+                dirs.extend(self.map_one(root_pt, page, vpn, overwrite));
+            }
             vpn = vpn + 1;
         }
         dirs
@@ -47,8 +50,11 @@ impl ASRegion for LazyRegion {
 
     fn unmap(&self, root_pt: PageTable) {
         let mut vpn = self.metadata.start;
-        for _ in self.pages.iter() {
-            self.unmap_one(root_pt, vpn);
+        for page in self.pages.iter() {
+            // 仅处理已映射的页，对于空闲页，要么一开始就没有映射，要么已经被覆写为无效页表项
+            if !matches!(page, PageState::Free) {
+                self.unmap_one(root_pt, vpn);
+            }
             vpn = vpn + 1;
         }
     }
@@ -259,7 +265,8 @@ impl LazyRegion {
             } else {
                 match pt.slot_type(*idx) {
                     SlotType::Directory(next) => pt = next,
-                    _ => return,
+                    SlotType::Page(_) => panic!("WTF big page"),
+                    SlotType::Invalid => return,
                 }
             }
         }
