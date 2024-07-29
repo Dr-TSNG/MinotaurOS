@@ -3,6 +3,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cmp::min;
+use log::warn;
 use crate::arch::{PAGE_SIZE, PageTableEntry, PhysPageNum, PTEFlags, VirtPageNum};
 use crate::mm::addr_space::ASPerms;
 use crate::mm::allocator::{alloc_kernel_frames, alloc_user_frames, HeapFrameTracker, UserFrameTracker};
@@ -151,8 +152,7 @@ impl ASRegion for LazyRegion {
                 temp = PageState::Framed(new_tracker);
             }
             PageState::Framed(_) => {
-                panic!("This should not happen?");
-                // TODO: 如果两个线程先后访问同一个页面，会发生什么？
+                warn!("Fault already handled");
             }
         }
         self.map_one(root_pt, &temp, vpn, true);

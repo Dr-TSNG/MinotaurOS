@@ -1,10 +1,10 @@
 use alloc::ffi::CString;
 use alloc::vec;
-use alloc::vec::Vec;
 use core::cmp::min;
 use core::ffi::CStr;
 use core::mem::size_of;
 use core::time::Duration;
+use hashbrown::HashMap;
 use log::{debug, info, warn};
 use tap::Tap;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
@@ -525,21 +525,20 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     );
     let proc_inner = current_process().inner.lock();
     let fd_slot_bits = 8 * size_of::<usize>();
-    let mut fds: Vec<PollFd> = Vec::new();
+    let mut fds: HashMap<FdNum, PollFd> = HashMap::new();
     for fd_slot in 0..FD_SET_LEN {
         for offset in 0..fd_slot_bits {
-            let fd = fd_slot * fd_slot_bits + offset;
-            if fd >= nfds as usize {
+            let fd = (fd_slot * fd_slot_bits + offset) as FdNum;
+            if fd >= nfds {
                 break;
             }
             let mut find_and_push = |set: &FdSet, event: PollEvents| {
                 if set.fds_bits[fd_slot] & (1 << offset) != 0 {
-                    let find = fds.iter_mut().find(|old_fd| old_fd.fd == fd as FdNum);
-                    if let Some(old_fd) = find {
+                    if let Some(old_fd) = fds.get_mut(&fd) {
                         old_fd.events |= event;
                     } else {
-                        fds.push(PollFd {
-                            fd: fd as i32,
+                        fds.insert(fd, PollFd {
+                            fd,
                             events: event,
                             revents: PollEvents::empty(),
                         });
@@ -571,6 +570,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     if let Some(sigmask) = sigmask {
         current_thread().signals.set_mask(sigmask);
     }
+    let fds = fds.into_values().collect();
     let fut = IOMultiplexFuture::new(fds, IOFormat::FdSets(FdSetRWE::new(readfds, writefds, exceptfds)));
     let ret = match suspend_now(timeout, Event::all(), fut).await {
         Err(Errno::ETIMEDOUT) => {
