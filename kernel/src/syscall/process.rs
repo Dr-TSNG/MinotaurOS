@@ -104,6 +104,17 @@ pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
     Err(Errno::EINVAL)
 }
 
+pub fn sys_tgkill(tgid: Pid, tid: Tid, signal: usize) -> SyscallResult<usize> {
+    let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
+    let monitors = MONITORS.lock();
+    let process = monitors.process.get(tgid).upgrade().ok_or(Errno::ESRCH)?;
+    let thread = process.inner.lock()
+        .threads.get(&tid).ok_or(Errno::ESRCH)?
+        .upgrade().ok_or(Errno::ESRCH)?;
+    thread.recv_signal(signal);
+    Ok(0)
+}
+
 pub fn sys_setpgid(pid: Pid, pgid: Gid) -> SyscallResult<usize> {
     let mut monitors = MONITORS.lock();
     let proc = match pid {

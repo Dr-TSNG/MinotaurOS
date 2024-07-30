@@ -33,7 +33,7 @@ impl SignalHandler {
         info!("Default signal handler for {:?}: terminate", signal);
         #[cfg(feature = "tombstone")]
         dump_tombstone(signal);
-        current_thread().terminate(-1);
+        current_thread().terminate(signal as i8);
     }
 }
 
