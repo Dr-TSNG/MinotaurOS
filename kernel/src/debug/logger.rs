@@ -106,7 +106,7 @@ macro_rules! strace {
             sched::time::cpu_time,
         };
         with_color!(
-            debug::logger::STRACE_COLOR_CODE,
+            crate::debug::logger::STRACE_COLOR_CODE,
             concat!("[{:6?}] [SCALL] [HART {}] [{}, {}] | ", $fmt),
             cpu_time(),
             local_hart().id,

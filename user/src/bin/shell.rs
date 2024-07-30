@@ -10,7 +10,7 @@ fn run_cmd(cmd: &str) {
         sys_execve(
             "/busybox",
             &["busybox", "sh", "-c", cmd],
-            &["PATH=/:/bin:/lib", "LD_LIBRARY_PATH=/lib"],
+            &["PATH=/:/bin:/lib", "LD_LIBRARY_PATH=/:/lib:/lib/glibc:/lib/musl"],
         );
     } else {
         let mut result: i32 = 0;
@@ -59,14 +59,12 @@ fn main() {
     let flags = VfsFlags::ST_WRITE | VfsFlags::ST_RELATIME;
     mount("dev", "/dev", "devtmpfs", flags, None);
     mount("proc", "/proc", "proc", flags, None);
+    mount("tmpfs", "/bin", "tmpfs", flags, None);
     mount("tmpfs", "/tmp", "tmpfs", flags, None);
     let mut sa = SigAction::default();
     sa.sa_handler = sigchld_handler as usize;
     sigaction(SIGCHLD, Some(&sa), None);
-    if sys_access("sort.src", 0) != 0 {
-        init_shell();
-        run_cmd("busybox ln -s /lib/dlopen_dso.so /dlopen_dso.so");
-        run_cmd("busybox touch sort.src");
-    }
+    init_shell();
+    run_cmd("busybox touch sort.src");
     run_cmd("busybox sh");
 }
