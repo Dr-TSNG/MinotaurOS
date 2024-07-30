@@ -65,6 +65,8 @@ fn main() {
     sa.sa_handler = sigchld_handler as usize;
     sigaction(SIGCHLD, Some(&sa), None);
     init_shell();
+    run_cmd("busybox mv /lib/dlopen_dso.so /dlopen_dso.so");
+    run_cmd("busybox mv /lib/glibc/* /lib");
     run_cmd("busybox touch sort.src");
     run_cmd("busybox sh");
 }

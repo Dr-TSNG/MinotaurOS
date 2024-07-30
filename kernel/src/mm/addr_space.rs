@@ -97,7 +97,6 @@ impl AddressSpace {
 
     pub async fn from_inode(
         mnt_ns: &MountNamespace,
-        ld_paths: &[&str],
         inode: Arc<dyn Inode>,
     ) -> SyscallResult<(Self, usize, Vec<Aux>)> {
         let exe = inode.mnt_ns_path(mnt_ns)?;
@@ -108,7 +107,7 @@ impl AddressSpace {
         drop(snapshots);
 
         let data = inode.open(OpenFlags::O_RDONLY)?.read_all().await?;
-        let mut snapshot = Self::from_elf(mnt_ns, ld_paths, &data).await?;
+        let mut snapshot = Self::from_elf(mnt_ns, &data).await?;
         let this = (snapshot.0.fork(), snapshot.1, snapshot.2.clone());
         let mut snapshots = EXE_SNAPSHOTS.lock();
         snapshots.put(exe.to_string(), snapshot);
@@ -118,7 +117,6 @@ impl AddressSpace {
 
     pub async fn from_elf(
         mnt_ns: &MountNamespace,
-        ld_paths: &[&str],
         data: &[u8],
     ) -> SyscallResult<(Self, usize, Vec<Aux>)> {
         let mut addr_space = Self::new_bare();
@@ -175,7 +173,7 @@ impl AddressSpace {
                     let linker = CStr::from_bytes_until_nul(&elf.input[phdr.offset() as usize..])
                         .unwrap().to_str().unwrap();
                     debug!("[addr_space] Load linker: {} at {:#x}", linker, linker_base);
-                    entry = addr_space.load_linker(mnt_ns, ld_paths, linker, linker_base).await?;
+                    entry = addr_space.load_linker(mnt_ns, linker, linker_base).await?;
                 }
                 _ => {}
             }
@@ -463,22 +461,11 @@ impl AddressSpace {
     async fn load_linker(
         &mut self,
         mnt_ns: &MountNamespace,
-        ld_paths: &[&str],
         linker: &str,
         offset: usize,
     ) -> SyscallResult<usize> {
-        let mut linker_inode = None;
-        let linker = linker.rsplit_once('/').map(|(_, name)| name).unwrap_or(linker);
-        for mut path in ld_paths {
-            if *path == "/" { path = &&""; }
-            let ld_path = format!("{}/{}", path, linker);
-            if let Ok(inode) = mnt_ns.lookup_absolute(&ld_path, true).await {
-                linker_inode = Some(inode);
-                break;
-            }
-        }
-        let linker_inode = linker_inode.ok_or(Errno::ENOENT)?;
-        let file = linker_inode.open(OpenFlags::O_RDONLY).unwrap();
+        let inode = mnt_ns.lookup_absolute(linker, true).await?;
+        let file = inode.open(OpenFlags::O_RDONLY).unwrap();
         let elf_data = file.read_all().await.unwrap();
         let elf = ElfFile::new(&elf_data).map_err(|_| Errno::ENOEXEC)?;
         let ph_count = elf.header.pt2.ph_count();

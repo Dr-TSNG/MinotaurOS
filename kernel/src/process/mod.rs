@@ -81,7 +81,7 @@ impl Process {
         mnt_ns: Arc<MountNamespace>,
         elf_data: &[u8],
     ) -> SyscallResult<Arc<Self>> {
-        let (addr_space, entry, _) = AddressSpace::from_elf(&mnt_ns, &[], elf_data).await?;
+        let (addr_space, entry, _) = AddressSpace::from_elf(&mnt_ns, elf_data).await?;
         let pid = Arc::new(TidTracker::new());
 
         let process = Arc::new(Process {
@@ -121,13 +121,8 @@ impl Process {
         envs: &[CString],
     ) -> SyscallResult<usize> {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
-        let ld_paths = envs.iter()
-            .find(|env| env.to_str().unwrap().starts_with("LD_LIBRARY_PATH="))
-            .unwrap().to_str().unwrap()
-            .split_once('=').unwrap().1
-            .split(':').collect::<Vec<&str>>();
         let (addr_space, entry, mut auxv) =
-            AddressSpace::from_inode(&mnt_ns, &ld_paths, inode.clone()).await?;
+            AddressSpace::from_inode(&mnt_ns, inode.clone()).await?;
 
         current_process().inner.lock().pipe_ref_mut(|proc_inner| {
             if proc_inner.threads.len() > 1 {
