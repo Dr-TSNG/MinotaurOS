@@ -24,7 +24,7 @@
   宋体: ("Times New Roman", "SimSun"),
   楷体: ("Times New Roman", "KaiTi"),
   黑体: ("Times New Roman", "Adobe Heiti Std", "SimHei"),
-  代码: ("Consolas", "Courier New", "SimSun"),
+  代码: ("Consolas", "Courier New", "KaiTi"),
 )
 
 #let special-chapter-format-heading(it: none, font: none, size: none, weight: "regular") = {

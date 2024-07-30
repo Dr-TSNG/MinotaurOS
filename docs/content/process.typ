@@ -32,10 +32,15 @@ Async 在 Rust 中的脱糖是零开销的，这意味着无需分配任何堆�
 
 MinotaurOS 的异步执行器基于 async_task 库实现。async_task 库提供了构建执行器的基本抽象，包括`Runnable`和`Task`。一个`Runnable`对象持有一个`Future`句柄，在运行时，会对`Future`轮询一次。然后，`Runnable`会消失，直到`Future`被唤醒才再次进入调度。一个`Task`对象用于获取`Future`的结果，通过`detatch`方法将任务移入后台执行。async_task 提供了`spawn`方法，传入`Future`和调度器，用于创建`Runnable`和`Task`对象。然后，通过`runnable.schedule`方法将`Runnable`加入调度序列。显而易见的优点是，I/O 阻塞的任务不会进入调度序列，避免了忙等待。
 
-MinotaurOS 的调度方式为改进的轮转调度（如#[@lst:调度器实现]所示）。调度器通过一个双端队列保存`Runnable`对象，每次从队列头部取出一个`Runnable`进行轮询。若`Runnable`在运行时被唤醒，通常是因为任务执行了 yield，让出时间片，此时将`Runnable`放回队列尾部；若`Runnable`在其他任务运行时被唤醒，则通常是因为异步 I/O 完成的中断，此时将`Runnable`放回队列头部。
+MinotaurOS 的调度方式为改进的轮转调度（如#[@lst:调度器实现]所示）。MinotaurOS 维护两个全局的无锁任务队列，一个是 FIFO 队列，一个是优先级队列，保存`Runnable`对象。调度开始时，CPU 核心首先尝试从优先级队列中取出一个`Runnable`运行，若优先级队列为空，则从 FIFO 队列中取出一个`Runnable`运行。在任务调度上，若`Runnable`在运行时被唤醒，通常是因为任务执行了 yield，让出时间片，此时将`Runnable`放入 FIFO 队列；若`Runnable`在其他任务运行时被唤醒，则通常是因为异步 I/O 完成的中断，此时将`Runnable`放入优先队列。
 
 #code-figure(
   ```rs
+  struct TaskQueue {
+    fifo: SegQueue<Runnable>,
+    prio: SegQueue<Runnable>,
+  }
+
   pub fn spawn<F>(future: F) -> (Runnable, Task<F::Output>)
       where
           F: Future + Send + 'static,
@@ -43,9 +48,9 @@ MinotaurOS 的调度方式为改进的轮转调度（如#[@lst:调度器实现]�
   {
       let schedule = move |runnable: Runnable, info: ScheduleInfo| {
           if info.woken_while_running {
-              TASK_QUEUE.push_back(runnable);
+            TASK_QUEUE.push_fifo(runnable);
           } else {
-              TASK_QUEUE.push_front(runnable);
+            TASK_QUEUE.push_prio(runnable);
           }
       };
       async_task::spawn(future, WithInfo(schedule))
@@ -57,21 +62,29 @@ MinotaurOS 的调度方式为改进的轮转调度（如#[@lst:调度器实现]�
 
 === 多核调度和无栈上下文切换
 
-MinotaurOS 支持多个 CPU 核心的运行。每个核心可以平等地从调度序列中取出`Runnable`运行。为了实现这个目的，每个 CPU 核心都有一个 thread local 的数据结构`Hart`，包含核心 ID 和核心上下文。`tp`寄存器保存了当前核心的 ID，通过这个 ID 可以获取到当前核心的`Hart`。核心上下文`HartContext`保存了当前核心正在运行的用户任务，其中包含`Thread`对象的引用和页表。上述数据结构定义如#[@lst:CPU核心数据结构]所示。
+MinotaurOS 支持多个 CPU 核心的运行。每个核心可以平等地从调度序列中取出`Runnable`运行。为了实现这个目的，每个 CPU 核心都有一个 thread local 的数据结构`Hart`，包含核心 ID 和核心上下文。`tp`寄存器保存了当前核心的 ID，通过这个 ID 可以获取到当前核心的`Hart`。核心上下文`HartContext`保存了当前核心正在运行的用户任务，其中包含`Thread`对象的引用、页表和地址空间 token。上述数据结构定义如#[@lst:CPU核心数据结构]所示。
 
 #code-figure(
   ```rs
   pub struct Hart {
       pub id: usize,
       pub ctx: HartContext,
+      pub on_kintr: bool,
+      pub on_page_test: bool,
+      pub last_page_fault: SyscallResult,
+      kintr_rec: usize,
+      asid_manager: LateInit<ASIDManager>,
   }
 
   pub struct HartContext {
       pub user_task: Option<UserTask>,
+      pub last_syscall: SyscallCode,
+      pub timer_during_sys: usize,
   }
 
   pub struct UserTask {
       pub thread: Arc<Thread>,
+      pub token: usize,
       pub root_pt: PageTable,
   }
   ```,
@@ -106,15 +119,15 @@ MinotaurOS 支持多个 CPU 核心的运行。每个核心可以平等地从调�
 #code-figure(
   ```rs
   async fn thread_loop(thread: Arc<Thread>) {
-      loop {
-          trap_return();
-          trap_from_user().await;
-          if let Some(code) = thread.inner().exit_code {
-              debug!(...);
-              break;
-          }
-      }
-      thread.on_terminate();
+    loop {
+        trap_return();
+        trap_from_user().await;
+        check_signal();
+        if thread.inner().exit_code.is_some() {
+            break;
+        }
+    }
+    thread.on_exit();
   }
   ```,
   caption: [线程循环],
@@ -140,7 +153,10 @@ MinotaurOS 支持多个 CPU 核心的运行。每个核心可以平等地从调�
       pub addr_space: AddressSpace,             // 地址空间
       pub mnt_ns: Arc<MountNamespace>,          // 挂载命名空间
       pub fd_table: FdTable,                    // 文件描述符表
+      pub futex_queue: FutexQueue,              // 互斥锁队列
+      pub timers: [ITimerVal; 3],               // 定时器
       pub cwd: String,                          // 工作目录
+      pub exe: String,                          // 可执行文件路径
       pub exit_code: Option<i8>,                // 退出状态
   }
   ```,
@@ -155,7 +171,8 @@ MinotaurOS 支持多个 CPU 核心的运行。每个核心可以平等地从调�
       pub process: Arc<Process>,
       pub signals: SignalController,
       pub event_bus: EventBus,
-      inner: UnsafeCell<ThreadInner>,
+      pub cpu_set: Mutex<CpuSet>,
+      inner: SyncUnsafeCell<ThreadInner>,
   }
 
   pub struct ThreadInner {

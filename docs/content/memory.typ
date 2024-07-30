@@ -16,7 +16,7 @@ MinotaurOS 使用单一页表结构，内存布局如#[@fig:内存布局]所示�
 
 MinotaurOS 存在两个内存分配器，分别是堆分配器和用户页帧分配器。堆分配器用于分配内核堆，即内存布局中位于内核镜像区域的内存，其分配的页帧始终位于所有页表的全局映射区域。用户页帧分配器分配内存布局中位于可用内存区域的内存，其分配的页帧也存在于页表的全局映射区域（可以通过偏移直接访问），但是可能被同时映射到用户空间的虚拟地址。
 
-堆分配器和用户页帧分配器使用相同的数据结构保存（如#[@lst:分配器结构]所示），但在实现上不同。堆分配器使用 Buddy System 算法，用户页帧分配器使用线性分配回收算法。堆分配器和用户页帧分配器均使用 RAII 方式实现自动回收，即使用帧跟踪器的数据结构跟踪分配的内存。当帧跟踪器被析构时，自动执行回收操作。
+堆分配器和用户页帧分配器使用相同的数据结构保存（如#[@lst:分配器结构]所示），两个分配器均使用 Buddy System 算法实现。分配器使用 RAII 方式实现自动回收，即使用帧跟踪器的数据结构跟踪分配的内存。当帧跟踪器被析构时，自动执行回收操作。
 
 #code-figure(
   ```rs
@@ -31,22 +31,25 @@ MinotaurOS 存在两个内存分配器，分别是堆分配器和用户页帧分
 
 == 虚拟内存数据结构
 
-一个虚拟地址空间由一个`AddressSpace`对象描述（如#[@lst:AddressSpace对象]所示）。`AddressSpace`对象包含了根页表、ASID、区域映射表和页表帧数组。其中，区域映射表是 MinotaurOS 虚拟内存系统的核心数据结构，描述了虚拟地址空间的区域。不同的区域可能有不同的映射方式，例如线性映射、共享内存、写时复制等。页表帧数组用于存储页表帧的跟踪器。
+一个虚拟地址空间由一个`AddressSpace`对象描述（如#[@lst:AddressSpace对象]所示）。`AddressSpace`对象包含了唯一的地址空间标识、区域映射表和页表帧数组等。其中，地址空间标识用于 TLB 优化，在性能优化一章中会详细介绍；区域映射表是 MinotaurOS 虚拟内存系统的核心数据结构，描述了虚拟地址空间的区域。不同的区域可能有不同的映射方式，例如线性映射、共享内存、写时复制等。页表帧数组用于存储页表帧的跟踪器。
 
 #code-figure(
   ```rs
   pub struct AddressSpace {
-      /// 根页表
-      pub root_pt: PageTable,
-
-      /// 与地址空间关联的 ASID
-      asid: ASID,
-
-      /// 地址空间中的区域
-      regions: BTreeMap<VirtPageNum, Box<dyn ASRegion>>,
-
-      /// 该地址空间关联的页表帧
-      pt_dirs: Vec<HeapFrameTracker>,
+    /// 地址空间标识
+    pub token: usize,
+    /// 根页表
+    pub root_pt: PageTable,
+    /// 地址空间中的区域
+    regions: BTreeMap<VirtPageNum, Box<dyn ASRegion>>,
+    /// 该地址空间关联的页表帧
+    pt_dirs: Vec<HeapFrameTracker>,
+    /// System V 共享内存
+    sysv_shm: Arc<Mutex<SysVShm>>,
+    /// 堆范围
+    heap: Range<VirtPageNum>,
+    /// 堆最大位置
+    heap_max: VirtPageNum,
   }
   ```,
   caption: [AddressSpace 对象],
@@ -55,36 +58,34 @@ MinotaurOS 存在两个内存分配器，分别是堆分配器和用户页帧分
 
 == 虚拟地址空间区域实现
 
-MinotaurOS 的虚拟地址空间区域通过`ASRegion`接口定义（如#[@lst:ASRegion接口]所示）。`ASRegion`定义了虚拟地址空间区域的基本操作，包括获取元数据、映射、解映射、复制和错误处理程序。目前为止，MinotaurOS 实现了`DirectRegion`、`LazyRegion`、`FileRegion`三种区域类型。其中，`DirectRegion`用于内核空间的全局映射；`LazyRegion`用于用户空间的页，实现了写时复制；`FileRegion`用于文件映射。
+MinotaurOS 的虚拟地址空间区域通过`ASRegion`接口定义（如#[@lst:ASRegion接口]所示）。`ASRegion`定义了虚拟地址空间区域的基本操作，包括获取元数据、映射、解映射、复制和错误处理程序。目前为止，MinotaurOS 实现了`DirectRegion`、`LazyRegion`、`FileRegion`、`SharedRegion`四种区域类型。其中，`DirectRegion`用于内核空间的全局映射；`LazyRegion`用于用户空间的页，实现了写时复制；`FileRegion`用于文件映射；`SharedRegion`用于共享内存。
 
 地址空间区域元数据`ASRegionMeta`存储了区域的基本信息，包括区域的名称、起始地址、大小和权限。每个`ASRegion`对象都需要实现`metadata`方法，返回一个`ASRegionMeta`对象的引用。为了与整体地址空间解耦，`ASRegion`及其元数据不存储页表帧和根页表，而是要求映射和解映射等操作所需的根页表在调用时传入，并将映射过程产生的页表帧委托给上层的`AddressSpace`管理。因此，虽然一个地址空间区域必然包含在一个地址空间中，但是地址空间区域并不与特定的地址空间绑定。这方便了地址空间区域的复制和移动。
 
 #code-figure(
   ```rs
-  pub trait ASRegion: Send + Sync {
-      /// 区域元数据
+    pub trait ASRegion: Send + Sync {
       fn metadata(&self) -> &ASRegionMeta;
-
+      fn metadata_mut(&mut self) -> &mut ASRegionMeta;
       /// 将区域映射到页表，返回创建的页表帧
       fn map(&self, root_pt: PageTable, overwrite: bool)
           -> Vec<HeapFrameTracker>;
-
       /// 将区域取消映射到页表
       fn unmap(&self, root_pt: PageTable);
-
-      /// 调整区域大小
-      fn resize(&mut self, new_pages: usize);
-
+      /// 分割区域
+      fn split(&mut self, start: usize, size: usize)
+          -> Vec<Box<dyn ASRegion>>;
+      /// 扩展区域
+      fn extend(&mut self, size: usize);
       /// 拷贝区域
-      fn fork(&mut self, parent_pt: PageTable)
-          -> Box<dyn ASRegion>;
-
+      fn fork(&mut self, parent_pt: PageTable) -> Box<dyn ASRegion>;
       /// 同步区域
       fn sync(&self) {}
-
       /// 错误处理
-      fn fault_handler(&mut self, pt: PageTable, vpn: VirtPageNum)
-          -> SyscallResult;
+      fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum)
+      -> SyscallResult<Vec<HeapFrameTracker>> {
+          Err(Errno::EINVAL)
+      }
   }
   ```,
   caption: [ASRegion 接口],
@@ -97,7 +98,7 @@ MinotaurOS 的虚拟地址空间区域通过`ASRegion`接口定义（如#[@lst:A
 
 === 懒惰映射区域
 
-`LazyRegion`为区域内的每一个虚拟页存储了一个`PageState`对象（如#[@lst:PageState对象]所示）。一个虚拟页可能存在三种状态：未分配、已映射和写时复制。若虚拟页处于未分配状态，则对应的`PageState`无需存储额外信息；若虚拟页处于已映射状态，则其独占持有一个用户页帧跟踪器；若虚拟页处于写时复制状态，则与其他区域（可能存在于不同的地址空间）共享持有一个用户页帧跟踪器。
+`LazyRegion`为区域内的每一个虚拟页存储了一个`PageState`对象（如#[@lst:LazyRegionPageState对象]所示）。一个虚拟页可能存在三种状态：未分配、已映射和写时复制。若虚拟页处于未分配状态，则对应的`PageState`无需存储额外信息；若虚拟页处于已映射状态，则其独占持有一个用户页帧跟踪器；若虚拟页处于写时复制状态，则与其他区域（可能存在于不同的地址空间）共享持有一个用户页帧跟踪器。
 
 #code-figure(
   ```rs
@@ -110,8 +111,8 @@ MinotaurOS 的虚拟地址空间区域通过`ASRegion`接口定义（如#[@lst:A
       CopyOnWrite(Arc<UserFrameTracker>),
   }
   ```,
-  caption: [PageState 对象],
-  label-name: "PageState对象",
+  caption: [LazyRegion PageState 对象],
+  label-name: "LazyRegionPageState对象",
 )
 
 #h(2em) 将`LazyRegion`映射到页表时，根据每一个虚拟页的状态不同，映射到页表上的对应页表项的权限也不同。即页表项权限与区域的权限并不一定保持一致。页表项映射规则如#[@algo:LazyRegion页表映射]所示：
@@ -126,12 +127,18 @@ MinotaurOS 的虚拟地址空间区域通过`ASRegion`接口定义（如#[@lst:A
   pseudocode(
     no-number,
     [*input:* page],
-    [*if* page.state = Free *then*], ind,
-    [page.pte $<-$ empty], ded,
-    [*else if* page.state = Framed *then*], ind,
-    [page.pte $<-$ region.perm], ded,
-    [*else* page.state = CopyOnWrite *then*], ind,
-    [page.pte $<-$ region.perm - Write], ded,
+    [*if* page.state = Free *then*],
+    ind,
+    [page.pte $<-$ empty],
+    ded,
+    [*else if* page.state = Framed *then*],
+    ind,
+    [page.pte $<-$ region.perm],
+    ded,
+    [*else* page.state = CopyOnWrite *then*],
+    ind,
+    [page.pte $<-$ region.perm - Write],
+    ded,
     [*end*],
   ),
   caption: [LazyRegion 页表映射],
@@ -144,14 +151,18 @@ MinotaurOS 的虚拟地址空间区域通过`ASRegion`接口定义（如#[@lst:A
   pseudocode(
     no-number,
     [*input:* page],
-    [*if* page.state = Free *then*], ind,
+    [*if* page.state = Free *then*],
+    ind,
     [page.frame $<-$ *alloc_frame*()],
-    [page.state $<-$ Framed], ded,
-    [*else if* page.state = CopyOnWrite *then*], ind,
+    [page.state $<-$ Framed],
+    ded,
+    [*else if* page.state = CopyOnWrite *then*],
+    ind,
     [new_frame $<-$ *alloc_frame*()],
     [*copy_frame*(new_frame, page.frame)],
     [page.frame $<-$ new_frame],
-    [page.state $<-$ Framed], ded,
+    [page.state $<-$ Framed],
+    ded,
     [*end*],
     [*remap*(page)],
   ),
@@ -167,20 +178,28 @@ MinotaurOS 的虚拟地址空间区域通过`ASRegion`接口定义（如#[@lst:A
     [*input:* region],
     no-number,
     [*output:* new_region],
-    [*for each* page *in* region *do*], ind,
-    [*if* page.state = Free *then*], ind,
+    [*for each* page *in* region *do*],
+    ind,
+    [*if* page.state = Free *then*],
+    ind,
     [new_page.frame $<-$ empty],
-    [new_page.state $<-$ Free], ded,
-    [*else if* page.state = Framed *then*], ind,
+    [new_page.state $<-$ Free],
+    ded,
+    [*else if* page.state = Framed *then*],
+    ind,
     [new_page.frame $<-$ page.frame],
     [new_page.state $<-$ CopyOnWrite],
-    [page.state $<-$ CopyOnWrite], ded,
-    [*else* page.state = CopyOnWrite *then*], ind,
+    [page.state $<-$ CopyOnWrite],
+    ded,
+    [*else* page.state = CopyOnWrite *then*],
+    ind,
     [new_page.frame $<-$ page.frame],
     [new_page.state $<-$ CopyOnWrite],
-    [new_region.*push*(new_page)], ded,
+    [new_region.*push*(new_page)],
+    ded,
     [*end*],
-    [*remap*(page)], ded,
+    [*remap*(page)],
+    ded,
     [*end*],
   ),
   caption: [LazyRegion 复制],
@@ -188,5 +207,36 @@ MinotaurOS 的虚拟地址空间区域通过`ASRegion`接口定义（如#[@lst:A
 )
 
 #h(2em) 通过上述设计，MinotaurOS 能够在创建进程时实现写时复制，减少复制开销；同时允许了程序申请巨大的内存空间，而不会立即分配物理页帧，提高了内存分配的效率。
+
+=== 共享内存区域
+
+MinotaurOS 支持两种类型的共享内存：System V 共享内存和匿名共享内存。System V 共享内存由`shmat`系列系统调用产生，匿名共享内存由`mmap`系统调用产生。System V 共享内存通过`SysVShm`对象管理，`SysVShm`对象包含了共享内存的 id 和对应分配的页帧，如#[@lst:SysVShm对象]所示。
+
+#code-figure(
+  ```rs
+  pub struct SysVShm {
+      ids: IdAllocator,
+      shm: BTreeMap<usize, Vec<Arc<UserFrameTracker>>>,
+  }
+  ```,
+  caption: [SysVShm 对象],
+  label-name: "SysVShm对象",
+)
+
+#h(2em) System V 共享内存与匿名共享内存统一使用`SharedRegion`数据结构实现。`SharedRegion`的虚拟页状态有三种，分别是未分配、已映射和引用映射。与`LazyRegion`自身持有用户页帧跟踪器不同，`SharedRegion`的引用映射状态下，地址空间区域对象引用持有在`SysVShm`中的用户页帧跟踪器。在帧管理上，System V 共享内存总是在调用时即时分配物理页帧，而匿名共享内存则是在第一次读/写操作时分配物理页帧。
+
+#code-figure(```rs
+  enum PageState {
+      /// 页面为空，未分配物理页帧
+      Free,
+      /// 页面已映射
+      Framed(UserFrameTracker),
+      /// 通过 `shmem` 系统调用映射的页面
+      Reffed(Weak<UserFrameTracker>),
+  }
+  ```,
+  caption: [SharedRegion PageState 对象],
+  label-name: "SharedRegionPageState对象",
+)
 
 #pagebreak()

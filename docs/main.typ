@@ -26,3 +26,4 @@
 #include "content/filesystem.typ"
 #include "content/interrupt.typ"
 #include "content/signal.typ"
+#include "content/net.typ"
