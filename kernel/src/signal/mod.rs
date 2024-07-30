@@ -38,20 +38,20 @@ impl SignalHandler {
 }
 
 #[derive(Default, Clone)]
-pub struct SignalQueue {
+struct SignalQueue {
     queue: VecDeque<Signal>,
     set: SigSet,
 }
 
 impl SignalQueue {
-    pub fn push(&mut self, signal: Signal) {
+    fn push(&mut self, signal: Signal) {
         if !self.set.contains(signal.into()) {
             self.queue.push_back(signal);
             self.set.insert(signal.into());
         }
     }
 
-    pub fn pop(&mut self) -> Option<Signal> {
+    fn pop(&mut self) -> Option<Signal> {
         self.queue.pop_front().inspect(|s| self.set.remove((*s).into()))
     }
 }

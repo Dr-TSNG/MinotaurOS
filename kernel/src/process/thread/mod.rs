@@ -29,6 +29,8 @@ pub struct Thread {
 
 pub struct ThreadInner {
     pub trap_ctx: TrapContext,
+    pub sys_can_restart: bool,
+    pub sys_last_a0: usize,
     pub tid_address: TidAddress,
     pub rusage: ResourceUsage,
     pub exit_code: Option<i8>,
@@ -51,6 +53,8 @@ impl Thread {
         let tid = tid.unwrap_or_else(|| Arc::new(TidTracker::new()));
         let inner = ThreadInner {
             trap_ctx,
+            sys_can_restart: false,
+            sys_last_a0: 0,
             tid_address: TidAddress::default(),
             rusage: ResourceUsage::new(),
             exit_code: None,

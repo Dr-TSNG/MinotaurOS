@@ -252,6 +252,9 @@ pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -
     let fut = WaitPidFuture::new(pid, options, wstatus);
     let ret = suspend_now(None, Event::all().difference(Event::CHILD_EXIT), fut).await;
     current_thread().signals.set_waiting_child(false);
+    if ret == Err(Errno::EINTR) {
+        current_thread().inner().sys_can_restart = true;
+    }
     info!("[wait4] ret: {:?}", ret);
     ret.map(|pid| pid as usize)
 }

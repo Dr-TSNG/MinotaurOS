@@ -23,6 +23,9 @@ pub fn trap_return() {
     local_hart().disable_kintr();
     set_user_trap_entry();
     current_thread().event_bus.reset();
+    let inner = current_thread().inner();
+    let trap_ctx = &mut inner.trap_ctx;
+    inner.sys_can_restart = false;
 
     // if local_hart().ctx.timer_during_sys > 1 {
     //     warn!(
@@ -33,18 +36,17 @@ pub fn trap_return() {
     // }
 
     local_hart().ctx.timer_during_sys = 0;
-    trace!("Trap return to user, pc: {:#x}", current_trap_ctx().get_pc());
+    trace!("Trap return to user, pc: {:#x}", trap_ctx.get_pc());
 
     unsafe {
-        current_thread().inner().rusage.trap_out();
+        inner.rusage.trap_out();
 
-        let trap_ctx = current_trap_ctx();
         trap_ctx.fctx.trap_out();
         trap_ctx.sstatus.set_fs(FS::Clean);
         __restore_to_user(trap_ctx);
         trap_ctx.fctx.trap_in(trap_ctx.sstatus);
 
-        current_thread().inner().rusage.trap_in();
+        inner.rusage.trap_in();
     }
 }
 
@@ -72,6 +74,7 @@ pub async fn trap_from_user() {
                     ctx.user_x[15],
                 ],
             ).await;
+            current_thread().inner().sys_last_a0 = ctx.user_x[10];
             ctx.user_x[10] = result.unwrap_or_else(|err| -(err as isize) as usize);
         }
         | Trap::Exception(Exception::LoadFault)
@@ -85,6 +88,10 @@ pub async fn trap_from_user() {
         Trap::Exception(Exception::InstructionFault)
         | Trap::Exception(Exception::InstructionPageFault) => {
             handle_page_fault(VirtAddr(sepc), ASPerms::X);
+        }
+        Trap::Exception(Exception::Breakpoint) => {
+            error!("Breakpoint at {:#x}", sepc);
+            current_thread().recv_signal(Signal::SIGTRAP);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             query_timer();
@@ -112,6 +119,13 @@ pub fn check_signal() {
             }
             SignalHandler::User(sig_action) => {
                 debug!("Switch pc to {:#x}", sig_action.sa_handler);
+                // 重启系统调用
+                if current_thread().inner().sys_can_restart
+                    && sig_action.sa_flags.contains(SigActionFlags::SA_RESTART) {
+                    info!("Restart syscall after signal");
+                    trap_ctx.user_x[10] = current_thread().inner().sys_last_a0;
+                    trap_ctx.set_pc(trap_ctx.get_pc() - 4);
+                }
                 trap_ctx.fctx.signal_enter();
                 let ucontext = UContext::new(poll.blocked_before, trap_ctx);
                 let user_sp = trap_ctx.get_sp() - size_of::<UContext>();
