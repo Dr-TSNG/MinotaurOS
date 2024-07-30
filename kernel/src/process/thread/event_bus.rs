@@ -141,7 +141,7 @@ impl Future for WaitPidFuture {
             drop(proc_inner);
             if self.wstatus != 0 {
                 let addr = user_transmute_w::<i32>(self.wstatus)?.ok_or(Errno::EINVAL)?;
-                let exit_status = (child.inner.lock().exit_code.unwrap() as i32) << 8;
+                let exit_status = child.inner.lock().exit_code.unwrap() as i32;
                 *addr = exit_status;
             }
             Poll::Ready(Ok(child.pid.0))

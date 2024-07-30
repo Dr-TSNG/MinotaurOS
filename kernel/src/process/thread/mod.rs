@@ -33,7 +33,7 @@ pub struct ThreadInner {
     pub sys_last_a0: usize,
     pub tid_address: TidAddress,
     pub rusage: ResourceUsage,
-    pub exit_code: Option<i8>,
+    pub exit_code: Option<u8>,
 }
 
 #[derive(Default)]
@@ -93,7 +93,7 @@ impl Thread {
         self.signals.push(signal);
     }
 
-    pub fn terminate(&self, exit_code: i8) {
+    pub fn terminate(&self, exit_code: u8) {
         let mut proc_inner = self.process.inner.lock();
         proc_inner.threads.remove(&self.tid.0);
         self.inner().exit_code = Some(exit_code);

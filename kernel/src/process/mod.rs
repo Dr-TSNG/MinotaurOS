@@ -73,7 +73,7 @@ pub struct ProcessInner {
     /// 可执行文件路径
     pub exe: String,
     /// 退出状态
-    pub exit_code: Option<i8>,
+    pub exit_code: Option<u8>,
 }
 
 impl Process {
@@ -340,7 +340,7 @@ impl Process {
         Ok(new_tid)
     }
 
-    pub fn terminate(&self, exit_code: i8) {
+    pub fn terminate(&self, exit_code: u8) {
         let mut proc_inner = self.inner.lock();
         proc_inner.exit_code = Some(exit_code);
         proc_inner.threads.retain(|_, thread| {
@@ -351,7 +351,7 @@ impl Process {
         });
     }
 
-    pub fn on_thread_exit(&self, tid: Tid, exit_code: i8) {
+    pub fn on_thread_exit(&self, tid: Tid, exit_code: u8) {
         info!("Thread {} exited with code {}", tid, exit_code);
         let monitor = MONITORS.lock();
         let mut proc_inner = self.inner.lock();
@@ -369,7 +369,7 @@ impl Process {
         }
     }
 
-    fn on_child_exit(&self, pid: Pid, exit_code: i8) {
+    fn on_child_exit(&self, pid: Pid, exit_code: u8) {
         info!("Child {} exited with code {}", pid, exit_code);
         for thread in self.inner.lock().threads.values() {
             if let Some(thread) = thread.upgrade() {

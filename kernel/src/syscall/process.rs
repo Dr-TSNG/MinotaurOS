@@ -18,12 +18,12 @@ use crate::result::{Errno, SyscallResult};
 use crate::sched::{suspend_now, yield_now};
 use crate::signal::ffi::Signal;
 
-pub fn sys_exit(exit_code: i8) -> SyscallResult<usize> {
+pub fn sys_exit(exit_code: u8) -> SyscallResult<usize> {
     current_thread().terminate(exit_code);
     Ok(0)
 }
 
-pub fn sys_exit_group(exit_code: i8) -> SyscallResult<usize> {
+pub fn sys_exit_group(exit_code: u8) -> SyscallResult<usize> {
     current_process().terminate(exit_code);
     Ok(0)
 }

@@ -57,7 +57,7 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) -> SyscallResult {
         Ok(()) => debug!("Page fault resolved"),
         Err(Errno::ENOSPC) => {
             error!("Fatal page fault: Out of memory, kill process");
-            thread.process.terminate(-1);
+            thread.process.terminate(Errno::ENOSPC as u8 + 128);
         }
         Err(e) => {
             error!("Page fault failed: {:?}, send SIGSEGV", e);
