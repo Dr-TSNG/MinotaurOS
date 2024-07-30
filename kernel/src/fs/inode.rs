@@ -220,28 +220,28 @@ impl dyn Inode {
 
     pub async fn read(&self, buf: &mut [u8], offset: isize) -> SyscallResult<isize> {
         match &self.metadata().page_cache {
-            Some(cache) => cache.read(self, buf, offset).await,
+            Some(cache) => cache.read(buf, offset).await,
             None => self.read_direct(buf, offset).await,
         }
     }
 
     pub async fn write(&self, buf: &[u8], offset: isize) -> SyscallResult<isize> {
         match &self.metadata().page_cache {
-            Some(cache) => cache.write(self, buf, offset).await,
+            Some(cache) => cache.write(buf, offset).await,
             None => self.write_direct(buf, offset).await,
         }
     }
 
     pub async fn truncate(&self, size: isize) -> SyscallResult {
         match &self.metadata().page_cache {
-            Some(cache) => cache.truncate(self, size).await,
+            Some(cache) => cache.truncate(size).await,
             None => self.truncate_direct(size).await,
         }
     }
 
     pub async fn sync(&self) -> SyscallResult<isize> {
         if let Some(page_cache) = &self.metadata().page_cache {
-            page_cache.sync_all(self).await?;
+            page_cache.sync_all().await?;
         }
         Ok(0)
     }
@@ -310,5 +310,19 @@ impl dyn Inode {
     pub fn mnt_ns_path(&self, mnt_ns: &MountNamespace) -> SyscallResult<String> {
         let pre = mnt_ns.get_inode_snapshot(self)?.1;
         Ok(format!("{}{}", pre, self.metadata().path))
+    }
+}
+
+pub struct DummyInode;
+
+impl InodeInternal for DummyInode {}
+
+impl Inode for DummyInode {
+    fn metadata(&self) -> &InodeMeta {
+        panic!()
+    }
+
+    fn file_system(&self) -> Weak<dyn FileSystem> {
+        panic!()
     }
 }

@@ -6,7 +6,6 @@ use alloc::sync::{Arc, Weak};
 use core::sync::atomic::Ordering;
 use async_trait::async_trait;
 use log::debug;
-use tap::Tap;
 use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
@@ -59,15 +58,16 @@ impl TmpfsInodeInner {
 #[async_trait]
 impl InodeInternal for TmpfsInode {
     async fn read_direct(&self, _: &mut [u8], _: isize) -> SyscallResult<isize> {
-        panic!("Tmpfs file should always be read from page cache");
+        Ok(0)
     }
 
     async fn write_direct(&self, _: &[u8], _: isize) -> SyscallResult<isize> {
-        panic!("Tmpfs file should always be written to page cache");
+        Ok(0)
     }
 
-    async fn truncate_direct(&self, _: isize) -> SyscallResult {
-        panic!("Tmpfs file should always be truncated in page cache");
+    async fn truncate_direct(&self, size: isize) -> SyscallResult {
+        self.metadata.inner.lock().size = size;
+        Ok(())
     }
 
     async fn do_lookup_name(self: Arc<Self>, name: &str) -> SyscallResult<Arc<dyn Inode>> {
@@ -94,7 +94,7 @@ impl InodeInternal for TmpfsInode {
             return Err(Errno::EEXIST);
         }
         let page_cache = match mode {
-            InodeMode::IFREG => Some(PageCache::new().tap_mut(|it| it.set_deleted())),
+            InodeMode::IFREG => Some(PageCache::new()),
             _ => None,
         };
         let now = real_time();
@@ -106,7 +106,7 @@ impl InodeInternal for TmpfsInode {
                 name.to_string(),
                 format!("{}/{}", self.metadata().path, name),
                 Some(self.clone()),
-                page_cache,
+                page_cache.clone(),
                 now.into(),
                 now.into(),
                 now.into(),
@@ -115,6 +115,7 @@ impl InodeInternal for TmpfsInode {
             fs: Arc::downgrade(&fs),
             inner: Default::default(),
         });
+        page_cache.map(|it| it.set_inode(inode.clone()));
         inner.children.insert(name.to_string(), inode.clone());
         Ok(inode)
     }

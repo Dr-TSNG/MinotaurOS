@@ -317,7 +317,7 @@ impl AddressSpace {
         };
         let metadata = ASRegionMeta { name, perms, start, pages };
         let region: Box<dyn ASRegion> = match inode {
-            Some(inode) => FileRegion::new(metadata, Arc::downgrade(&inode), offset),
+            Some(inode) => FileRegion::new(metadata, inode.page_cache().unwrap(), offset),
             None if is_shared => SharedRegion::new_free(metadata),
             None => LazyRegion::new_free(metadata),
         };

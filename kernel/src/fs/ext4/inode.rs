@@ -100,7 +100,7 @@ impl Ext4Inode {
                     dirent.name.to_string(),
                     path,
                     Some(self.clone()),
-                    page_cache,
+                    page_cache.clone(),
                     Duration::from_secs(inode_ref.access_time as u64).into(),
                     Duration::from_secs(inode_ref.modification_time as u64).into(),
                     Duration::from_secs(inode_ref.change_inode_time as u64).into(),
@@ -109,6 +109,7 @@ impl Ext4Inode {
                 fs: self.fs.clone(),
                 inner: Ext4InodeInner::new(file),
             });
+            page_cache.map(|it| it.set_inode(inode.clone()));
             self.inner().children.insert(dirent.name.to_string(), inode);
         }
         self.inner().children_loaded = true;
@@ -224,7 +225,7 @@ impl InodeInternal for Ext4Inode {
                 name.to_string(),
                 path,
                 Some(self.clone()),
-                page_cache,
+                page_cache.clone(),
                 Duration::from_secs(inode_ref.access_time as u64).into(),
                 Duration::from_secs(inode_ref.modification_time as u64).into(),
                 Duration::from_secs(inode_ref.change_inode_time as u64).into(),
@@ -233,6 +234,7 @@ impl InodeInternal for Ext4Inode {
             fs: self.fs.clone(),
             inner: Ext4InodeInner::new(Some(file)),
         });
+        page_cache.map(|it| it.set_inode(inode.clone()));
         self.inner().children.insert(name.to_string(), inode.clone());
         Ok(inode)
     }
