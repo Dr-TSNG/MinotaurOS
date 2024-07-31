@@ -8,16 +8,15 @@
 
 中断发生时，RISC-V 处理器会将中断号保存到`scause`寄存器中，将中断发生时的指令地址保存到`sepc`寄存器中。之后，跳转到`stvec`寄存器设定的中断处理程序。对于内核态中断和用户态中断，MinotaurOS 使用不同的中断处理函数。
 
-对于内核态中断，MinotaurOS 只需要保存 caller-saved 寄存器，然后调用 `trap_from_kernel` 函数。这是因为内核态中断不会改变内核的栈帧，在控制流角度就像插入了一次普通的函数调用，编译器会自动保存和恢复 callee-saved 寄存器。
+对于内核态中断，MinotaurOS 只需要保存 caller-saved 寄存器，然后调用`trap_from_kernel`函数。这是因为内核态中断不会改变内核的栈帧，在控制流角度就像插入了一次普通的函数调用，编译器会自动保存和恢复 callee-saved 寄存器。
 
-对于用户态中断，MinotaurOS 会保存中断上下文（如#[@lst:中断上下文]所示），并恢复内核 callee-saved 寄存器和切换内核栈，然后执行`ret`。这是因为在编译器看来，当前内核栈状态是执行了 `trap_return` 函数，因此需要在返回前恢复 callee-saved 寄存器。此时，内核的控制流会回到协程调度器管理下的 `thread_loop` 函数中（见第 4.1.5 节）。然后，再执行对应的中断处理函数。处理完成后，MinotaurOS 会调用 `trap_return` 函数，恢复之前保存的中断上下文，然后执行`sret`将控制流返回到用户态。整体流程如#[@fig:用户态中断处理流程]所示。
+对于用户态中断，MinotaurOS 会保存中断上下文（如#[@lst:中断上下文]所示），并恢复内核 callee-saved 寄存器和切换内核栈，然后执行`ret`。这是因为在编译器看来，当前内核栈状态是执行了`trap_return`函数，因此需要在返回前恢复 callee-saved 寄存器。此时，内核的控制流会回到协程调度器管理下的`thread_loop`函数中（见第 4.1.5 节）。然后，再执行对应的中断处理函数。处理完成后，MinotaurOS 会调用`trap_return`函数，恢复之前保存的中断上下文，然后执行`sret`将控制流返回到用户态。整体流程如#[@fig:用户态中断处理流程]所示。
 
 #code-figure(
   ```rs
   pub struct TrapContext {
       /*  0 */ pub user_x: [usize; 32],
-      /* 32 */ pub user_f: [usize; 32],
-      /* 64 */ pub fcsr: usize,
+      /* 32 */ pub fctx: FloatContext,
       /* 65 */ pub sstatus: Sstatus,
       /* 66 */ pub sepc: usize,
       /* 67 */ pub kernel_tp: usize,
@@ -41,39 +40,74 @@
 
 === 内核态中断处理
 
-内核态中断分为三类，分别是时钟中断、外部中断和缺页异常。目前为止，MinotaurOS 并未实现内核态时钟中断，只实现了外部中断和缺页异常的处理，如#[@lst:内核态中断处理]所示。对于未识别的内核态中断，MinotaurOS 会直接触发崩溃。
+内核中断分为三类，分别是时钟中断、外部中断和缺页异常，如#[@lst:内核态中断处理]所示。
 
 #code-figure(
   ```rs
-  fn trap_from_kernel() {
+  fn trap_from_kernel() -> bool {
+      local_hart().on_kintr = true;
       let stval = stval::read();
       let sepc = sepc::read();
       let trap = scause::read().cause();
-      debug!(
-          "Trap {:?} from kernel at {:#x} for {:#x}",
-          trap, sepc, stval,
-      );
       match trap {
-          | Trap::Exception(Exception::LoadFault)
+          Trap::Exception(Exception::LoadFault)
           | Trap::Exception(Exception::LoadPageFault) => {
-              handle_page_fault(VirtAddr(stval), ASPerms::R);
+              local_hart().last_page_fault =
+                handle_page_fault(VirtAddr(stval), ASPerms::R);
           }
           Trap::Exception(Exception::StoreFault)
           | Trap::Exception(Exception::StorePageFault) => {
-              handle_page_fault(VirtAddr(stval), ASPerms::W);
+              local_hart().last_page_fault =
+                handle_page_fault(VirtAddr(stval), ASPerms::W);
           }
           Trap::Exception(Exception::InstructionFault)
           | Trap::Exception(Exception::InstructionPageFault) => {
-              handle_page_fault(VirtAddr(sepc), ASPerms::X);
+              local_hart().last_page_fault =
+                handle_page_fault(VirtAddr(stval), ASPerms::X);
+          }
+          Trap::Interrupt(Interrupt::SupervisorTimer) => {
+              local_hart().ctx.timer_during_sys += 1;
+              query_timer();
+              set_next_trigger();
+          }
+          Trap::Interrupt(Interrupt::SupervisorExternal) => {
+              BOARD_INFO.plic.handle_irq(local_hart().id);
           }
           _ => {
               panic!("Fatal");
           }
       }
+      local_hart().on_kintr = false;
+      local_hart().on_page_test
   }
   ```,
   caption: [内核态中断处理],
   label-name: "内核态中断处理",
+)
+
+#h(2em) 为了支持缺页异常以外的内核中断，且避免出现嵌套内核中断，我们设计了中断保护机制：`kintr_rec`记录了当前中断保护的层数，`on_kintr`标志记录了当前是否在内核中断处理中。当且仅当`kintr_rec`为 0 且`on_kintr`为`false`时，才会启用内核中断。当内核中断发生时，CPU 会自动关闭中断；在处理函数中，`on_kintr`被设置为`true`，从而避免出现嵌套。在内核中断外的临界区中，通过 RAII 风格的保护结构`KIntrGuard`来控制`kintr_rec`的增减，从而保证中断保护的正确性。
+
+#code-figure(
+  ```rs
+  pub fn enable_kintr(&mut self) {
+      self.kintr_rec -= 1;
+      if self.kintr_rec == 0 && !self.on_kintr {
+          arch::enable_kernel_interrupt();
+      }
+  }
+
+  pub fn disable_kintr(&mut self) {
+      if self.kintr_rec == 0 {
+          arch::disable_kernel_interrupt();
+      }
+      self.kintr_rec += 1;
+  }
+
+  /// RAII 风格守护结构
+  pub struct KIntrGuard;
+  ```,
+  caption: [中断保护机制],
+  label-name: "中断保护机制",
 )
 
 #h(2em) 内核缺页异常通常发生在系统调用，内核向用户传入的地址写入数据时，触发写时复制机制。如果异常处理失败，则根据失败类型做不同处理。如果失败原因是内存不足，则终止当前进程；如果失败原因是非法访问，则发送`SIGSEGV`信号。处理函数如#[@lst:内核缺页异常处理]所示。
@@ -106,7 +140,7 @@
   label-name: "内核缺页异常处理",
 )
 
-#h(2em) 对于外部中断，MinotaurOS 使用程序查询的方式来处理。外部中断的触发是由外部设备产生的，例如串口接收到数据、磁盘读写完成等。MinotaurOS 会在每次协程块执行完毕后，检查是否有外部中断发生。外部中断通过 PLIC 进行管理。PLIC 是 RISC-V 的外部中断控制器，用于管理外部中断的优先级和掩码。PLIC 的 MMIO 地址在设备树中定义。MinotaurOS 在解析完设备树后，初始化 PLIC。
+#h(2em) 外部中断的触发是由外部设备产生的，例如串口接收到数据、磁盘读写完成等。外部中断通过 PLIC 进行管理。PLIC 是 RISC-V 的外部中断控制器，用于管理外部中断的优先级和掩码。PLIC 的 MMIO 地址在设备树中定义。MinotaurOS 在解析完设备树后，初始化 PLIC。
 
 === 用户态中断处理
 

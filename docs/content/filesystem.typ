@@ -335,7 +335,37 @@ Inode 是文件系统的核心结构，其唯一地标识了文件系统中的�
 
 == Inode 缓存
 
+文件系统的访问存在相当的时间局部性，往往存在于绝对路径、父目录和子目录之间。在 Linux 当中，使用了哈希表来加快 Inode 的查找过程。MinotaurOS 也实现了类似的缓存机制。
 
+在 MinotaurOS 中，我们采用了一套查询零拷贝的缓存机制。`MountNamespace`中保存了两个`InodeCache`，分别用于绝对路径和相对路径的解析。`InodeCache`是一个哈希表，键为`HashKey`，值为弱引用的`Inode`。`HashKey`由父节点的 Inode key 和子路径组成，如#[@lst:HashKey]所示。
+#code-figure(
+  ```rs
+  #[derive(Eq, Hash, PartialEq, Clone, Debug)]
+  struct HashKey<'a> {
+      pub parent_key: usize,
+      pub subpath: Cow<'a, str>,
+  }
+
+  pub struct InodeCache(Mutex<HashMap<
+      HashKey<'static>,
+      Weak<dyn Inode>,
+  >>)
+  ```,
+  caption: [HashKey 和 InodeCache],
+  label-name: "HashKey",
+)
+
+Inode key 是全局自增的，在不同文件系统中，Inode 可能有相同的 ino，但不会有相同的 key。子路径由一个`Cow`类型的字符串表示，在`HashKey`中，子路径字符串只有在插入缓存时才会被复制构造，而在查询缓存时，子路径字符串作为`Cow::Borrowed`类型从调用者借用，避免了不必要的内存拷贝。
+
+#code-figure(
+  ```rs
+  // 插入缓存，复制构造
+  let hash_key = HashKey::new(parent_key, Cow::Owned(subpath));
+  // 查询缓存，零拷贝
+  let hash_key = HashKey::new(parent_key, Cow::Borrowed(subpath));
+  ```,
+  caption: [InodeCache 插入和查询],
+)
 
 == 路径解析
 
