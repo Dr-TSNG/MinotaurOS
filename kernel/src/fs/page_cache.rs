@@ -13,6 +13,7 @@ pub struct PageCache(ReMutex<PageCacheInner>);
 struct PageCacheInner {
     inode: Weak<dyn Inode>,
     file_size: usize,
+    deleted: bool,
     pages: BTreeMap<usize, Page>,
 }
 
@@ -32,6 +33,7 @@ impl PageCache {
         Arc::new(Self(ReMutex::new(PageCacheInner {
             inode: Weak::<DummyInode>::new(),
             file_size: 0,
+            deleted: false,
             pages: BTreeMap::new(),
         })))
     }
@@ -47,7 +49,7 @@ impl PageCache {
     }
 
     pub fn set_deleted(&self) {
-        self.0.lock().inode = Weak::<DummyInode>::new();
+        self.0.lock().deleted = true;
     }
 
     pub async fn load(&self, page_num: usize) -> SyscallResult {
@@ -55,7 +57,7 @@ impl PageCache {
         if inner.pages.get(&page_num).is_none() {
             let frame = alloc_user_frames(1)?;
             let page_buf = frame.ppn.byte_array();
-            if let Some(inode) = inner.inode.upgrade() {
+            if !inner.deleted && let Some(inode) = inner.inode.upgrade() {
                 inode.read_direct(page_buf, (page_num * PAGE_SIZE) as isize).await?;
             }
             inner.pages.insert(page_num, Page::new(frame));
@@ -85,7 +87,7 @@ impl PageCache {
                 None => {
                     let frame = alloc_user_frames(1)?;
                     let page_buf = frame.ppn.byte_array();
-                    if let Some(inode) = inner.inode.upgrade() {
+                    if !inner.deleted && let Some(inode) = inner.inode.upgrade() {
                         inode.read_direct(page_buf, (page_num * PAGE_SIZE) as isize).await?;
                     }
                     inner.pages.entry(page_num).or_insert(Page::new(frame))
@@ -136,8 +138,14 @@ impl PageCache {
     pub async fn truncate(&self, size: isize) -> SyscallResult {
         let mut inner = self.0.lock();
         inner.file_size = size as usize;
-        if let Some(inode) = inner.inode.upgrade() {
-            inode.truncate_direct(size).await?;
+        if inner.deleted {
+            if let Some(inode) = inner.inode.upgrade() {
+                inode.metadata().inner.lock().size = size;
+            }
+        } else {
+            if let Some(inode) = inner.inode.upgrade() {
+                inode.truncate_direct(size).await?;
+            }
         }
 
         let page_num = size as usize / PAGE_SIZE;
@@ -156,6 +164,9 @@ impl PageCache {
             Some(inode) => inode,
             None => return Ok(()),
         };
+        if inner.deleted {
+            return Ok(());
+        }
 
         let file_size = inode.metadata().inner.lock().size as usize;
         let page_start = offset / PAGE_SIZE;

@@ -154,7 +154,7 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
         Ok(()) => debug!("Page fault resolved"),
         Err(Errno::ENOSPC) => {
             error!("Fatal page fault: Out of memory, kill process");
-            current_process().terminate(Errno::ENOSPC as u8 + 128);
+            current_process().terminate(Errno::ENOSPC as u32 + 128);
         }
         Err(e) => {
             info!("Failed to resolve page fault, send SIGSEGV: {:?}", e);
