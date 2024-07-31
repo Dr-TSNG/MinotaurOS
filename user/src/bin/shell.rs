@@ -56,6 +56,7 @@ fn main() {
     sys_mkdir("/proc", 0);
     sys_mkdir("/tmp", 0);
     sys_mkdir("/sys", 0);
+    sys_mkdir("/etc", 0);
     let flags = VfsFlags::ST_WRITE | VfsFlags::ST_RELATIME;
     mount("dev", "/dev", "devtmpfs", flags, None);
     mount("proc", "/proc", "proc", flags, None);
@@ -65,8 +66,12 @@ fn main() {
     sa.sa_handler = sigchld_handler as usize;
     sigaction(SIGCHLD, Some(&sa), None);
     init_shell();
-    run_cmd("busybox mv /lib/dlopen_dso.so /dlopen_dso.so");
-    run_cmd("busybox mv /lib/glibc/* /lib");
-    run_cmd("busybox touch sort.src");
-    run_cmd("busybox sh");
+    run_cmd("mv /lib/dlopen_dso.so /dlopen_dso.so");
+    run_cmd("mv /lib/glibc/* /lib");
+    run_cmd("touch sort.src");
+
+    run_cmd("echo root:x:0:0::/:/busybox sh > /etc/passwd");
+    run_cmd("echo nobody:x:65534:65534:Kernel Overflow User:/:/usr/bin/nologin >> /etc/passwd");
+    
+    run_cmd("sh");
 }
