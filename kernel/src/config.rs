@@ -23,7 +23,6 @@ pub const KERNEL_STACK_SIZE: usize = 256 * KB;
 
 pub const KERNEL_HEAP_SIZE: usize = 48 * MB;
 pub const USER_STACK_SIZE: usize = 8 * MB;
-pub const USER_HEAP_SIZE: usize = 8 * MB;
 pub const USER_HEAP_SIZE_MAX: usize = 128 * MB;
 
 pub const MAX_FD_NUM: usize = 1024;

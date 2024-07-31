@@ -15,7 +15,7 @@ use log::{debug, info};
 use lru::LruCache;
 use xmas_elf::ElfFile;
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
-use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE, USER_HEAP_SIZE_MAX, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE_MAX, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::driver::GLOBAL_MAPPINGS;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file_system::MountNamespace;
@@ -191,19 +191,17 @@ impl AddressSpace {
         addr_space.map_region(region);
         debug!("[addr_space] Map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
 
-        // 映射用户堆
-        let uheap_bottom_vpn = max_end_vpn;
-        let uheap_top_vpn = uheap_bottom_vpn + USER_HEAP_SIZE / PAGE_SIZE;
+        // 映射用户堆（只映射一个空闲区域）
         let region = LazyRegion::new_free(ASRegionMeta {
             name: Some("[heap]".to_string()),
             perms: ASPerms::U | ASPerms::R | ASPerms::W,
-            start: uheap_bottom_vpn,
-            pages: uheap_top_vpn - uheap_bottom_vpn,
+            start: max_end_vpn,
+            pages: max_end_vpn - max_end_vpn,
         });
         addr_space.map_region(region);
-        addr_space.heap = uheap_bottom_vpn..uheap_top_vpn;
-        addr_space.heap_max = uheap_bottom_vpn + USER_HEAP_SIZE_MAX / PAGE_SIZE;
-        debug!("[addr_space] Map user heap: {:?} - {:?}", uheap_bottom_vpn, uheap_top_vpn);
+        addr_space.heap = max_end_vpn..max_end_vpn;
+        addr_space.heap_max = max_end_vpn + USER_HEAP_SIZE_MAX / PAGE_SIZE;
+        debug!("[addr_space] Map user heap: {:?} - {:?}", max_end_vpn, max_end_vpn);
 
         let mut auxv: Vec<Aux> = Vec::with_capacity(64);
         auxv.push(Aux::new(aux::AT_PHDR, load_base + elf.header.pt2.ph_offset() as usize));
@@ -317,7 +315,7 @@ impl AddressSpace {
         };
         let metadata = ASRegionMeta { name, perms, start, pages };
         let region: Box<dyn ASRegion> = match inode {
-            Some(inode) => FileRegion::new(metadata, inode.page_cache().unwrap(), offset),
+            Some(inode) => FileRegion::new(metadata, inode.page_cache().unwrap(), offset, is_shared),
             None if is_shared => SharedRegion::new_free(metadata),
             None => LazyRegion::new_free(metadata),
         };
