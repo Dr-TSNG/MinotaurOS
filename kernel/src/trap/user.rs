@@ -87,10 +87,10 @@ pub async fn trap_from_user() {
         }
         Trap::Exception(Exception::InstructionFault)
         | Trap::Exception(Exception::InstructionPageFault) => {
-            handle_page_fault(VirtAddr(sepc), ASPerms::X);
+            handle_page_fault(VirtAddr(stval), ASPerms::X);
         }
         Trap::Exception(Exception::Breakpoint) => {
-            error!("Breakpoint at {:#x}", sepc);
+            error!("Breakpoint at {:#x}", stval);
             current_thread().recv_signal(Signal::SIGTRAP);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {

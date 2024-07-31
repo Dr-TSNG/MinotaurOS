@@ -29,7 +29,7 @@ fn trap_from_kernel() -> bool {
         }
         Trap::Exception(Exception::InstructionFault)
         | Trap::Exception(Exception::InstructionPageFault) => {
-            local_hart().last_page_fault = handle_page_fault(VirtAddr(sepc), ASPerms::X);
+            local_hart().last_page_fault = handle_page_fault(VirtAddr(stval), ASPerms::X);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             local_hart().ctx.timer_during_sys += 1;

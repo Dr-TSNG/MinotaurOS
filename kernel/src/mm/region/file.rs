@@ -43,12 +43,10 @@ impl ASRegion for FileRegion {
 
     fn map(&self, root_pt: PageTable, overwrite: bool) -> Vec<HeapFrameTracker> {
         let mut dirs = vec![];
-        let mut vpn = self.metadata.start;
         for i in 0..self.pages.len() {
             if overwrite || !matches!(self.pages[i], PageState::Free) {
-                dirs.extend(self.map_one(root_pt, i, vpn, overwrite));
+                dirs.extend(self.map_one(root_pt, i, overwrite));
             }
-            vpn = vpn + 1;
         }
         dirs
     }
@@ -144,8 +142,7 @@ impl ASRegion for FileRegion {
             new_pages.push(new_page);
         }
         for i in remap {
-            let vpn = self.metadata.start + i;
-            self.map_one(parent_pt, i, vpn, true);
+            self.map_one(parent_pt, i, true);
         }
         let new_region = FileRegion {
             metadata: self.metadata.clone(),
@@ -165,16 +162,16 @@ impl ASRegion for FileRegion {
         let page_num = vpn - self.metadata.start;
         let mut temp = PageState::Free;
         core::mem::swap(&mut temp, &mut self.pages[page_num]);
-        temp = match temp {
-            PageState::Free => PageState::Clean,
+        match temp {
+            PageState::Free => temp = PageState::Clean,
             PageState::Clean => {
                 if self.is_shared {
-                    PageState::Dirty
+                    temp = PageState::Dirty;
                 } else {
                     let frame = alloc_user_frames(1)?;
-                    let target = self.cache.ppn_of(page_num + self.offset).unwrap().byte_array();
-                    frame.ppn.byte_array().copy_from_slice(target);
-                    PageState::Private(frame)
+                    let page = self.cache.ppn_of(page_num + self.offset).unwrap();
+                    frame.ppn.byte_array().copy_from_slice(page.byte_array());
+                    temp = PageState::Private(frame);
                 }
             }
             PageState::Dirty => panic!("Page should not be dirty"),
@@ -182,11 +179,11 @@ impl ASRegion for FileRegion {
             PageState::CopyOnWrite(tracker) => {
                 let new_tracker = alloc_user_frames(1)?;
                 new_tracker.ppn.byte_array().copy_from_slice(tracker.ppn.byte_array());
-                PageState::Private(new_tracker)
+                temp = PageState::Private(new_tracker);
             }
-        };
+        }
         core::mem::swap(&mut temp, &mut self.pages[page_num]);
-        Ok(self.map_one(root_pt, page_num, vpn, true))
+        Ok(self.map_one(root_pt, page_num, true))
     }
 }
 
@@ -204,10 +201,10 @@ impl FileRegion {
         &self,
         mut pt: PageTable,
         page_num: usize,
-        vpn: VirtPageNum,
         overwrite: bool,
     ) -> Vec<HeapFrameTracker> {
         let mut dirs = vec![];
+        let vpn = self.metadata.start + page_num;
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
             if i == 2 {

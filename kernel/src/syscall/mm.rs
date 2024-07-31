@@ -64,7 +64,7 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
         _ => flags.contains(MapFlags::MAP_FIXED).then_some(VirtAddr(addr).into()),
     };
     debug!(
-        "[mmap] start: {:?}, len: {}, prot: {:?}, flags: {:?}, fd: {:?}, offset: {}",
+        "[mmap] start: {:?}, len: {:#x}, prot: {:?}, flags: {:?}, fd: {:?}, offset: {}",
         start, len, prot, flags, fd, offset,
     );
     let is_shared = flags.contains(MapFlags::MAP_SHARED);
