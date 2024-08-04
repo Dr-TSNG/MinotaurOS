@@ -5,7 +5,6 @@ use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use tap::Tap;
-use crate::fs::devfs::net::NetInode;
 use crate::fs::devfs::null::NullInode;
 use crate::fs::devfs::zero::ZeroInode;
 use crate::fs::devfs::rtc::RtcInode;
@@ -18,7 +17,6 @@ use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
 
-mod net;
 mod null;
 pub mod tty;
 mod zero;
@@ -65,7 +63,9 @@ impl RootInode {
             metadata: InodeMeta::new(
                 fs.ino_pool.fetch_add(1, Ordering::Relaxed),
                 0,
-                InodeMode::IFDIR,
+                0,
+                0,
+                InodeMode::S_IFDIR | InodeMode::from_bits_truncate(0o755),
                 String::new(),
                 String::new(),
                 parent,
@@ -81,7 +81,6 @@ impl RootInode {
         root.children.lock().tap_mut(|it| {
             it.insert("null".to_string(), NullInode::new(fs.clone(), root.clone()));
             it.insert("zero".to_string(), ZeroInode::new(fs.clone(), root.clone()));
-            it.insert("net".to_string(), NetInode::new(fs.clone(), root.clone()));
             it.insert("rtc".to_string(), RtcInode::new(fs.clone(), root.clone()));
             it.insert("urandom".to_string(), UrandomInode::new(fs.clone(), root.clone()));
         });

@@ -24,7 +24,9 @@ impl MountsInode {
             metadata: InodeMeta::new(
                 fs.ino_pool.fetch_add(1, Ordering::Relaxed),
                 0,
-                InodeMode::IFREG,
+                0,
+                0,
+                InodeMode::S_IFCHR | InodeMode::from_bits_truncate(0o444),
                 "mounts".to_string(),
                 "mounts".to_string(),
                 Some(parent),

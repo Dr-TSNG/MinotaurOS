@@ -9,6 +9,7 @@ use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::{AsyncMutex, Mutex};
 use crate::fs::ffi::OpenFlags;
 use crate::net::Socket;
+use crate::process::token::AccessToken;
 
 pub struct FileMeta {
     pub inode: Option<Arc<dyn Inode>>,
@@ -119,11 +120,15 @@ impl dyn File {
 
 pub struct CharacterFile {
     metadata: FileMeta,
+    pos: AsyncMutex<isize>,
 }
 
 impl CharacterFile {
     pub fn new(metadata: FileMeta) -> Arc<Self> {
-        Arc::new(Self { metadata })
+        Arc::new(Self {
+            metadata,
+            pos: AsyncMutex::default(),
+        })
     }
 }
 
@@ -135,12 +140,18 @@ impl File for CharacterFile {
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
-        inode.read(buf, 0).await
+        let mut pos = self.pos.lock().await;
+        let count = inode.read(buf, *pos).await?;
+        *pos += count;
+        Ok(count)
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         let inode = self.metadata.inode.as_ref().unwrap();
-        inode.write(buf, 0).await
+        let mut pos = self.pos.lock().await;
+        let count = inode.write(buf, *pos).await?;
+        *pos += count;
+        Ok(count)
     }
 
     async fn ioctl(&self, request: usize, value: usize, arg2: usize, arg3: usize, arg4: usize) -> SyscallResult<i32> {
@@ -152,13 +163,15 @@ impl File for CharacterFile {
 pub struct DirFile {
     metadata: FileMeta,
     pos: AsyncMutex<usize>,
+    token: AccessToken,
 }
 
 impl DirFile {
-    pub fn new(metadata: FileMeta) -> Arc<Self> {
+    pub fn new(metadata: FileMeta, token: AccessToken) -> Arc<Self> {
         Arc::new(Self {
             metadata,
             pos: AsyncMutex::default(),
+            token,
         })
     }
 }
@@ -175,7 +188,7 @@ impl File for DirFile {
         let inode = match *pos {
             0 => inode.clone(),
             1 => inode.metadata().parent.clone().and_then(|p| p.upgrade()).unwrap_or(inode.clone()),
-            _ => match inode.clone().lookup_idx(*pos - 2).await {
+            _ => match inode.clone().lookup_idx(*pos - 2, self.token).await {
                 Ok(inode) => inode,
                 Err(Errno::ENOENT) => return Ok(None),
                 Err(e) => return Err(e),

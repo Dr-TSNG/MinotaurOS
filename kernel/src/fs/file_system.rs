@@ -9,8 +9,8 @@ use log::debug;
 use crate::driver::ffi::sep_dev;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::inode::Inode;
-use crate::fs::inode_cache::InodeCache;
 use crate::fs::path::is_absolute_path;
+use crate::process::token::AccessToken;
 use crate::result::{Errno, SyscallResult};
 use crate::split_path;
 use crate::sync::mutex::Mutex;
@@ -81,7 +81,6 @@ static MNT_NS_ID_POOL: AtomicUsize = AtomicUsize::new(1);
 /// 挂载命名空间
 pub struct MountNamespace {
     pub mnt_ns_id: usize,
-    pub caches: [InodeCache; 2],
     inner: Mutex<NSInner>,
 }
 
@@ -111,7 +110,6 @@ impl MountNamespace {
         let snapshot = (tree.fs.metadata().fsid, (tree.mnt_id, String::new()));
         Self {
             mnt_ns_id: MNT_NS_ID_POOL.fetch_add(1, Ordering::Acquire),
-            caches: core::array::from_fn(|_| InodeCache::new()),
             inner: Mutex::new(NSInner { tree, snapshot: HashMap::from([snapshot]) }),
         }
     }
@@ -142,11 +140,11 @@ impl MountNamespace {
         &self,
         path: &str,
         follow_link: bool,
+        token: AccessToken,
     ) -> SyscallResult<Arc<dyn Inode>> {
         assert!(is_absolute_path(path));
         let root = self.inner.lock().tree.fs.root();
-        let inode = self.lookup_relative(root, &path[1..], follow_link).await?;
-        self.caches[follow_link as usize].insert(None, path.to_string(), &inode);
+        let inode = self.lookup_relative(root, &path[1..], follow_link, token).await?;
         Ok(inode)
     }
 
@@ -155,12 +153,13 @@ impl MountNamespace {
         parent: Arc<dyn Inode>,
         path: &str,
         follow_link: bool,
+        token: AccessToken,
     ) -> SyscallResult<Arc<dyn Inode>> {
         assert!(!is_absolute_path(&path));
         let mut names = split_path!(path).map(|s| s.to_string()).collect::<VecDeque<_>>();
         let mut inode = parent.clone();
         loop {
-            if inode.metadata().mode == InodeMode::IFLNK && (!names.is_empty() || follow_link) {
+            if inode.metadata().ifmt == InodeMode::S_IFLNK && (!names.is_empty() || follow_link) {
                 let path = inode.clone().do_readlink().await?;
                 debug!("[lookup] Follow link: {}", path);
                 inode = if is_absolute_path(&path) {
@@ -182,48 +181,49 @@ impl MountNamespace {
                         }
                     }
                 } else {
-                    inode = inode.lookup_name(&name).await?;
+                    inode = inode.lookup_name(&name, token).await?;
                 }
             } else {
-                self.caches[follow_link as usize].insert(Some(&parent), path.to_string(), &inode);
                 break Ok(inode);
             }
         }
     }
 
-    pub async fn mount<F>(&self, absolute_path: &str, fs_fn: F) -> SyscallResult
+    pub async fn mount<F>(&self, token: AccessToken, absolute_path: &str, fs_fn: F) -> SyscallResult
     where
         F: FnOnce(Arc<dyn Inode>) -> Arc<dyn FileSystem>,
     {
         assert!(is_absolute_path(absolute_path));
-        let inode = self.lookup_absolute(absolute_path, false).await?;
+        let inode = self.lookup_absolute(absolute_path, false, token).await?;
         let inode = inode.metadata().parent.clone().unwrap().upgrade().unwrap();
         let dir_name = absolute_path.rsplit_once('/').unwrap().1.to_string();
         let fs = fs_fn(inode.clone());
         let mut inner = self.inner.lock();
         let mnt_id = Self::do_mount(&mut inner.tree.sub_trees, fs.clone(), absolute_path)?;
         inner.snapshot.insert(fs.metadata().fsid, (mnt_id, absolute_path.to_string()));
-        self.caches.iter().for_each(|cache| cache.invalidate());
         inode.metadata().inner.lock().mounts.insert(dir_name, fs.root());
         Ok(())
     }
 
-    pub async fn unmount(&self, absolute_path: &str) -> SyscallResult {
+    pub async fn unmount(&self, token: AccessToken, absolute_path: &str) -> SyscallResult {
         assert!(is_absolute_path(absolute_path));
-        let inode = self.lookup_absolute(absolute_path, false).await?;
+        let inode = self.lookup_absolute(absolute_path, false, token).await?;
         let inode = inode.metadata().parent.clone().unwrap().upgrade().unwrap();
         let dir_name = absolute_path.rsplit_once('/').unwrap().1.to_string();
         let mut inner = self.inner.lock();
         let tree = Self::do_unmount(&mut inner.tree.sub_trees, absolute_path)?;
         inner.snapshot.remove(&tree.fs.metadata().fsid);
-        self.caches.iter().for_each(|cache| cache.invalidate());
         inode.metadata().inner.lock().mounts.remove(&dir_name);
         Ok(())
     }
 
     pub fn get_inode_snapshot(&self, inode: &dyn Inode) -> SyscallResult<(usize, String)> {
         let fsid = inode.file_system().upgrade().ok_or(Errno::EIO)?.metadata().fsid;
-        Ok(self.inner.lock().snapshot.get(&fsid).cloned().expect("fsid not found"))
+        let mut mp = self.inner.lock().snapshot.get(&fsid).cloned().expect("fsid not found");
+        if mp.1.is_empty() {
+            mp.1 = "/".to_string();
+        }
+        Ok(mp)
     }
 
     fn do_mount(

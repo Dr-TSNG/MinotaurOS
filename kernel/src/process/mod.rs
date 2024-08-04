@@ -2,6 +2,7 @@ pub mod aux;
 pub mod ffi;
 pub mod monitor;
 pub mod thread;
+pub mod token;
 
 use alloc::collections::BTreeMap;
 use alloc::ffi::CString;
@@ -17,6 +18,7 @@ use tap::{Pipe, Tap};
 use crate::arch::VirtAddr;
 use crate::config::USER_STACK_TOP;
 use crate::fs::fd::FdTable;
+use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::MountNamespace;
 use crate::fs::inode::Inode;
 use crate::mm::addr_space::AddressSpace;
@@ -27,6 +29,7 @@ use crate::process::monitor::MONITORS;
 use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::Thread;
 use crate::process::thread::tid::TidTracker;
+use crate::process::token::AccessToken;
 use crate::processor::{current_process, current_thread, current_trap_ctx, SYSTEM_SHUTDOWN};
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
@@ -41,6 +44,7 @@ use crate::trap::context::TrapContext;
 pub type Tid = i32;
 pub type Pid = i32;
 pub type Gid = i32;
+pub type Uid = u16;
 
 pub struct Process {
     /// 进程的 pid
@@ -72,6 +76,16 @@ pub struct ProcessInner {
     pub cwd: String,
     /// 可执行文件路径
     pub exe: String,
+    /// 用户 ID
+    pub uid: Uid,
+    /// 组 ID
+    pub gid: Uid,
+    /// 有效用户 ID
+    pub euid: Uid,
+    /// 有效组 ID
+    pub egid: Uid,
+    /// 文件创建权限掩码
+    pub umask: InodeMode,
     /// 退出状态
     pub exit_code: Option<u32>,
 }
@@ -81,7 +95,8 @@ impl Process {
         mnt_ns: Arc<MountNamespace>,
         elf_data: &[u8],
     ) -> SyscallResult<Arc<Self>> {
-        let (addr_space, entry, _) = AddressSpace::from_elf(&mnt_ns, elf_data).await?;
+        let (addr_space, entry, _) =
+            AddressSpace::from_elf(&mnt_ns, elf_data, AccessToken::root()).await?;
         let pid = Arc::new(TidTracker::new());
 
         let process = Arc::new(Process {
@@ -98,6 +113,11 @@ impl Process {
                 timers: Default::default(),
                 cwd: String::from("/"),
                 exe: String::from("/init"),
+                uid: 0,
+                gid: 0,
+                euid: 0,
+                egid: 0,
+                umask: InodeMode::S_IWGRP | InodeMode::S_IWOTH,
                 exit_code: None,
             }),
         });
@@ -119,10 +139,11 @@ impl Process {
         inode: Arc<dyn Inode>,
         args: &[CString],
         envs: &[CString],
+        token: AccessToken,
     ) -> SyscallResult<usize> {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
         let (addr_space, entry, mut auxv) =
-            AddressSpace::from_inode(&mnt_ns, inode.clone()).await?;
+            AddressSpace::from_inode(&mnt_ns, inode.clone(), token).await?;
 
         current_process().inner.lock().pipe_ref_mut(|proc_inner| {
             if proc_inner.threads.len() > 1 {
@@ -246,6 +267,11 @@ impl Process {
                     timers: Default::default(),
                     cwd: proc_inner.cwd.clone(),
                     exe: proc_inner.exe.clone(),
+                    uid: proc_inner.egid,
+                    gid: proc_inner.egid,
+                    euid: proc_inner.euid,
+                    egid: proc_inner.egid,
+                    umask: proc_inner.umask,
                     exit_code: None,
                 }),
             });
@@ -338,6 +364,12 @@ impl Process {
             new_tid, flags, ptid, ctid,
         );
         Ok(new_tid)
+    }
+
+    pub fn token(&self) -> AccessToken {
+        self.inner.lock().pipe_ref(|it| {
+            AccessToken::new(it.euid, it.egid)
+        })
     }
 
     pub fn terminate(&self, exit_code: u32) {

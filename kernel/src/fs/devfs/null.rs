@@ -17,7 +17,9 @@ impl NullInode {
         Arc::new(Self(InodeMeta::new(
             fs.ino_pool.fetch_add(1, Ordering::Relaxed),
             0,
-            InodeMode::IFCHR,
+            0,
+            0,
+            InodeMode::S_IFCHR | InodeMode::from_bits_truncate(0o666),
             "null".to_string(),
             "null".to_string(),
             Some(parent),

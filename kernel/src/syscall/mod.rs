@@ -19,7 +19,7 @@ use time::*;
 use log::{debug, warn};
 use num_enum::FromPrimitive;
 use crate::fs::fd::FdNum;
-use crate::process::{Gid, Pid, Tid};
+use crate::process::{Gid, Pid, Tid, Uid};
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::strace;
@@ -134,6 +134,7 @@ pub enum SyscallCode {
     Getppid = 173,
     Getuid = 174,
     Geteuid = 175,
+    Getgid = 176,
     Getegid = 177,
     Gettid = 178,
     Sysinfo = 179,
@@ -192,8 +193,8 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Ftruncate => async_syscall!(sys_ftruncate, args[0] as FdNum, args[1] as isize),
         SyscallCode::Faccessat => async_syscall!(sys_faccessat, args[0] as FdNum, args[1], args[2] as u32, args[3] as u32),
         SyscallCode::Chdir => async_syscall!(sys_chdir, args[0]),
-        SyscallCode::Fchmodat => syscall!(dummy),
-        SyscallCode::Fchownat => syscall!(dummy),
+        SyscallCode::Fchmodat => async_syscall!(sys_fchmodat, args[0] as FdNum, args[1], args[2] as u32, args[3] as u32),
+        SyscallCode::Fchownat => async_syscall!(sys_fchownat, args[0] as FdNum, args[1], args[2] as Uid, args[3] as Uid, args[4] as u32),
         SyscallCode::Openat => async_syscall!(sys_openat, args[0] as i32, args[1], args[2] as u32, args[3] as u32),
         SyscallCode::Close => syscall!(sys_close, args[0] as FdNum),
         SyscallCode::Pipe2 => syscall!(sys_pipe2, args[0], args[1] as u32),
@@ -240,7 +241,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::RtSigprocmask => syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2]),
         SyscallCode::RtSigtimedwait => syscall!(sys_rt_sigtimedwait, args[0], args[1], args[2]),
         SyscallCode::RtSigreturn => syscall!(sys_rt_sigreturn),
-        SyscallCode::Setuid => syscall!(dummy),
+        SyscallCode::Setuid => syscall!(sys_setuid, args[0] as Uid),
         SyscallCode::Times => syscall!(sys_times, args[0]),
         SyscallCode::Setpgid => syscall!(sys_setpgid, args[0] as Pid, args[1] as Gid),
         SyscallCode::Getpgid => syscall!(sys_getpgid, args[0] as Pid),
@@ -249,13 +250,14 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Getrlimit => syscall!(sys_getrlimit, args[0] as u32, args[1]),
         SyscallCode::Setrlimit => syscall!(sys_setrlimit, args[0] as u32, args[1]),
         SyscallCode::Getrusage => syscall!(sys_getrusage, args[0] as i32, args[1]),
-        SyscallCode::Umask => syscall!(dummy),
+        SyscallCode::Umask => syscall!(sys_umask, args[0] as u32),
         SyscallCode::GetTimeOfDay => syscall!(sys_gettimeofday, args[0], args[1]),
         SyscallCode::Getpid => syscall!(sys_getpid),
         SyscallCode::Getppid => syscall!(sys_getppid),
-        SyscallCode::Getuid => syscall!(dummy),
-        SyscallCode::Geteuid => syscall!(dummy),
-        SyscallCode::Getegid => syscall!(dummy),
+        SyscallCode::Getuid => syscall!(sys_getuid),
+        SyscallCode::Geteuid => syscall!(sys_geteuid),
+        SyscallCode::Getgid => syscall!(sys_getgid),
+        SyscallCode::Getegid => syscall!(sys_getegid),
         SyscallCode::Gettid => syscall!(sys_gettid),
         SyscallCode::Sysinfo => syscall!(sys_sysinfo, args[0]),
         SyscallCode::Shmget => syscall!(sys_shmget, args[0], args[1], args[2] as u32),

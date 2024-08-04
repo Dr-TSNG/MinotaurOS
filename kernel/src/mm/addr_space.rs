@@ -29,6 +29,7 @@ use crate::mm::region::lazy::LazyRegion;
 use crate::mm::region::shared::SharedRegion;
 use crate::mm::sysv_shm::SysVShm;
 use crate::process::aux::{self, Aux};
+use crate::process::token::AccessToken;
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
@@ -98,6 +99,7 @@ impl AddressSpace {
     pub async fn from_inode(
         mnt_ns: &MountNamespace,
         inode: Arc<dyn Inode>,
+        token: AccessToken,
     ) -> SyscallResult<(Self, usize, Vec<Aux>)> {
         let exe = inode.mnt_ns_path(mnt_ns)?;
         let mut snapshots = EXE_SNAPSHOTS.lock();
@@ -106,8 +108,8 @@ impl AddressSpace {
         }
         drop(snapshots);
 
-        let data = inode.open(OpenFlags::O_RDONLY)?.read_all().await?;
-        let mut snapshot = Self::from_elf(mnt_ns, &data).await?;
+        let data = inode.open(OpenFlags::O_RDONLY, token)?.read_all().await?;
+        let mut snapshot = Self::from_elf(mnt_ns, &data, token).await?;
         let this = (snapshot.0.fork(), snapshot.1, snapshot.2.clone());
         let mut snapshots = EXE_SNAPSHOTS.lock();
         snapshots.put(exe.to_string(), snapshot);
@@ -118,6 +120,7 @@ impl AddressSpace {
     pub async fn from_elf(
         mnt_ns: &MountNamespace,
         data: &[u8],
+        token: AccessToken,
     ) -> SyscallResult<(Self, usize, Vec<Aux>)> {
         let mut addr_space = Self::new_bare();
         addr_space.copy_global_mappings();
@@ -173,7 +176,7 @@ impl AddressSpace {
                     let linker = CStr::from_bytes_until_nul(&elf.input[phdr.offset() as usize..])
                         .unwrap().to_str().unwrap();
                     debug!("[addr_space] Load linker: {} at {:#x}", linker, linker_base);
-                    entry = addr_space.load_linker(mnt_ns, linker, linker_base).await?;
+                    entry = addr_space.load_linker(mnt_ns, linker, linker_base, token).await?;
                 }
                 _ => {}
             }
@@ -461,9 +464,10 @@ impl AddressSpace {
         mnt_ns: &MountNamespace,
         linker: &str,
         offset: usize,
+        token: AccessToken,
     ) -> SyscallResult<usize> {
-        let inode = mnt_ns.lookup_absolute(linker, true).await?;
-        let file = inode.open(OpenFlags::O_RDONLY).unwrap();
+        let inode = mnt_ns.lookup_absolute(linker, true, token).await?;
+        let file = inode.open(OpenFlags::O_RDONLY, AccessToken::root()).unwrap();
         let elf_data = file.read_all().await.unwrap();
         let elf = ElfFile::new(&elf_data).map_err(|_| Errno::ENOEXEC)?;
         let ph_count = elf.header.pt2.ph_count();

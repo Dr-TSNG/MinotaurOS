@@ -6,11 +6,11 @@ use core::time::Duration;
 use log::{debug, info, warn};
 use crate::arch::VirtAddr;
 use crate::config::USER_STACK_SIZE;
-use crate::fs::ffi::{AT_FDCWD, InodeMode, PATH_MAX};
+use crate::fs::ffi::{AccessMode, AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::mm::protect::{user_transmute_r, user_transmute_str, user_transmute_w};
 use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
-use crate::process::{Gid, Pid, Tid};
+use crate::process::{Gid, Pid, Tid, Uid};
 use crate::process::monitor::MONITORS;
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
@@ -115,6 +115,12 @@ pub fn sys_tgkill(tgid: Pid, tid: Tid, signal: usize) -> SyscallResult<usize> {
     Ok(0)
 }
 
+pub fn sys_setuid(uid: Uid) -> SyscallResult<usize> {
+    let mut proc_inner = current_process().inner.lock();
+    proc_inner.euid = uid;
+    Ok(0)
+}
+
 pub fn sys_setpgid(pid: Pid, pgid: Gid) -> SyscallResult<usize> {
     let mut monitors = MONITORS.lock();
     let proc = match pid {
@@ -190,6 +196,12 @@ pub fn sys_getrusage(who: i32, buf: usize) -> SyscallResult<usize> {
     Ok(0)
 }
 
+pub fn sys_umask(mask: u32) -> SyscallResult<usize> {
+    let mut proc_inner = current_process().inner.lock();
+    proc_inner.umask = InodeMode::from_bits_access(mask).ok_or(Errno::EINVAL)?;
+    Ok(0)
+}
+
 pub fn sys_getpid() -> SyscallResult<usize> {
     Ok(current_process().pid.0 as usize)
 }
@@ -198,6 +210,26 @@ pub fn sys_getppid() -> SyscallResult<usize> {
     let proc_inner = current_process().inner.lock();
     // SAFETY: 由于我们将 init 进程的 parent 设置为自己，所以这里可以直接 unwrap
     Ok(proc_inner.parent.upgrade().unwrap().pid.0 as usize)
+}
+
+pub fn sys_getuid() -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    Ok(proc_inner.uid as usize)
+}
+
+pub fn sys_geteuid() -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    Ok(proc_inner.euid as usize)
+}
+
+pub fn sys_getgid() -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    Ok(proc_inner.gid as usize)
+}
+
+pub fn sys_getegid() -> SyscallResult<usize> {
+    let proc_inner = current_process().inner.lock();
+    Ok(proc_inner.egid as usize)
 }
 
 pub fn sys_gettid() -> SyscallResult<usize> {
@@ -248,12 +280,15 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
         envs_vec.push(CString::new("LD_LIBRARY_PATH=/:/lib:/lib/glibc:/lib/musl").unwrap());
     }
 
-    let inode = resolve_path(AT_FDCWD, path, true).await?;
-    if inode.metadata().mode == InodeMode::IFDIR {
+    let token = current_process().token();
+    let inode = resolve_path(AT_FDCWD, path, true, token).await?;
+    if inode.metadata().ifmt == InodeMode::S_IFDIR {
         return Err(Errno::EISDIR);
     }
-
-    current_process().execve(inode, &args_vec, &envs_vec).await
+    if !inode.proc_access(token).contains(AccessMode::X_OK) {
+        return Err(Errno::EACCES);
+    }
+    current_process().execve(inode, &args_vec, &envs_vec, token).await
 }
 
 pub async fn sys_wait4(pid: Pid, wstatus: usize, options: u32, _rusage: usize) -> SyscallResult<usize> {

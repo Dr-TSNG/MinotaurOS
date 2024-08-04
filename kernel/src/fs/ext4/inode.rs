@@ -16,6 +16,7 @@ use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::page_cache::PageCache;
+use crate::process::token::AccessToken;
 use crate::result::{Errno, SyscallResult};
 
 pub struct Ext4Inode {
@@ -52,7 +53,9 @@ impl Ext4Inode {
             metadata: InodeMeta::new(
                 2,
                 fs.device.metadata().dev_id,
-                InodeMode::IFDIR,
+                inode_ref.uid,
+                inode_ref.gid,
+                InodeMode::from_bits(inode_ref.mode as u32).unwrap(),
                 String::new(),
                 String::new(),
                 parent,
@@ -82,20 +85,22 @@ impl Ext4Inode {
             }
             let path = format!("{}/{}", self.metadata.path, dirent.name);
             let inode_ref = fs.ext4.ext4_get_inode_ref(dirent.inode).map_err(i32_to_err)?;
-            let mode = InodeMode::try_from(inode_ref.mode & 0xf000).unwrap();
-            let file = match mode {
-                InodeMode::IFDIR => Some(Ext4File::open_dir(&path, false).map_err(i32_to_err)?),
-                InodeMode::IFREG => Some(Ext4File::open_file(&path, O_RDWR).map_err(i32_to_err)?),
+            let mode = InodeMode::from_bits(inode_ref.mode as u32).unwrap();
+            let file = match mode.file_type() {
+                InodeMode::S_IFDIR => Some(Ext4File::open_dir(&path, false).map_err(i32_to_err)?),
+                InodeMode::S_IFREG => Some(Ext4File::open_file(&path, O_RDWR).map_err(i32_to_err)?),
                 _ => None,
             };
-            let page_cache = match mode {
-                InodeMode::IFREG => Some(PageCache::new()),
+            let page_cache = match mode.file_type() {
+                InodeMode::S_IFREG => Some(PageCache::new()),
                 _ => None,
             };
             let inode = Arc::new(Self {
                 metadata: InodeMeta::new(
                     dirent.inode as usize,
                     fs.device.metadata().dev_id,
+                    inode_ref.uid,
+                    inode_ref.gid,
                     mode,
                     dirent.name.to_string(),
                     path,
@@ -200,20 +205,20 @@ impl InodeInternal for Ext4Inode {
         }
     }
 
-    async fn do_create(self: Arc<Self>, mode: InodeMode, name: &str) -> SyscallResult<Arc<dyn Inode>> {
+    async fn do_create(self: Arc<Self>, mode: InodeMode, name: &str, token: AccessToken) -> SyscallResult<Arc<dyn Inode>> {
         debug!("[ext4] Create file: {}", name);
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
         self.clone().check_exists(name, false)?;
 
         let path = format!("{}/{}", self.metadata.path, name);
-        let file = if mode == InodeMode::IFDIR {
+        let file = if mode.is_dir() {
             Ext4File::open_dir(&path, true).map_err(i32_to_err)?
         } else {
             Ext4File::open_file(&path, O_RDWR | O_CREAT).map_err(i32_to_err)?
         };
-        let page_cache = match mode {
-            InodeMode::IFREG => Some(PageCache::new()),
+        let page_cache = match mode.file_type() {
+            InodeMode::S_IFREG => Some(PageCache::new()),
             _ => None,
         };
         let inode_ref = fs.ext4.ext4_get_inode_ref(file.inode()).map_err(i32_to_err)?;
@@ -221,6 +226,8 @@ impl InodeInternal for Ext4Inode {
             metadata: InodeMeta::new(
                 file.inode() as usize,
                 fs.device.metadata().dev_id,
+                token.uid,
+                token.gid,
                 mode,
                 name.to_string(),
                 path,
@@ -239,7 +246,7 @@ impl InodeInternal for Ext4Inode {
         Ok(inode)
     }
 
-    async fn do_symlink(self: Arc<Self>, name: &str, target: &str) -> SyscallResult {
+    async fn do_symlink(self: Arc<Self>, mode: InodeMode, name: &str, target: &str, token: AccessToken) -> SyscallResult {
         debug!("[ext4] Symlink {} -> {}", name, target);
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
@@ -253,7 +260,9 @@ impl InodeInternal for Ext4Inode {
             metadata: InodeMeta::new(
                 inode as usize,
                 fs.device.metadata().dev_id,
-                InodeMode::IFLNK,
+                token.uid,
+                token.gid,
+                mode,
                 name.to_string(),
                 path,
                 Some(self.clone()),
@@ -278,7 +287,7 @@ impl InodeInternal for Ext4Inode {
         if let Ok(inode) = inode.downcast_arc::<Ext4Inode>() {
             let old_path = inode.metadata().path.as_str();
             let new_path = format!("{}/{}", self.metadata.path, name);
-            if self.metadata.mode == InodeMode::IFDIR {
+            if self.metadata.ifmt.is_dir() {
                 lwext4_movedir(&old_path, &new_path).map_err(i32_to_err)?;
             } else {
                 lwext4_movefile(&old_path, &new_path).map_err(i32_to_err)?;
@@ -305,7 +314,7 @@ impl InodeInternal for Ext4Inode {
         let _guard = fs.driver_lock.lock().await;
         self.clone().check_exists(&target.metadata().name, true)?;
 
-        if target.metadata().mode == InodeMode::IFDIR {
+        if target.metadata().ifmt.is_dir() {
             lwext4_rmdir(&target.metadata().path).map_err(i32_to_err)?;
         } else {
             lwext4_rmfile(&target.metadata().path).map_err(i32_to_err)?;

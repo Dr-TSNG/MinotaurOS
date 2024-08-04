@@ -5,6 +5,7 @@ use log::{debug, info};
 use crate::fs::fd::FdNum;
 use crate::fs::ffi::AT_FDCWD;
 use crate::fs::inode::Inode;
+use crate::process::token::AccessToken;
 use crate::processor::current_process;
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
@@ -21,6 +22,7 @@ pub async fn resolve_path(
     dirfd: FdNum,
     path: &str,
     follow_link: bool,
+    token: AccessToken,
 ) -> SyscallResult<Arc<dyn Inode>> {
     assert_ne!(current_process().inner.locked_by(), local_hart().id);
     let proc_inner = current_process().inner.lock();
@@ -34,32 +36,19 @@ pub async fn resolve_path(
     }
 
     let mnt_ns = proc_inner.mnt_ns.clone();
-    let inode_cache = &mnt_ns.caches[follow_link as usize];
     if is_absolute_path(&path) {
         drop(proc_inner);
-        match inode_cache.get(None, &path) {
-            Some(cached) => Ok(cached),
-            None => mnt_ns.lookup_absolute(&path, follow_link).await,
-        }
+        mnt_ns.lookup_absolute(&path, follow_link, token).await
     } else if dirfd == AT_FDCWD {
         let cwd = proc_inner.cwd.clone();
         drop(proc_inner);
-        let inode = match inode_cache.get(None, &cwd) {
-            Some(cached) => cached,
-            None => mnt_ns.lookup_absolute(&cwd, follow_link).await?,
-        };
-        match inode_cache.get(Some(&inode), &path) {
-            Some(cached) => Ok(cached),
-            None => mnt_ns.lookup_relative(inode, &path, follow_link).await,
-        }
+        let inode = mnt_ns.lookup_absolute(&cwd, follow_link, token).await?;
+        mnt_ns.lookup_relative(inode, &path, follow_link, token).await
     } else {
         let fd_impl = proc_inner.fd_table.get(dirfd)?;
         let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
         drop(proc_inner);
-        match inode_cache.get(Some(&inode), &path) {
-            Some(cached) => Ok(cached),
-            None => mnt_ns.lookup_relative(inode, &path, follow_link).await,
-        }
+        mnt_ns.lookup_relative(inode, &path, follow_link, token).await
     }
 }
 

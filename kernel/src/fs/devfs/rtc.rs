@@ -19,7 +19,9 @@ impl RtcInode {
         Arc::new(Self(InodeMeta::new(
             fs.ino_pool.fetch_add(1, Ordering::Relaxed),
             0,
-            InodeMode::IFCHR,
+            0,
+            0,
+            InodeMode::S_IFCHR | InodeMode::S_IRUSR | InodeMode::S_IWUSR,
             "rtc".to_string(),
             "rtc".to_string(),
             Some(parent),
