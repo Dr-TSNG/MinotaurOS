@@ -19,7 +19,7 @@ use crate::fs::procfs::ProcFileSystem;
 use crate::fs::tmpfs::TmpFileSystem;
 use crate::mm::protect::{user_slice_r, user_slice_w, user_transmute_r, user_transmute_str, user_transmute_w};
 use crate::process::thread::event_bus::Event;
-use crate::process::Uid;
+use crate::process::{Gid, Uid};
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::{TimeSpec, UTIME_NOW, UTIME_OMIT};
@@ -304,7 +304,7 @@ pub async fn sys_fchmodat(dirfd: FdNum, path: usize, mode: u32, flags: u32) -> S
     Ok(0)
 }
 
-pub async fn sys_fchownat(dirfd: FdNum, path: usize, uid: Uid, gid: Uid, flags: u32) -> SyscallResult<usize> {
+pub async fn sys_fchownat(dirfd: FdNum, path: usize, uid: Uid, gid: Gid, flags: u32) -> SyscallResult<usize> {
     // TODO: Permission check
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;

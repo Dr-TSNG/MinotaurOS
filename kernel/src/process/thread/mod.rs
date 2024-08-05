@@ -4,7 +4,7 @@ use log::{debug, info, warn};
 use crate::arch::VirtAddr;
 use crate::mm::protect::user_transmute_w;
 use crate::process::ffi::CpuSet;
-use crate::process::{Process, Uid};
+use crate::process::{Gid, Process, Uid};
 use crate::process::thread::event_bus::{Event, EventBus};
 use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::tid::TidTracker;
@@ -44,9 +44,9 @@ pub struct TokenSet {
     pub ruid: Uid,
     pub euid: Uid,
     pub suid: Uid,
-    pub rgid: Uid,
-    pub egid: Uid,
-    pub sgid: Uid,
+    pub rgid: Gid,
+    pub egid: Gid,
+    pub sgid: Gid,
 }
 
 #[derive(Default)]

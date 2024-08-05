@@ -137,6 +137,37 @@ pub fn sys_tgkill(tgid: Pid, tid: Pid, signal: usize) -> SyscallResult<usize> {
     Ok(0)
 }
 
+pub fn sys_setregid(rgid: Uid, egid: Uid) -> SyscallResult<usize> {
+    let token_set = &mut current_thread().inner().token_set;
+    if rgid != Uid::MAX {
+        token_set.rgid = rgid;
+    }
+    if egid != Uid::MAX {
+        token_set.egid = egid;
+    }
+    Ok(0)
+}
+
+pub fn sys_setgid(gid: Uid) -> SyscallResult<usize> {
+    let token_set = &mut current_thread().inner().token_set;
+    if token_set.euid == 0 {
+        token_set.rgid = gid;
+        token_set.egid = gid;
+    }
+    Ok(0)
+}
+
+pub fn sys_setreuid(ruid: Uid, euid: Uid) -> SyscallResult<usize> {
+    let token_set = &mut current_thread().inner().token_set;
+    if ruid != Uid::MAX {
+        token_set.ruid = ruid;
+    }
+    if euid != Uid::MAX {
+        token_set.euid = euid;
+    }
+    Ok(0)
+}
+
 pub fn sys_setuid(uid: Uid) -> SyscallResult<usize> {
     let token_set = &mut current_thread().inner().token_set;
     if token_set.euid == 0 {
@@ -158,6 +189,42 @@ pub fn sys_setresuid(ruid: Uid, euid: Uid, suid: Uid) -> SyscallResult<usize> {
     if suid != Uid::MAX {
         token_set.suid = suid;
     }
+    Ok(0)
+}
+
+pub fn sys_getresuid(ruid: usize, euid: usize, suid: usize) -> SyscallResult<usize> {
+    let ruid = user_transmute_w::<Uid>(ruid)?.ok_or(Errno::EINVAL)?;
+    let euid = user_transmute_w::<Uid>(euid)?.ok_or(Errno::EINVAL)?;
+    let suid = user_transmute_w::<Uid>(suid)?.ok_or(Errno::EINVAL)?;
+    let token_set = &current_thread().inner().token_set;
+    *ruid = token_set.ruid;
+    *euid = token_set.euid;
+    *suid = token_set.suid;
+    Ok(0)
+}
+
+pub fn sys_setresgid(rgid: Uid, egid: Uid, sgid: Uid) -> SyscallResult<usize> {
+    let token_set = &mut current_thread().inner().token_set;
+    if rgid != Uid::MAX {
+        token_set.rgid = rgid;
+    }
+    if egid != Uid::MAX {
+        token_set.egid = egid;
+    }
+    if sgid != Uid::MAX {
+        token_set.sgid = sgid;
+    }
+    Ok(0)
+}
+
+pub fn sys_getresgid(rgid: usize, egid: usize, sgid: usize) -> SyscallResult<usize> {
+    let rgid = user_transmute_w::<Uid>(rgid)?.ok_or(Errno::EINVAL)?;
+    let egid = user_transmute_w::<Uid>(egid)?.ok_or(Errno::EINVAL)?;
+    let sgid = user_transmute_w::<Uid>(sgid)?.ok_or(Errno::EINVAL)?;
+    let token_set = &current_thread().inner().token_set;
+    *rgid = token_set.rgid;
+    *egid = token_set.egid;
+    *sgid = token_set.sgid;
     Ok(0)
 }
 

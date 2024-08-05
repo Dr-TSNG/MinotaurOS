@@ -19,7 +19,7 @@ use time::*;
 use log::{debug, warn};
 use num_enum::FromPrimitive;
 use crate::fs::fd::FdNum;
-use crate::process::{Pid, Uid};
+use crate::process::{Gid, Pid, Uid};
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::strace;
@@ -120,8 +120,14 @@ pub enum SyscallCode {
     RtSigprocmask = 135,
     RtSigtimedwait = 137,
     RtSigreturn = 139,
+    Setregid = 143,
+    Setgid = 144,
+    Setreuid = 145,
     Setuid = 146,
     Setresuid = 147,
+    Getresuid = 148,
+    Setresgid = 149,
+    Getresgid = 150,
     Times = 153,
     Setpgid = 154,
     Getpgid = 155,
@@ -196,7 +202,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Faccessat => async_syscall!(sys_faccessat, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Chdir => async_syscall!(sys_chdir, args[0]),
         SyscallCode::Fchmodat => async_syscall!(sys_fchmodat, args[0] as FdNum, args[1], args[2] as u32, args[3] as u32),
-        SyscallCode::Fchownat => async_syscall!(sys_fchownat, args[0] as FdNum, args[1], args[2] as Uid, args[3] as Uid, args[4] as u32),
+        SyscallCode::Fchownat => async_syscall!(sys_fchownat, args[0] as FdNum, args[1], args[2] as Uid, args[3] as Gid, args[4] as u32),
         SyscallCode::Openat => async_syscall!(sys_openat, args[0] as i32, args[1], args[2] as u32, args[3] as u32),
         SyscallCode::Close => syscall!(sys_close, args[0] as FdNum),
         SyscallCode::Pipe2 => syscall!(sys_pipe2, args[0], args[1] as u32),
@@ -244,8 +250,14 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::RtSigprocmask => syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2]),
         SyscallCode::RtSigtimedwait => syscall!(sys_rt_sigtimedwait, args[0], args[1], args[2]),
         SyscallCode::RtSigreturn => syscall!(sys_rt_sigreturn),
+        SyscallCode::Setregid => syscall!(sys_setregid, args[0] as Gid, args[1] as Gid),
+        SyscallCode::Setgid => syscall!(sys_setgid, args[0] as Gid),
+        SyscallCode::Setreuid => syscall!(sys_setreuid, args[0] as Uid, args[1] as Uid),
         SyscallCode::Setuid => syscall!(sys_setuid, args[0] as Uid),
         SyscallCode::Setresuid => syscall!(sys_setresuid, args[0] as Uid, args[1] as Uid, args[2] as Uid),
+        SyscallCode::Getresuid => syscall!(sys_getresuid, args[0], args[1], args[2]),
+        SyscallCode::Setresgid => syscall!(sys_setresgid, args[0] as Gid, args[1] as Gid, args[2] as Gid),
+        SyscallCode::Getresgid => syscall!(sys_getresgid, args[0], args[1], args[2]),
         SyscallCode::Times => syscall!(sys_times, args[0]),
         SyscallCode::Setpgid => syscall!(sys_setpgid, args[0] as Pid, args[1] as Pid),
         SyscallCode::Getpgid => syscall!(sys_getpgid, args[0] as Pid),

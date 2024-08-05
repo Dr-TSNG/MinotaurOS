@@ -44,6 +44,7 @@ use crate::trap::context::TrapContext;
 
 pub type Pid = i32;
 pub type Uid = u16;
+pub type Gid = u16;
 
 pub struct Process {
     /// 进程的 pid

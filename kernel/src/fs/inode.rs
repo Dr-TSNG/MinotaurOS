@@ -11,7 +11,7 @@ use crate::fs::file::{CharacterFile, DirFile, File, FileMeta, RegularFile};
 use crate::fs::file_system::{FileSystem, MountNamespace};
 use crate::fs::page_cache::PageCache;
 use crate::process::token::AccessToken;
-use crate::process::Uid;
+use crate::process::{Gid, Uid};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
@@ -42,7 +42,7 @@ pub struct InodeMetaInner {
     /// uid
     pub uid: Uid,
     /// gid
-    pub gid: Uid,
+    pub gid: Gid,
     /// 访问权限
     pub mode: InodeMode,
     /// 硬链接数
@@ -67,7 +67,7 @@ impl InodeMeta {
         ino: usize,
         dev: u64,
         uid: Uid,
-        gid: Uid,
+        gid: Gid,
         mode: InodeMode,
         name: String,
         path: String,

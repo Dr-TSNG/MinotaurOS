@@ -1,9 +1,9 @@
-use crate::process::Uid;
+use crate::process::{Gid, Uid};
 
 #[derive(Copy, Clone)]
 pub struct AccessToken {
     pub uid: Uid,
-    pub gid: Uid,
+    pub gid: Gid,
 }
 
 impl AccessToken {
@@ -11,7 +11,7 @@ impl AccessToken {
         Self { uid: 0, gid: 0 }
     }
 
-    pub fn new(uid: Uid, gid: Uid) -> Self {
+    pub fn new(uid: Uid, gid: Gid) -> Self {
         Self { uid, gid }
     }
 }
