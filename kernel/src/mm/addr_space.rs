@@ -5,17 +5,18 @@ use alloc::sync::Arc;
 use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::cmp::{max, min};
-use core::ffi::CStr;
 use core::num::NonZeroUsize;
 use core::ops::Range;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use bitflags::bitflags;
+use goblin::elf::Elf;
+use goblin::elf::header::ET_DYN;
+use goblin::elf::program_header::{PT_LOAD, PT_PHDR};
 use lazy_static::lazy_static;
 use log::{debug, info};
 use lru::LruCache;
-use xmas_elf::ElfFile;
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
-use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE_MAX, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE_MAX, USER_LOAD_BASE, USER_STACK_SIZE, USER_STACK_TOP};
 use crate::driver::GLOBAL_MAPPINGS;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file_system::MountNamespace;
@@ -125,60 +126,53 @@ impl AddressSpace {
         let mut addr_space = Self::new_bare();
         addr_space.copy_global_mappings();
         addr_space.map_trampoline()?;
-        let elf = ElfFile::new(data).map_err(|_| Errno::ENOEXEC)?;
-        let ph_count = elf.header.pt2.ph_count();
+        let elf = Elf::parse(data).map_err(|_| Errno::ENOEXEC)?;
+        let offset = match elf.header.e_type {
+            ET_DYN => USER_LOAD_BASE,
+            _ => VirtAddr(0),
+        };
 
-        let mut entry = elf.header.pt2.entry_point() as usize;
-        let mut load_base = 0;
-        let mut linker_base = 0;
+        let mut entry = offset + elf.entry as usize;
+        if let Some(linker) = elf.interpreter {
+            debug!("[addr_space] Load linker: {} at {:?}", linker, DYNAMIC_LINKER_BASE);
+            entry = addr_space.load_linker(mnt_ns, linker, token).await?;
+        }
+
+        let mut load_base = None;
         let mut max_end_vpn = VirtPageNum(0);
-        for i in 0..ph_count {
-            let phdr = elf.program_header(i).map_err(|_| Errno::ENOEXEC)?;
-            match phdr.get_type().map_err(|_| Errno::ENOEXEC)? {
-                xmas_elf::program::Type::Load => {
-                    let start_addr = VirtAddr(phdr.virtual_addr() as usize);
-                    let end_addr = VirtAddr((phdr.virtual_addr() + phdr.mem_size()) as usize);
-                    let start_vpn = start_addr.floor();
-                    let end_vpn = end_addr.ceil();
-                    if load_base == 0 {
-                        load_base = start_addr.0;
-                    }
+        for phdr in elf.program_headers {
+            if phdr.p_type == PT_LOAD {
+                let start_addr = offset + phdr.p_vaddr as usize;
+                let end_addr = start_addr + phdr.p_memsz as usize;
+                let start_vpn = start_addr.floor();
+                let end_vpn = end_addr.ceil();
+                if load_base.is_none() {
+                    load_base = Some(start_addr);
+                }
 
-                    let mut perms = ASPerms::U;
-                    let ph_flags = phdr.flags();
-                    if ph_flags.is_read() {
-                        perms |= ASPerms::R;
-                    }
-                    if ph_flags.is_write() {
-                        perms |= ASPerms::W;
-                    }
-                    if ph_flags.is_execute() {
-                        perms |= ASPerms::X;
-                    }
-                    let buf = &elf
-                        .input[phdr.offset() as usize..(phdr.offset() + phdr.file_size()) as usize];
-                    let region = LazyRegion::new_framed(
-                        ASRegionMeta {
-                            name: None,
-                            perms,
-                            start: start_vpn,
-                            pages: end_vpn - start_vpn,
-                        },
-                        buf,
-                        start_addr.page_offset(2),
-                    )?;
-                    max_end_vpn = region.metadata().end();
-                    addr_space.map_region(region);
-                    debug!("[addr_space] Map elf section: {:?} - {:?} for {:?}", start_vpn, end_vpn, perms);
+                let mut perms = ASPerms::U;
+                if phdr.is_read() {
+                    perms |= ASPerms::R;
                 }
-                xmas_elf::program::Type::Interp => {
-                    linker_base = DYNAMIC_LINKER_BASE;
-                    let linker = CStr::from_bytes_until_nul(&elf.input[phdr.offset() as usize..])
-                        .unwrap().to_str().unwrap();
-                    debug!("[addr_space] Load linker: {} at {:#x}", linker, linker_base);
-                    entry = addr_space.load_linker(mnt_ns, linker, linker_base, token).await?;
+                if phdr.is_write() {
+                    perms |= ASPerms::W;
                 }
-                _ => {}
+                if phdr.is_executable() {
+                    perms |= ASPerms::X;
+                }
+                let region = LazyRegion::new_framed(
+                    ASRegionMeta {
+                        name: None,
+                        perms,
+                        start: start_vpn,
+                        pages: end_vpn - start_vpn,
+                    },
+                    &data[phdr.file_range()],
+                    start_addr.page_offset(2),
+                )?;
+                max_end_vpn = region.metadata().end();
+                addr_space.map_region(region);
+                debug!("[addr_space] Map elf section: {:?} - {:?} for {:?}", start_vpn, end_vpn, perms);
             }
         }
 
@@ -207,19 +201,19 @@ impl AddressSpace {
         debug!("[addr_space] Map user heap: {:?} - {:?}", max_end_vpn, max_end_vpn);
 
         let mut auxv: Vec<Aux> = Vec::with_capacity(64);
-        auxv.push(Aux::new(aux::AT_PHDR, load_base + elf.header.pt2.ph_offset() as usize));
-        auxv.push(Aux::new(aux::AT_PHENT, elf.header.pt2.ph_entry_size() as usize));
-        auxv.push(Aux::new(aux::AT_PHNUM, ph_count as usize));
+        auxv.push(Aux::new(aux::AT_PHDR, load_base.unwrap().0 + elf.header.e_phoff as usize));
+        auxv.push(Aux::new(aux::AT_PHENT, elf.header.e_phentsize as usize));
+        auxv.push(Aux::new(aux::AT_PHNUM, elf.header.e_phnum as usize));
         auxv.push(Aux::new(aux::AT_PAGESZ, PAGE_SIZE));
-        auxv.push(Aux::new(aux::AT_BASE, linker_base));
+        auxv.push(Aux::new(aux::AT_BASE, DYNAMIC_LINKER_BASE.0));
         auxv.push(Aux::new(aux::AT_FLAGS, 0));
-        auxv.push(Aux::new(aux::AT_ENTRY, elf.header.pt2.entry_point() as usize));
+        auxv.push(Aux::new(aux::AT_ENTRY, offset.0 + elf.header.e_entry as usize));
         auxv.push(Aux::new(aux::AT_UID, 0));
         auxv.push(Aux::new(aux::AT_EUID, 0));
         auxv.push(Aux::new(aux::AT_GID, 0));
         auxv.push(Aux::new(aux::AT_EGID, 0));
 
-        Ok((addr_space, entry, auxv))
+        Ok((addr_space, entry.0, auxv))
     }
 
     pub fn fork(&mut self) -> AddressSpace {
@@ -463,36 +457,30 @@ impl AddressSpace {
         &mut self,
         mnt_ns: &MountNamespace,
         linker: &str,
-        offset: usize,
         token: AccessToken,
-    ) -> SyscallResult<usize> {
+    ) -> SyscallResult<VirtAddr> {
         let inode = mnt_ns.lookup_absolute(linker, true, token).await?;
         let file = inode.open(OpenFlags::O_RDONLY, AccessToken::root()).unwrap();
-        let elf_data = file.read_all().await.unwrap();
-        let elf = ElfFile::new(&elf_data).map_err(|_| Errno::ENOEXEC)?;
-        let ph_count = elf.header.pt2.ph_count();
+        let data = file.read_all().await.unwrap();
+        let elf = Elf::parse(&data).map_err(|_| Errno::ENOEXEC)?;
 
-        for i in 0..ph_count {
-            let phdr = elf.program_header(i).map_err(|_| Errno::ENOEXEC)?;
-            if phdr.get_type().map_err(|_| Errno::ENOEXEC)? == xmas_elf::program::Type::Load {
-                let start_addr = VirtAddr(phdr.virtual_addr() as usize + offset);
-                let end_addr = VirtAddr((phdr.virtual_addr() + phdr.mem_size()) as usize + offset);
+        for phdr in elf.program_headers {
+            if phdr.p_type == PT_LOAD {
+                let start_addr = DYNAMIC_LINKER_BASE + phdr.p_vaddr as usize;
+                let end_addr = start_addr + phdr.p_memsz as usize;
                 let start_vpn = start_addr.floor();
                 let end_vpn = end_addr.ceil();
 
                 let mut perms = ASPerms::U;
-                let ph_flags = phdr.flags();
-                if ph_flags.is_read() {
+                if phdr.is_read() {
                     perms |= ASPerms::R;
                 }
-                if ph_flags.is_write() {
+                if phdr.is_write() {
                     perms |= ASPerms::W;
                 }
-                if ph_flags.is_execute() {
+                if phdr.is_executable() {
                     perms |= ASPerms::X;
                 }
-                let buf = &elf
-                    .input[phdr.offset() as usize..(phdr.offset() + phdr.file_size()) as usize];
                 let region = LazyRegion::new_framed(
                     ASRegionMeta {
                         name: None,
@@ -500,13 +488,13 @@ impl AddressSpace {
                         start: start_vpn,
                         pages: end_vpn - start_vpn,
                     },
-                    buf,
+                    &data[phdr.file_range()],
                     start_addr.page_offset(2),
                 )?;
                 self.map_region(region);
                 debug!("[addr_space] Map linker section: {:?} - {:?}", start_vpn, end_vpn);
             }
         }
-        Ok(elf.header.pt2.entry_point() as usize + offset)
+        Ok(DYNAMIC_LINKER_BASE + elf.header.e_entry as usize)
     }
 }

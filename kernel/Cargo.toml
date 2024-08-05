@@ -28,6 +28,7 @@ crossbeam-queue = { version = "0.3", default-features = false, features = ["allo
 downcast-rs = { version = "1.2", default-features = false }
 fdt-rs = { version = "0.4", default-features = false }
 futures = { version = "0.3", default-features = false }
+goblin = { version = "0.8", default-features = false, features = ["elf32", "elf64", "endian_fd"] }
 hashbrown = "0.14"
 lazy_static = { version = "1.4", features = ["spin_no_std"] }
 log = "0.4"
@@ -40,7 +41,6 @@ spin = "0.9"
 tap = "1.0"
 time = { version = "0.3", default-features = false }
 virtio-drivers = "0.7.4"
-xmas-elf = "0.7.0"
 zerocopy = { version = "0.7", features = ["derive"] }
 
 [features]
