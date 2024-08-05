@@ -351,7 +351,7 @@ impl dyn Inode {
         let inner = self.metadata().inner.lock();
         let bypass_rw = token.uid == 0;
         let bypass_x = token.uid == 0 && self.metadata().ifmt.is_dir();
-        let mut mode = if inner.uid == token.uid {
+        let mode = if inner.uid == token.uid {
             AccessMode::new(
                 bypass_rw | inner.mode.contains(InodeMode::S_IRUSR),
                 bypass_rw | inner.mode.contains(InodeMode::S_IWUSR),

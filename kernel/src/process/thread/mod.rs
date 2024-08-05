@@ -4,10 +4,11 @@ use log::{debug, info, warn};
 use crate::arch::VirtAddr;
 use crate::mm::protect::user_transmute_w;
 use crate::process::ffi::CpuSet;
-use crate::process::Process;
+use crate::process::{Process, Uid};
 use crate::process::thread::event_bus::{Event, EventBus};
 use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::tid::TidTracker;
+use crate::process::token::AccessToken;
 use crate::signal::ffi::Signal;
 use crate::signal::SignalController;
 use crate::sync::mutex::Mutex;
@@ -29,12 +30,23 @@ pub struct Thread {
 
 pub struct ThreadInner {
     pub trap_ctx: TrapContext,
+    pub token_set: TokenSet,
     pub sys_can_restart: bool,
     pub sys_last_a0: usize,
     pub tid_address: TidAddress,
     pub rusage: ResourceUsage,
     pub vfork_from: Option<Arc<Thread>>,
     pub exit_code: Option<u32>,
+}
+
+#[derive(Clone, Default)]
+pub struct TokenSet {
+    pub ruid: Uid,
+    pub euid: Uid,
+    pub suid: Uid,
+    pub rgid: Uid,
+    pub egid: Uid,
+    pub sgid: Uid,
 }
 
 #[derive(Default)]
@@ -47,6 +59,7 @@ impl Thread {
     pub fn new(
         process: Arc<Process>,
         trap_ctx: TrapContext,
+        token_set: TokenSet,
         tid: Option<Arc<TidTracker>>,
         signals: SignalController,
         cpu_set: CpuSet,
@@ -55,6 +68,7 @@ impl Thread {
         let tid = tid.unwrap_or_else(|| Arc::new(TidTracker::new()));
         let inner = ThreadInner {
             trap_ctx,
+            token_set,
             sys_can_restart: false,
             sys_last_a0: 0,
             tid_address: TidAddress::default(),
@@ -78,6 +92,11 @@ impl Thread {
         unsafe { &mut *self.inner.get() }
     }
 
+    pub fn token(&self) -> AccessToken {
+        let tokens = &self.inner().token_set;
+        AccessToken::new(tokens.euid, tokens.egid)
+    }
+
     pub fn recv_signal(&self, signal: Signal) {
         info!("Thread {} receive signal {:?}", self.tid.0, signal);
         match signal {
@@ -85,7 +104,7 @@ impl Thread {
                 if !self.signals.ignore_on_bus(signal) {
                     self.event_bus.recv_event(Event::CHILD_EXIT);
                 }
-            },
+            }
             Signal::SIGKILL => self.event_bus.recv_event(Event::KILL_THREAD),
             _ => {
                 if !self.signals.ignore_on_bus(signal) {

@@ -115,7 +115,7 @@ pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     debug!("[mkdirat] fd: {}, path: {:?}, mode: {}", dirfd, path, mode);
     let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(dirfd, &parent, true, token).await?;
     inode.create(mode, &name, token).await?;
     Ok(0)
@@ -134,7 +134,7 @@ pub async fn sys_unlinkat(dirfd: FdNum, path: usize, flags: u32) -> SyscallResul
     }
 
     let (parent, name) = split_last_path(path).ok_or(Errno::EINVAL)?;
-    let token = current_process().token();
+    let token = current_thread().token();
     let parent = resolve_path(dirfd, &parent, true, token).await?;
     let inode = parent.clone().lookup_name(&name, token).await?;
     if inode.metadata().ifmt.is_dir() {
@@ -158,7 +158,7 @@ pub async fn sys_symlinkat(target: usize, dirfd: FdNum, linkpath: usize) -> Sysc
     let linkpath = user_transmute_str(linkpath, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     debug!("[symlinkat] target: {}, dirfd: {}, linkpath: {}", target, dirfd, linkpath);
     let (parent, name) = split_last_path(linkpath).ok_or(Errno::EINVAL)?;
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(dirfd, &parent, true, token).await?;
     if !inode.metadata().ifmt.is_dir() {
         return Err(Errno::ENOTDIR);
@@ -170,7 +170,7 @@ pub async fn sys_symlinkat(target: usize, dirfd: FdNum, linkpath: usize) -> Sysc
 pub async fn sys_umount2(target: usize, flags: u32) -> SyscallResult<usize> {
     let target = user_transmute_str(target, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     debug!("[umount2] target: {}, flags: {:#x}", target, flags);
-    let token = current_process().token();
+    let token = current_thread().token();
     let mnt_ns = current_process().inner.lock().mnt_ns.clone();
     let target = resolve_path(AT_FDCWD, target, true, token).await?;
     if !target.metadata().ifmt.is_dir() {
@@ -191,7 +191,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
         source, target, fstype, flags, data,
     );
 
-    let token = current_process().token();
+    let token = current_thread().token();
     let mnt_ns = current_process().inner.lock().mnt_ns.clone();
     let target = resolve_path(AT_FDCWD, target, true, token).await?;
     if !target.metadata().ifmt.is_dir() {
@@ -222,7 +222,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
 pub async fn sys_statfs(path: usize, buf: usize) -> SyscallResult<usize> {
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let writeback = user_transmute_w(buf)?.ok_or(Errno::EINVAL)?;
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(AT_FDCWD, path, true, token).await?;
     let fs = inode.file_system().upgrade().ok_or(Errno::ENODEV)?;
     let mut stat = KernelStatfs::default();
@@ -275,7 +275,7 @@ pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
 pub async fn sys_faccessat(fd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
     let mode = AccessMode::from_bits(mode).ok_or(Errno::EINVAL)?;
     let path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(fd, path, true, token).await?;
     inode.proc_access(token, mode)?;
     Ok(0)
@@ -283,7 +283,7 @@ pub async fn sys_faccessat(fd: FdNum, path: usize, mode: u32) -> SyscallResult<u
 
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(AT_FDCWD, path, true, token).await?;
     if inode.metadata().ifmt != InodeMode::S_IFDIR {
         return Err(Errno::ENOTDIR);
@@ -298,7 +298,7 @@ pub async fn sys_fchmodat(dirfd: FdNum, path: usize, mode: u32, flags: u32) -> S
     let mode = InodeMode::from_bits_access(mode).ok_or(Errno::EINVAL)?;
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(dirfd, path, follow_link, token).await?;
     inode.chmod(mode);
     Ok(0)
@@ -308,7 +308,7 @@ pub async fn sys_fchownat(dirfd: FdNum, path: usize, uid: Uid, gid: Uid, flags: 
     // TODO: Permission check
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(dirfd, path, follow_link, token).await?;
     inode.metadata().inner.lock().uid = uid;
     inode.metadata().inner.lock().gid = gid;
@@ -325,7 +325,7 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, mode: u32) -> Sys
         path = "/tmp/testshm";
     }
 
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = match resolve_path(dirfd, path, true, token).await {
         Ok(inode) => inode,
         Err(Errno::ENOENT) if flags.contains(OpenFlags::O_CREAT) => {
@@ -629,7 +629,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
 
 pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {
     let path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(dirfd, path, false, token).await?;
     if inode.metadata().ifmt != InodeMode::S_IFLNK {
         return Err(Errno::EINVAL);
@@ -644,7 +644,7 @@ pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, flags: u32) -
     let path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let writeback = user_transmute_w(buf)?.ok_or(Errno::EINVAL)?;
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(dirfd, path, follow_link, token).await?;
     let mut stat = KernelStat::default();
     stat.st_dev = inode.metadata().dev;
@@ -692,7 +692,7 @@ pub async fn sys_fsync(fd: FdNum) -> SyscallResult<usize> {
 pub async fn sys_utimensat(dirfd: FdNum, path: usize, times: usize, flags: u32) -> SyscallResult<usize> {
     let path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(dirfd, path, follow_link, token).await?;
     let now = TimeSpec::from(real_time());
     let (atime, mtime) = match times {
@@ -736,7 +736,7 @@ pub async fn sys_renameat2(old_dirfd: FdNum, old_path: usize, new_dirfd: FdNum, 
     );
     let (old_parent, old_name) = split_last_path(old_path).ok_or(Errno::EINVAL)?;
     let (new_parent, new_name) = split_last_path(new_path).ok_or(Errno::EINVAL)?;
-    let token = current_process().token();
+    let token = current_thread().token();
     let old_parent = resolve_path(old_dirfd, &old_parent, true, token).await?;
     let new_parent = resolve_path(new_dirfd, &new_parent, true, token).await?;
     let old_inode = old_parent.clone().lookup_name(&old_name, token).await?;
