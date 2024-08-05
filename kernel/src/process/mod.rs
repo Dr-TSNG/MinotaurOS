@@ -26,6 +26,7 @@ use crate::mm::protect::{user_slice_r, user_transmute_w};
 use crate::process::aux::Aux;
 use crate::process::ffi::{CloneFlags, CpuSet};
 use crate::process::monitor::MONITORS;
+use crate::process::thread::event_bus::Event;
 use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::Thread;
 use crate::process::thread::tid::TidTracker;
@@ -34,11 +35,11 @@ use crate::processor::{current_process, current_thread, current_trap_ctx, SYSTEM
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::ITimerVal;
-use crate::sched::spawn_user_thread;
+use crate::sched::{IdleFuture, spawn_user_thread, suspend_now};
 use crate::signal::ffi::Signal;
 use crate::signal::SignalController;
 use crate::sync::futex::FutexQueue;
-use crate::sync::mutex::IrqReMutex;
+use crate::sync::mutex::{IrqReMutex, Mutex};
 use crate::trap::context::TrapContext;
 
 pub type Tid = i32;
@@ -63,7 +64,7 @@ pub struct ProcessInner {
     /// 进程的线程组
     pub threads: BTreeMap<Tid, Weak<Thread>>,
     /// 地址空间
-    pub addr_space: AddressSpace,
+    pub addr_space: Arc<Mutex<AddressSpace>>,
     /// 挂载命名空间
     pub mnt_ns: Arc<MountNamespace>,
     /// 文件描述符表
@@ -106,7 +107,7 @@ impl Process {
                 children: Vec::new(),
                 pgid: pid.clone(),
                 threads: BTreeMap::new(),
-                addr_space,
+                addr_space: Arc::new(Mutex::new(addr_space)),
                 mnt_ns,
                 fd_table: FdTable::new(),
                 futex_queue: Default::default(),
@@ -123,7 +124,7 @@ impl Process {
         });
 
         let trap_ctx = TrapContext::new(entry, USER_STACK_TOP.0);
-        let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()), SignalController::new(), CpuSet::new(1));
+        let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()), SignalController::new(), CpuSet::new(1), None);
         process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
 
         let mut monitors = MONITORS.lock();
@@ -165,7 +166,7 @@ impl Process {
             let task = local_hart().ctx.user_task.as_mut().unwrap();
             task.token = addr_space.token;
             task.root_pt = addr_space.root_pt;
-            proc_inner.addr_space = addr_space;
+            proc_inner.addr_space = Arc::new(Mutex::new(addr_space));
             proc_inner.fd_table.cloexec();
             proc_inner.timers = Default::default();
             proc_inner.exe = inode.mnt_ns_path(&proc_inner.mnt_ns)?;
@@ -239,6 +240,9 @@ impl Process {
             it.trap_ctx = TrapContext::new(entry, user_sp);
             it.tid_address = Default::default();
             it.rusage = ResourceUsage::new();
+            if let Some(parent) = it.vfork_from.take() {
+                parent.event_bus.recv_event(Event::VFORK_DONE);
+            }
         });
 
         info!(
@@ -248,11 +252,16 @@ impl Process {
         Ok(0)
     }
 
-    pub fn fork_process(self: &Arc<Self>, flags: CloneFlags, stack: usize) -> SyscallResult<Pid> {
+    pub async fn fork_process(self: &Arc<Self>, flags: CloneFlags, stack: usize) -> SyscallResult<Pid> {
         let mut monitors = MONITORS.lock();
-
         let new_pid = Arc::new(TidTracker::new());
+        let is_vfork = flags.contains(CloneFlags::CLONE_VFORK);
         let (new_thread, pgid) = self.inner.lock().pipe_ref_mut(|proc_inner| {
+            let addr_space = if is_vfork {
+                proc_inner.addr_space.clone()
+            } else {
+                Arc::new(Mutex::new(proc_inner.addr_space.lock().fork()))
+            };
             let new_process = Arc::new(Process {
                 pid: new_pid.clone(),
                 inner: IrqReMutex::new(ProcessInner {
@@ -260,7 +269,7 @@ impl Process {
                     children: Vec::new(),
                     pgid: proc_inner.pgid.clone(),
                     threads: BTreeMap::new(),
-                    addr_space: proc_inner.addr_space.fork(),
+                    addr_space,
                     mnt_ns: proc_inner.mnt_ns.clone(),
                     fd_table: proc_inner.fd_table.clone(),
                     futex_queue: Default::default(),
@@ -276,7 +285,7 @@ impl Process {
                 }),
             });
             // 地址空间 fork 后需要刷新 TLB
-            unsafe { local_hart().refresh_tlb(proc_inner.addr_space.token); }
+            unsafe { local_hart().refresh_tlb(proc_inner.addr_space.lock().token); }
 
             let mut trap_ctx = current_trap_ctx().clone();
             trap_ctx.user_x[10] = 0;
@@ -289,7 +298,8 @@ impl Process {
                 current_thread().signals.clone_private()
             };
             let new_cpu_set = current_thread().cpu_set.lock().clone();
-            let new_thread = Thread::new(new_process.clone(), trap_ctx, Some(new_pid.clone()), signals, new_cpu_set);
+            let vfork_from = is_vfork.then(|| current_thread().clone());
+            let new_thread = Thread::new(new_process.clone(), trap_ctx, Some(new_pid.clone()), signals, new_cpu_set, vfork_from);
             new_process.inner.lock().threads.insert(new_pid.0, Arc::downgrade(&new_thread));
             proc_inner.children.push(new_process.clone());
 
@@ -304,6 +314,9 @@ impl Process {
             "[fork_process] New process (pid = {}) created, flags {:?}",
             new_pid.0, flags,
         );
+        if flags.contains(CloneFlags::CLONE_VFORK) {
+            let _ = suspend_now(None, Event::VFORK_DONE, IdleFuture).await;
+        }
         Ok(new_pid.0)
     }
 
@@ -336,7 +349,7 @@ impl Process {
             };
 
             let new_cpu_set = current_thread().cpu_set.lock().clone();
-            let new_thread = Thread::new(self.clone(), trap_ctx, None, signals, new_cpu_set);
+            let new_thread = Thread::new(self.clone(), trap_ctx, None, signals, new_cpu_set, None);
             let new_tid = new_thread.tid.0;
             proc_inner.threads.insert(new_tid, Arc::downgrade(&new_thread));
 

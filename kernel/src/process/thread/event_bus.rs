@@ -19,6 +19,7 @@ bitflags! {
         const CHILD_EXIT = 1 << 0;
         const KILL_THREAD = 1 << 1;
         const COMMON_SIGNAL = 1 << 2;
+        const VFORK_DONE = 1 << 3;
     }
 }
 
@@ -50,7 +51,7 @@ impl EventBus {
         }
     }
 
-    pub(super) fn recv_event(&self, event: Event) {
+    pub fn recv_event(&self, event: Event) {
         let inner = &mut *self.0.lock();
         inner.event |= event;
         inner.callbacks.retain(|(e, waker)| {

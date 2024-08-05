@@ -26,10 +26,11 @@ impl HartContext {
 
     pub fn user(thread: Arc<Thread>) -> Self {
         let proc_inner = thread.process.inner.lock();
+        let addr_space = proc_inner.addr_space.lock();
         let user_task = UserTask {
             thread: thread.clone(),
-            token: proc_inner.addr_space.token,
-            root_pt: proc_inner.addr_space.root_pt,
+            token: addr_space.token,
+            root_pt: addr_space.root_pt,
         };
         HartContext {
             user_task: Some(user_task),

@@ -236,12 +236,12 @@ pub fn sys_gettid() -> SyscallResult<usize> {
     Ok(current_thread().tid.0 as usize)
 }
 
-pub fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize) -> SyscallResult<usize> {
+pub async fn sys_clone(flags: u32, stack: usize, ptid: usize, tls: usize, ctid: usize) -> SyscallResult<usize> {
     let flags = CloneFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
-    let ret = if flags.contains(CloneFlags::CLONE_VM) {
+    let ret = if flags.contains(CloneFlags::CLONE_VM) && !flags.contains(CloneFlags::CLONE_VFORK) {
         current_process().clone_thread(flags, stack, tls, ptid, ctid)
     } else {
-        current_process().fork_process(flags, stack)
+        current_process().fork_process(flags, stack).await
     };
     ret.map(|tid| tid as usize)
 }

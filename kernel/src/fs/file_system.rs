@@ -219,10 +219,7 @@ impl MountNamespace {
 
     pub fn get_inode_snapshot(&self, inode: &dyn Inode) -> SyscallResult<(usize, String)> {
         let fsid = inode.file_system().upgrade().ok_or(Errno::EIO)?.metadata().fsid;
-        let mut mp = self.inner.lock().snapshot.get(&fsid).cloned().expect("fsid not found");
-        if mp.1.is_empty() {
-            mp.1 = "/".to_string();
-        }
+        let mp = self.inner.lock().snapshot.get(&fsid).cloned().expect("fsid not found");
         Ok(mp)
     }
 

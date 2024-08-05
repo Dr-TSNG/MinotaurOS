@@ -33,6 +33,7 @@ pub struct ThreadInner {
     pub sys_last_a0: usize,
     pub tid_address: TidAddress,
     pub rusage: ResourceUsage,
+    pub vfork_from: Option<Arc<Thread>>,
     pub exit_code: Option<u32>,
 }
 
@@ -49,6 +50,7 @@ impl Thread {
         tid: Option<Arc<TidTracker>>,
         signals: SignalController,
         cpu_set: CpuSet,
+        vfork_from: Option<Arc<Thread>>,
     ) -> Arc<Self> {
         let tid = tid.unwrap_or_else(|| Arc::new(TidTracker::new()));
         let inner = ThreadInner {
@@ -57,6 +59,7 @@ impl Thread {
             sys_last_a0: 0,
             tid_address: TidAddress::default(),
             rusage: ResourceUsage::new(),
+            vfork_from,
             exit_code: None,
         };
         let thread = Thread {

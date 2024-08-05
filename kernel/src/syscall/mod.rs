@@ -277,7 +277,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Sockshutdown => syscall!(sys_sockshutdown, args[0] as FdNum, args[1] as u32),
         SyscallCode::Brk => syscall!(sys_brk, args[0]),
         SyscallCode::Munmap => syscall!(sys_munmap, args[0], args[1]),
-        SyscallCode::Clone => syscall!(sys_clone, args[0] as u32, args[1], args[2], args[3], args[4]),
+        SyscallCode::Clone => async_syscall!(sys_clone, args[0] as u32, args[1], args[2], args[3], args[4]),
         SyscallCode::Execve => async_syscall!(sys_execve, args[0], args[1], args[2]),
         SyscallCode::Mmap => syscall!(sys_mmap, args[0], args[1], args[2] as u32, args[3] as u32, args[4] as FdNum, args[5]),
         SyscallCode::Mprotect => syscall!(sys_mprotect, args[0], args[1], args[2] as u32),

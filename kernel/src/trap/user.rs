@@ -149,8 +149,10 @@ pub fn check_signal() {
 
 fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
     debug!("User page fault at {:?} for {:?}", addr, perform);
-    let mut proc_inner = current_process().inner.lock();
-    match proc_inner.addr_space.handle_page_fault(addr, perform) {
+    let res = current_process().inner.lock()
+        .addr_space.lock()
+        .handle_page_fault(addr, perform);
+    match res {
         Ok(()) => debug!("Page fault resolved"),
         Err(Errno::ENOSPC) => {
             error!("Fatal page fault: Out of memory, kill process");

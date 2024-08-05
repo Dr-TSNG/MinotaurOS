@@ -52,7 +52,9 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) -> SyscallResult {
     let thread = local_hart()
         .current_thread()
         .expect("Page fault while running kernel thread");
-    let res = thread.process.inner.lock().addr_space.handle_page_fault(addr, perform);
+    let res = thread.process.inner.lock()
+        .addr_space.lock()
+        .handle_page_fault(addr, perform);
     match res {
         Ok(()) => debug!("Page fault resolved"),
         Err(Errno::ENOSPC) => {

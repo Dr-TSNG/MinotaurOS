@@ -1,7 +1,7 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
@@ -360,7 +360,11 @@ impl dyn Inode {
 
     pub fn mnt_ns_path(&self, mnt_ns: &MountNamespace) -> SyscallResult<String> {
         let pre = mnt_ns.get_inode_snapshot(self)?.1;
-        Ok(format!("{}{}", pre, self.metadata().path))
+        let mut path = format!("{}{}", pre, self.metadata().path);
+        if path.is_empty() {
+            path = "/".to_string();
+        }
+        Ok(path)
     }
 
     pub fn proc_access(&self, token: AccessToken) -> AccessMode {

@@ -67,10 +67,10 @@ impl Future for YieldFuture {
     }
 }
 
-struct IdleFuture;
+pub struct IdleFuture;
 
 impl Future for IdleFuture {
-    type Output = !;
+    type Output = SyscallResult;
 
     fn poll(self: Pin<&mut Self>, _: &mut Context) -> Poll<Self::Output> {
         Poll::Pending
@@ -113,7 +113,7 @@ where
     }
 }
 
-pub async fn sleep_for(time: Duration) -> SyscallResult<()> {
+pub async fn sleep_for(time: Duration) -> SyscallResult {
     TimeoutFuture::new(time, IdleFuture).await;
     Ok(())
 }
