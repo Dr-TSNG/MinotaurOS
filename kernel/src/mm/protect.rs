@@ -36,14 +36,15 @@ pub fn user_transmute_str(addr: usize, max_len: usize) -> SyscallResult<Option<&
         0 => Ok(None),
         _ => {
             let mut cur_len = min(max_len, PAGE_SIZE - (addr % PAGE_SIZE));
-            while cur_len <= max_len {
+            loop {
                 let data = user_slice_r(addr, cur_len)?;
                 if let Ok(cstr) = CStr::from_bytes_until_nul(data) {
                     return Ok(Some(cstr.to_str().map_err(|_| Errno::EINVAL)?));
+                } else if cur_len == max_len {
+                    return Err(Errno::ENAMETOOLONG);
                 }
                 cur_len = min(cur_len + PAGE_SIZE, max_len);
             }
-            Err(Errno::EINVAL)
         }
     }
 }
@@ -51,6 +52,9 @@ pub fn user_transmute_str(addr: usize, max_len: usize) -> SyscallResult<Option<&
 pub fn user_slice_r(addr: usize, len: usize) -> SyscallResult<&'static [u8]> {
     if len == 0 {
         return Ok(&[]);
+    }
+    if addr.checked_add(len).is_none() {
+        return Err(Errno::EFAULT);
     }
     let addr = VirtAddr(addr);
     check_slice_readable(addr, len)?;
@@ -61,6 +65,9 @@ pub fn user_slice_r(addr: usize, len: usize) -> SyscallResult<&'static [u8]> {
 pub fn user_slice_w(addr: usize, len: usize) -> SyscallResult<&'static mut [u8]> {
     if len == 0 {
         return Ok(&mut []);
+    }
+    if addr.checked_add(len).is_none() {
+        return Err(Errno::EFAULT);
     }
     let addr = VirtAddr(addr);
     check_slice_writable(addr, len)?;

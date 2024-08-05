@@ -285,9 +285,7 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
     if inode.metadata().ifmt == InodeMode::S_IFDIR {
         return Err(Errno::EISDIR);
     }
-    if !inode.proc_access(token).contains(AccessMode::X_OK) {
-        return Err(Errno::EACCES);
-    }
+    inode.proc_access(token, AccessMode::X_OK)?;
     current_process().execve(inode, &args_vec, &envs_vec, token).await
 }
 

@@ -191,7 +191,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Statfs => async_syscall!(sys_statfs, args[0], args[1]),
         SyscallCode::Fstatfs => syscall!(sys_fstatfs, args[0] as FdNum, args[1]),
         SyscallCode::Ftruncate => async_syscall!(sys_ftruncate, args[0] as FdNum, args[1] as isize),
-        SyscallCode::Faccessat => async_syscall!(sys_faccessat, args[0] as FdNum, args[1], args[2] as u32, args[3] as u32),
+        SyscallCode::Faccessat => async_syscall!(sys_faccessat, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Chdir => async_syscall!(sys_chdir, args[0]),
         SyscallCode::Fchmodat => async_syscall!(sys_fchmodat, args[0] as FdNum, args[1], args[2] as u32, args[3] as u32),
         SyscallCode::Fchownat => async_syscall!(sys_fchownat, args[0] as FdNum, args[1], args[2] as Uid, args[3] as Uid, args[4] as u32),

@@ -25,6 +25,9 @@ pub async fn resolve_path(
     token: AccessToken,
 ) -> SyscallResult<Arc<dyn Inode>> {
     assert_ne!(current_process().inner.locked_by(), local_hart().id);
+    if path.is_empty() {
+        return Err(Errno::ENOENT);
+    }
     let proc_inner = current_process().inner.lock();
 
     let mut path = normalize_path(path);

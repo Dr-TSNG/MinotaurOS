@@ -168,39 +168,48 @@ pub async fn sys_symlinkat(target: usize, dirfd: FdNum, linkpath: usize) -> Sysc
 }
 
 pub async fn sys_umount2(target: usize, flags: u32) -> SyscallResult<usize> {
-    let token = current_process().token();
     let target = user_transmute_str(target, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     debug!("[umount2] target: {}, flags: {:#x}", target, flags);
-    current_process().inner.lock().mnt_ns.unmount(token, target).await?;
+    let token = current_process().token();
+    let mnt_ns = current_process().inner.lock().mnt_ns.clone();
+    let target = resolve_path(AT_FDCWD, target, true, token).await?;
+    if !target.metadata().ifmt.is_dir() {
+        return Err(Errno::ENOTDIR);
+    }
+    mnt_ns.unmount(target).await?;
     Ok(0)
 }
 
 pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, data: usize) -> SyscallResult<usize> {
-    let source = user_transmute_str(source, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let source = user_transmute_str(source, PATH_MAX)?;
     let target = user_transmute_str(target, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let fstype = user_transmute_str(fstype, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let flags = VfsFlags::from_bits_truncate(flags);
     let data = user_transmute_str(data, PATH_MAX)?;
     info!(
-        "[mount] source: {}, target: {}, fstype: {}, flags: {:?}, data: {:?}",
+        "[mount] source: {:?}, target: {}, fstype: {}, flags: {:?}, data: {:?}",
         source, target, fstype, flags, data,
     );
 
     let token = current_process().token();
-    let proc_inner = current_process().inner.lock();
+    let mnt_ns = current_process().inner.lock().mnt_ns.clone();
+    let target = resolve_path(AT_FDCWD, target, true, token).await?;
+    if !target.metadata().ifmt.is_dir() {
+        return Err(Errno::ENOTDIR);
+    }
     match fstype {
         "devtmpfs" => {
-            proc_inner.mnt_ns.mount(token, target, |p| {
-                DevFileSystem::new(source, flags, Some(p))
+            mnt_ns.mount(target, flags, |p| {
+                DevFileSystem::new(flags, Some(p))
             }).await?;
         }
         "proc" => {
-            proc_inner.mnt_ns.mount(token, target, |p| {
-                ProcFileSystem::new(source, flags, Some(p))
+            mnt_ns.mount(target, flags, |p| {
+                ProcFileSystem::new(flags, Some(p))
             }).await?;
         }
         "tmpfs" => {
-            proc_inner.mnt_ns.mount(token, target, |p| {
+            mnt_ns.mount(target, flags, |p| {
                 TmpFileSystem::new(source, flags, Some(p))
             }).await?;
         }
@@ -227,7 +236,7 @@ pub async fn sys_statfs(path: usize, buf: usize) -> SyscallResult<usize> {
     stat.f_fsid = 0;
     stat.f_namelen = MAX_NAME_LEN as u64;
     stat.f_frsize = 512;
-    stat.f_flags = fs.metadata().flags.bits() as u64;
+    stat.f_flags = fs.flags().bits() as u64;
     *writeback = stat;
     Ok(0)
 }
@@ -248,7 +257,7 @@ pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
     stat.f_fsid = 0;
     stat.f_namelen = MAX_NAME_LEN as u64;
     stat.f_frsize = 512;
-    stat.f_flags = fs.metadata().flags.bits() as u64;
+    stat.f_flags = fs.flags().bits() as u64;
     *writeback = stat;
     Ok(0)
 }
@@ -263,16 +272,13 @@ pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
     Ok(0)
 }
 
-pub async fn sys_faccessat(fd: FdNum, path: usize, mode: u32, _flags: u32) -> SyscallResult<usize> {
+pub async fn sys_faccessat(fd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
     let mode = AccessMode::from_bits(mode).ok_or(Errno::EINVAL)?;
     let path = user_transmute_str(path, PATH_MAX)?.unwrap_or(".");
     let token = current_process().token();
-    let inode = resolve_path(fd, path, false, token).await?;
-    if inode.proc_access(token).contains(mode) {
-        Ok(0)
-    } else {
-        Err(Errno::EACCES)
-    }
+    let inode = resolve_path(fd, path, true, token).await?;
+    inode.proc_access(token, mode)?;
+    Ok(0)
 }
 
 pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {

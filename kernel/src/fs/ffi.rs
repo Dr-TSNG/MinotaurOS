@@ -68,6 +68,8 @@ bitflags! {
         const ST_NOEXEC      = 1 << 3;
         /// Writes are synced at once
         const ST_SYNCHRONOUS = 1 << 4;
+        /// Alter flags of a mounted FS
+        const MS_REMOUNT     = 1 << 5;
         /// Allow mandatory locks on an FS
         const ST_MANDLOCK    = 1 << 6;
         /// Write on file/directory/symlink
