@@ -42,9 +42,7 @@ use crate::sync::futex::FutexQueue;
 use crate::sync::mutex::{IrqReMutex, Mutex};
 use crate::trap::context::TrapContext;
 
-pub type Tid = i32;
 pub type Pid = i32;
-pub type Gid = i32;
 pub type Uid = u16;
 
 pub struct Process {
@@ -62,7 +60,7 @@ pub struct ProcessInner {
     /// 进程组
     pub pgid: Arc<TidTracker>,
     /// 进程的线程组
-    pub threads: BTreeMap<Tid, Weak<Thread>>,
+    pub threads: BTreeMap<Pid, Weak<Thread>>,
     /// 地址空间
     pub addr_space: Arc<Mutex<AddressSpace>>,
     /// 挂载命名空间
@@ -327,7 +325,7 @@ impl Process {
         tls: usize,
         ptid: usize,
         ctid: usize,
-    ) -> SyscallResult<Tid> {
+    ) -> SyscallResult<Pid> {
         let new_thread = self.inner.lock().pipe_ref_mut(|proc_inner| {
             user_slice_r(stack, size_of::<usize>() * 2)?;
             let entry = unsafe {
@@ -366,11 +364,11 @@ impl Process {
                 *ptid = new_tid;
             }
             if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
-                user_transmute_w::<Tid>(ctid)?.ok_or(Errno::EINVAL)?;
+                user_transmute_w::<Pid>(ctid)?.ok_or(Errno::EINVAL)?;
                 new_thread.inner().tid_address.clear = Some(VirtAddr(ctid));
             }
             if flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
-                user_transmute_w::<Tid>(ctid)?.ok_or(Errno::EINVAL)?;
+                user_transmute_w::<Pid>(ctid)?.ok_or(Errno::EINVAL)?;
                 new_thread.inner().tid_address.set = Some(VirtAddr(ctid));
             }
 
@@ -398,7 +396,7 @@ impl Process {
         });
     }
 
-    pub fn on_thread_exit(&self, tid: Tid, exit_code: u32) {
+    pub fn on_thread_exit(&self, tid: Pid, exit_code: u32) {
         info!("Thread {} exited with code {}", tid, exit_code);
         let monitor = MONITORS.lock();
         let mut proc_inner = self.inner.lock();

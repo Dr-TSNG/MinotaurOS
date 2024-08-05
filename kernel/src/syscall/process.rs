@@ -10,7 +10,7 @@ use crate::fs::ffi::{AccessMode, AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::mm::protect::{user_transmute_r, user_transmute_str, user_transmute_w};
 use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
-use crate::process::{Gid, Pid, Tid, Uid};
+use crate::process::{Pid, Uid};
 use crate::process::monitor::MONITORS;
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
@@ -59,7 +59,7 @@ pub fn sys_set_tid_address(tid: usize) -> SyscallResult<usize> {
     Ok(current_thread().tid.0 as usize)
 }
 
-pub fn sys_sched_setaffinity(tid: Tid, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
+pub fn sys_sched_setaffinity(tid: Pid, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
     if cpusetsize != size_of::<CpuSet>() {
         return Err(Errno::EINVAL);
     }
@@ -72,7 +72,7 @@ pub fn sys_sched_setaffinity(tid: Tid, cpusetsize: usize, mask: usize) -> Syscal
     Ok(0)
 }
 
-pub fn sys_sched_getaffinity(tid: Tid, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
+pub fn sys_sched_getaffinity(tid: Pid, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
     if cpusetsize != size_of::<CpuSet>() {
         return Err(Errno::EINVAL);
     }
@@ -117,7 +117,7 @@ pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
     handled.then_some(0).ok_or(Errno::EINVAL)
 }
 
-pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
+pub fn sys_tkill(tid: Pid, signal: usize) -> SyscallResult<usize> {
     let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
     if let Some(thread) = MONITORS.lock().thread.get(tid).upgrade() {
         thread.recv_signal(signal);
@@ -126,7 +126,7 @@ pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
     Err(Errno::EINVAL)
 }
 
-pub fn sys_tgkill(tgid: Pid, tid: Tid, signal: usize) -> SyscallResult<usize> {
+pub fn sys_tgkill(tgid: Pid, tid: Pid, signal: usize) -> SyscallResult<usize> {
     let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
     let monitors = MONITORS.lock();
     let process = monitors.process.get(tgid).upgrade().ok_or(Errno::ESRCH)?;
@@ -161,7 +161,7 @@ pub fn sys_setresuid(ruid: Uid, euid: Uid, suid: Uid) -> SyscallResult<usize> {
     Ok(0)
 }
 
-pub fn sys_setpgid(pid: Pid, pgid: Gid) -> SyscallResult<usize> {
+pub fn sys_setpgid(pid: Pid, pgid: Pid) -> SyscallResult<usize> {
     let mut monitors = MONITORS.lock();
     let proc = match pid {
         0 => current_process().clone(),

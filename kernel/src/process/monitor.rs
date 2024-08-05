@@ -2,7 +2,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::sync::Weak;
 use alloc::vec::Vec;
 use core::cell::RefCell;
-use crate::process::{Gid, Pid, Process, Tid};
+use crate::process::{Pid, Process};
 use crate::process::thread::Thread;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::ReMutex;
@@ -15,9 +15,9 @@ pub struct Monitors {
     pub group: ProcessGroupMonitor,
 }
 
-pub struct ThreadMonitor(BTreeMap<Tid, Weak<Thread>>);
+pub struct ThreadMonitor(BTreeMap<Pid, Weak<Thread>>);
 pub struct ProcessMonitor(BTreeMap<Pid, Weak<Process>>);
-pub struct ProcessGroupMonitor(BTreeMap<Gid, RefCell<BTreeSet<Pid>>>);
+pub struct ProcessGroupMonitor(BTreeMap<Pid, RefCell<BTreeSet<Pid>>>);
 
 impl Monitors {
     const fn new() -> Self {
@@ -30,15 +30,15 @@ impl Monitors {
 }
 
 impl ThreadMonitor {
-    pub fn add(&mut self, tid: Tid, thread: Weak<Thread>) {
+    pub fn add(&mut self, tid: Pid, thread: Weak<Thread>) {
         self.0.insert(tid, thread);
     }
 
-    pub fn remove(&mut self, tid: Tid) {
+    pub fn remove(&mut self, tid: Pid) {
         self.0.remove(&tid);
     }
 
-    pub fn get(&self, tid: Tid) -> Weak<Thread> {
+    pub fn get(&self, tid: Pid) -> Weak<Thread> {
         self.0.get(&tid).cloned().unwrap_or(Weak::new())
     }
 }
@@ -74,16 +74,16 @@ impl ProcessGroupMonitor {
         self.0.insert(pid, RefCell::new(set));
     }
 
-    pub fn remove_group(&mut self, pgid: Gid) {
+    pub fn remove_group(&mut self, pgid: Pid) {
         self.0.remove(&pgid);
     }
 
-    pub fn add_process(&mut self, pgid: Gid, pid: Pid) {
+    pub fn add_process(&mut self, pgid: Pid, pid: Pid) {
         let group = self.0.get(&pgid).unwrap();
         group.borrow_mut().insert(pid);
     }
 
-    pub fn move_to_group(&mut self, old_pgid: Gid, pid: Pid, new_pgid: Gid) -> SyscallResult {
+    pub fn move_to_group(&mut self, old_pgid: Pid, pid: Pid, new_pgid: Pid) -> SyscallResult {
         let old_group = self.0.get(&old_pgid).ok_or(Errno::ESRCH)?;
         let new_group = self.0.get(&new_pgid).ok_or(Errno::EPERM)?;
         old_group.borrow_mut().remove(&pid);
@@ -91,7 +91,7 @@ impl ProcessGroupMonitor {
         Ok(())
     }
 
-    pub fn get_group(&self, pgid: Gid) -> Option<Vec<Pid>> {
+    pub fn get_group(&self, pgid: Pid) -> Option<Vec<Pid>> {
         self.0.get(&pgid).map(|group| group.borrow_mut().iter().cloned().collect())
     }
 }

@@ -7,12 +7,12 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use core::task::{Context, Poll, Waker};
 use log::info;
 use crate::arch::VirtAddr;
-use crate::process::Tid;
+use crate::process::Pid;
 use crate::processor::{current_process, current_thread};
 use crate::result::SyscallResult;
 
 #[derive(Default)]
-pub struct FutexQueue(BTreeMap<VirtAddr, BTreeMap<Tid, FutexWaker>>);
+pub struct FutexQueue(BTreeMap<VirtAddr, BTreeMap<Pid, FutexWaker>>);
 
 impl FutexQueue {
     pub fn wake(&mut self, addr: VirtAddr, nval: usize) -> usize {
@@ -57,7 +57,7 @@ impl FutexQueue {
         woken_req
     }
 
-    fn register(&mut self, tid: Tid, waker: FutexWaker) {
+    fn register(&mut self, tid: Pid, waker: FutexWaker) {
         let addr = unsafe { *waker.addr.get() };
         if let Some(queue) = self.0.get_mut(&addr) {
             queue.insert(tid, waker);
@@ -68,7 +68,7 @@ impl FutexQueue {
         }
     }
 
-    fn unregister(&mut self, addr: VirtAddr, tid: Tid) {
+    fn unregister(&mut self, addr: VirtAddr, tid: Pid) {
         if let Some(queue) = self.0.get_mut(&addr) {
             queue.remove(&tid);
         }

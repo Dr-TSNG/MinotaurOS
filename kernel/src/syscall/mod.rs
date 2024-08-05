@@ -19,7 +19,7 @@ use time::*;
 use log::{debug, warn};
 use num_enum::FromPrimitive;
 use crate::fs::fd::FdNum;
-use crate::process::{Gid, Pid, Tid, Uid};
+use crate::process::{Pid, Uid};
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::strace;
@@ -233,12 +233,12 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::SchedSetScheduler => syscall!(dummy),
         SyscallCode::SchedGetScheduler => syscall!(dummy),
         SyscallCode::SchedGetParam => syscall!(dummy),
-        SyscallCode::SchedSetAffinity => syscall!(sys_sched_setaffinity, args[0] as Tid, args[1], args[2]),
-        SyscallCode::SchedGetAffinity => syscall!(sys_sched_getaffinity, args[0] as Tid, args[1], args[2]),
+        SyscallCode::SchedSetAffinity => syscall!(sys_sched_setaffinity, args[0] as Pid, args[1], args[2]),
+        SyscallCode::SchedGetAffinity => syscall!(sys_sched_getaffinity, args[0] as Pid, args[1], args[2]),
         SyscallCode::SchedYield => async_syscall!(sys_sched_yield),
         SyscallCode::Kill => syscall!(sys_kill, args[0] as Pid, args[1]),
-        SyscallCode::Tkill => syscall!(sys_tkill, args[0] as Tid, args[1]),
-        SyscallCode::Tgkill => syscall!(sys_tgkill, args[0] as Pid, args[1] as Tid, args[2]),
+        SyscallCode::Tkill => syscall!(sys_tkill, args[0] as Pid, args[1]),
+        SyscallCode::Tgkill => syscall!(sys_tgkill, args[0] as Pid, args[1] as Pid, args[2]),
         SyscallCode::RtSigsupend => async_syscall!(sys_rt_sigsuspend, args[0]),
         SyscallCode::RtSigaction => syscall!(sys_rt_sigaction, args[0] as i32, args[1], args[2]),
         SyscallCode::RtSigprocmask => syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2]),
@@ -247,7 +247,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Setuid => syscall!(sys_setuid, args[0] as Uid),
         SyscallCode::Setresuid => syscall!(sys_setresuid, args[0] as Uid, args[1] as Uid, args[2] as Uid),
         SyscallCode::Times => syscall!(sys_times, args[0]),
-        SyscallCode::Setpgid => syscall!(sys_setpgid, args[0] as Pid, args[1] as Gid),
+        SyscallCode::Setpgid => syscall!(sys_setpgid, args[0] as Pid, args[1] as Pid),
         SyscallCode::Getpgid => syscall!(sys_getpgid, args[0] as Pid),
         SyscallCode::Setsid => syscall!(sys_setsid),
         SyscallCode::Uname => syscall!(sys_uname, args[0]),
