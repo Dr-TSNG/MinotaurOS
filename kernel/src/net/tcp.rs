@@ -286,8 +286,12 @@ impl Socket for TcpSocket {
             .unwrap_or_else(|| SockAddr::In4(SockAddrIn4::default()))
     }
 
-    fn peer_name(&self) -> Option<SockAddr> {
-        self.inner.lock().remote_endpoint.map(Into::into)
+    fn peer_name(&self) -> SyscallResult<SockAddr> {
+        let res = self.inner.lock().remote_endpoint.map(Into::into);
+        match res {
+            Some(sockaddr) => Ok(sockaddr),
+            _ => Err(Errno::ENOTCONN),
+        }
     }
 
     fn shutdown(&self, how: u32) -> SyscallResult {

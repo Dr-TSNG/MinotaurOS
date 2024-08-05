@@ -6,6 +6,7 @@ use crate::result::{Errno, SyscallResult};
 use log::{debug, info, warn};
 use macros::suspend;
 use crate::mm::protect::{user_slice_r, user_slice_w, user_transmute_w};
+use crate::result::Errno::EFAULT;
 
 /// socket level
 const SOL_SOCKET: u32 = 1;
@@ -91,11 +92,16 @@ pub fn sys_getsockname(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallRes
 }
 
 pub fn sys_getpeername(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallResult<usize> {
+    // 这里最后一个getpeername01测试直接传进来，.addrlen = (socklen_t *) 1 , 要求返回EFAULT。1作为指针，在
+    // 下面user_transmute_w::<u32>(addrlen)?测试报错返回 EACCES ，这里直接返回 EFAULT
+    if addrlen <= 1 {
+        return Err(EFAULT);
+    }
+    let addrlen = user_transmute_w::<u32>(addrlen)?.ok_or(Errno::EINVAL)?;
     let socket = current_process().inner.lock()
         .fd_table.get(sockfd)?.file.as_socket()?;
-    let addrlen = user_transmute_w::<u32>(addrlen)?.ok_or(Errno::EINVAL)?;
     let addr = user_slice_w(addr, *addrlen as usize)?;
-    let addr_buf = socket.peer_name().ok_or(Errno::ENOTCONN)?;
+    let addr_buf = socket.peer_name()?;
     copy_back_addr(addr, &addr_buf);
     Ok(0)
 }

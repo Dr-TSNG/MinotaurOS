@@ -84,6 +84,10 @@ fn check_slice_readable(addr: VirtAddr, len: usize) -> SyscallResult {
 }
 
 fn check_slice_writable(addr: VirtAddr, len: usize) -> SyscallResult {
+    if 0xFFFFFFFFFFFFFFFF - addr.0 < len{
+    	return Err(Errno::EFAULT);
+    }
+
     let _guard = KIntrGuard::new();
     local_hart().on_page_test = true;
     let start = addr.floor();
