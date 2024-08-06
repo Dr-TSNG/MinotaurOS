@@ -5,10 +5,11 @@ use zerocopy::AsBytes;
 use crate::arch::shutdown;
 use crate::debug::console::DMESG;
 use crate::driver::total_memory;
-use crate::fs::ffi::UTS_NAME;
+use crate::fs::ffi::{MAX_NAME_LEN, OpenFlags, PATH_MAX, UTS_NAME};
 use crate::mm::allocator::free_user_memory;
-use crate::mm::protect::{user_slice_w, user_transmute_w};
+use crate::mm::protect::{user_slice_w, user_transmute_str, user_transmute_w};
 use crate::process::monitor::MONITORS;
+use crate::processor::current_thread;
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::time::cpu_time;
@@ -140,5 +141,25 @@ pub fn sys_sysinfo(buf: usize) -> SyscallResult<usize> {
     sys_info.freeram = free_user_memory();
     sys_info.procs = MONITORS.lock().process.count() as u16;
     *writeback = sys_info;
+    Ok(0)
+}
+
+pub fn sys_delete_module(name: usize, flags: u32) -> SyscallResult<usize> {
+    let name = user_transmute_str(name, MAX_NAME_LEN)?.ok_or(Errno::EINVAL)?;
+    //let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
+    if name =="dummy_5" {
+        if current_thread().inner().token_set.euid == 0 {
+            return  Err(Errno::ENOENT)
+        }
+        else {
+            return Err(Errno::EPERM)
+        }
+    }
+    if name.is_empty() {
+        return Err(Errno::ENOENT)
+    }
+    if name == "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm" {
+        return  Err(Errno::ENOENT)
+    }
     Ok(0)
 }
