@@ -1,6 +1,7 @@
 use log::{debug, warn};
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::fd::FdNum;
+use crate::mm::addr_space::ASPerms;
 use crate::mm::ffi::{IPC_PRIVATE, MapFlags, MapProt};
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
@@ -68,7 +69,12 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
         "[mmap] start: {:?}, len: {:#x}, prot: {:?}, flags: {:?}, fd: {:?}, offset: {}",
         start, len, prot, flags, fd, offset,
     );
-    let is_shared = flags.contains(MapFlags::MAP_SHARED);
+    let mut perms = ASPerms::from(prot);
+    if flags.contains(MapFlags::MAP_PRIVATE) {
+        perms |= ASPerms::P;
+    } else if !flags.contains(MapFlags::MAP_SHARED) {
+        return Err(Errno::EINVAL);
+    }
     let proc_inner = current_process().inner.lock();
     if !flags.contains(MapFlags::MAP_ANONYMOUS) && fd != -1 {
         let fd_impl = proc_inner.fd_table.get(fd)?;
@@ -76,10 +82,10 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
         inode.metadata().page_cache.as_ref().ok_or(Errno::ENODEV)?;
         let name = inode.mnt_ns_path(&proc_inner.mnt_ns)?;
         proc_inner.addr_space.lock()
-            .mmap(Some(name), start, len.div_ceil(PAGE_SIZE), prot.into(), Some(inode), offset / PAGE_SIZE, is_shared)
+            .mmap(Some(name), start, len.div_ceil(PAGE_SIZE), prot.into(), Some(inode), offset / PAGE_SIZE)
     } else {
         proc_inner.addr_space.lock()
-            .mmap(None, start, len.div_ceil(PAGE_SIZE), prot.into(), None, 0, is_shared)
+            .mmap(None, start, len.div_ceil(PAGE_SIZE), prot.into(), None, 0)
     }
 }
 

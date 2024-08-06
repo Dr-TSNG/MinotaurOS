@@ -88,7 +88,7 @@ impl Process {
         elf_data: &[u8],
     ) -> SyscallResult<Arc<Self>> {
         let (addr_space, entry, _) =
-            AddressSpace::from_elf(&mnt_ns, elf_data, AccessToken::root()).await?;
+            AddressSpace::from_elf(&mnt_ns, "/init", elf_data, AccessToken::root()).await?;
         let pid = Arc::new(TidTracker::new());
 
         let process = Arc::new(Process {
@@ -302,6 +302,10 @@ impl Process {
             new_process.inner.lock().threads.insert(new_pid.0, Arc::downgrade(&new_thread));
             proc_inner.children.push(new_process.clone());
 
+            if let Some(procfs) = proc_inner.mnt_ns.proc_fs().upgrade() {
+                procfs.add_process(new_process.clone());
+            }
+
             (new_thread, proc_inner.pgid.0)
         });
 
@@ -428,6 +432,9 @@ impl Process {
 
 impl Drop for Process {
     fn drop(&mut self) {
+        if let Some(procfs) = self.inner.lock().mnt_ns.proc_fs().upgrade() {
+            procfs.remove_process(self.pid.0);
+        }
         if self.pid.0 == 1 {
             SYSTEM_SHUTDOWN.store(true, Ordering::Relaxed);
         }

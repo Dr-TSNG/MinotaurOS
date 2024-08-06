@@ -1,16 +1,20 @@
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::format;
 use alloc::string::{String, ToString};
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
 use core::fmt::Display;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use hashbrown::HashMap;
 use log::debug;
+use tap::Tap;
 use crate::config::MAX_SYMLINKS;
 use crate::driver::ffi::sep_dev;
+use crate::fs::devfs::DevFileSystem;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::inode::Inode;
 use crate::fs::path::is_absolute_path;
+use crate::fs::procfs::ProcFileSystem;
+use crate::fs::tmpfs::TmpFileSystem;
 use crate::process::token::AccessToken;
 use crate::result::{Errno, SyscallResult};
 use crate::split_path;
@@ -93,6 +97,7 @@ pub struct MountNamespace {
 
 struct NSInner {
     tree: MountTree,
+    procfs: Weak<ProcFileSystem>,
     snapshot: HashMap<usize, (usize, String)>,
 }
 
@@ -117,8 +122,16 @@ impl MountNamespace {
         let snapshot = (tree.fs.metadata().fsid, (tree.mnt_id, String::new()));
         Self {
             mnt_ns_id: MNT_NS_ID_POOL.fetch_add(1, Ordering::Acquire),
-            inner: Mutex::new(NSInner { tree, snapshot: HashMap::from([snapshot]) }),
+            inner: Mutex::new(NSInner {
+                tree,
+                procfs: Weak::new(),
+                snapshot: HashMap::from([snapshot]),
+            }),
         }
+    }
+
+    pub fn proc_fs(&self) -> Weak<ProcFileSystem> {
+        self.inner.lock().procfs.clone()
     }
 
     pub fn print_mounts(&self) -> String {
@@ -201,10 +214,13 @@ impl MountNamespace {
         }
     }
 
-    pub async fn mount<F>(&self, target: Arc<dyn Inode>, flags: VfsFlags, fs_fn: F) -> SyscallResult
-    where
-        F: FnOnce(Arc<dyn Inode>) -> Arc<dyn FileSystem>,
-    {
+    pub fn mount(
+        &self,
+        source: Option<&str>,
+        target: Arc<dyn Inode>,
+        fstype: &str,
+        flags: VfsFlags,
+    ) -> SyscallResult {
         if target.metadata().path.is_empty() { // Already mounted
             if flags.contains(VfsFlags::MS_REMOUNT) {
                 target.file_system().upgrade().unwrap().remount(flags)?;
@@ -215,8 +231,18 @@ impl MountNamespace {
             let parent = target.metadata().parent.clone().unwrap().upgrade().unwrap();
             let dir_name = target.metadata().name.clone();
             let absolute_path = target.mnt_ns_path(self)?;
-            let fs = fs_fn(parent.clone());
             let mut inner = self.inner.lock();
+            let fs: Arc<dyn FileSystem> = match fstype {
+                "proc" => {
+                    // TODO: Monitor 会不会存在竞争？
+                    ProcFileSystem::new(flags, Some(parent.clone())).tap(|fs| {
+                        inner.procfs = Arc::downgrade(fs);
+                    })
+                }
+                "devtmpfs" => DevFileSystem::new(flags, Some(parent.clone())),
+                "tmpfs" => TmpFileSystem::new(source, flags, Some(parent.clone())),
+                _ => return Err(Errno::ENODEV),
+            };
             let mnt_id = Self::do_mount(&mut inner.tree.sub_trees, fs.clone(), &absolute_path)?;
             inner.snapshot.insert(fs.metadata().fsid, (mnt_id, absolute_path.to_string()));
             parent.metadata().inner.lock().mounts.insert(dir_name, fs.root());
@@ -224,7 +250,7 @@ impl MountNamespace {
         Ok(())
     }
 
-    pub async fn unmount(&self, target: Arc<dyn Inode>) -> SyscallResult {
+    pub fn unmount(&self, target: Arc<dyn Inode>) -> SyscallResult {
         if !target.metadata().path.is_empty() {
             return Err(Errno::EINVAL);
         }

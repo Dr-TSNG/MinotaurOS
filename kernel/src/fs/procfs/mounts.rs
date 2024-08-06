@@ -26,7 +26,7 @@ impl MountsInode {
                 0,
                 0,
                 0,
-                InodeMode::S_IFCHR | InodeMode::from_bits_truncate(0o444),
+                InodeMode::S_IFREG | InodeMode::from_bits_truncate(0o444),
                 "mounts".to_string(),
                 "mounts".to_string(),
                 Some(parent),

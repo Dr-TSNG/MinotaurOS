@@ -44,6 +44,10 @@ pub trait ASRegion: Send + Sync {
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult<Vec<HeapFrameTracker>> {
         Err(Errno::EINVAL)
     }
+
+    fn off_dev_ino(&self) -> (usize, u64, usize) {
+        (0, 0, 0)
+    }
 }
 
 impl dyn ASRegion {
@@ -51,7 +55,8 @@ impl dyn ASRegion {
     ///
     /// SAFETY: 需要手动调用 `map` 或 `unmap` 来更新页表
     pub fn set_perms(&mut self, perms: ASPerms) {
-        self.metadata_mut().perms = perms;
+        let s_perms = &mut self.metadata_mut().perms;
+        *s_perms = (*s_perms - ASPerms::RWX) | (perms & ASPerms::RWX);
     }
 }
 

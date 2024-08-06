@@ -5,6 +5,7 @@ use alloc::sync::Arc;
 use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::cmp::{max, min};
+use core::fmt::{Display, Formatter};
 use core::num::NonZeroUsize;
 use core::ops::Range;
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -17,6 +18,7 @@ use log::{debug, info};
 use lru::LruCache;
 use crate::arch::{PAGE_SIZE, PhysPageNum, VirtAddr, VirtPageNum};
 use crate::config::{DYNAMIC_LINKER_BASE, TRAMPOLINE_BASE, USER_HEAP_SIZE_MAX, USER_LOAD_BASE, USER_STACK_SIZE, USER_STACK_TOP};
+use crate::driver::ffi::sep_dev;
 use crate::driver::GLOBAL_MAPPINGS;
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file_system::MountNamespace;
@@ -41,6 +43,26 @@ bitflags! {
         const W = 1 << 1;
         const X = 1 << 2;
         const U = 1 << 3;
+        const P = 1 << 4;
+        const RWX = Self::R.bits | Self::W.bits | Self::X.bits;
+    }
+}
+
+impl Display for ASPerms {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        let mut append = |flag: ASPerms, c: char| {
+            if self.contains(flag) {
+                write!(f, "{}", c)?;
+            } else {
+                write!(f, "-")?;
+            }
+            Ok(())
+        };
+        append(ASPerms::R, 'r')?;
+        append(ASPerms::W, 'w')?;
+        append(ASPerms::X, 'x')?;
+        append(ASPerms::P, 'p')?;
+        Ok(())
     }
 }
 
@@ -110,7 +132,7 @@ impl AddressSpace {
         drop(snapshots);
 
         let data = inode.open(OpenFlags::O_RDONLY, token)?.read_all().await?;
-        let mut snapshot = Self::from_elf(mnt_ns, &data, token).await?;
+        let mut snapshot = Self::from_elf(mnt_ns, &exe, &data, token).await?;
         let this = (snapshot.0.fork(), snapshot.1, snapshot.2.clone());
         let mut snapshots = EXE_SNAPSHOTS.lock();
         snapshots.put(exe.to_string(), snapshot);
@@ -120,6 +142,7 @@ impl AddressSpace {
 
     pub async fn from_elf(
         mnt_ns: &MountNamespace,
+        name: &str,
         data: &[u8],
         token: AccessToken,
     ) -> SyscallResult<(Self, usize, Vec<Aux>)> {
@@ -162,7 +185,7 @@ impl AddressSpace {
                 }
                 let region = LazyRegion::new_framed(
                     ASRegionMeta {
-                        name: None,
+                        name: Some(name.to_string()),
                         perms,
                         start: start_vpn,
                         pages: end_vpn - start_vpn,
@@ -295,7 +318,6 @@ impl AddressSpace {
         perms: ASPerms,
         inode: Option<Arc<dyn Inode>>,
         offset: usize,
-        is_shared: bool,
     ) -> SyscallResult<usize> {
         let start = if let Some(start) = start {
             self.munmap(start, pages)?;
@@ -312,8 +334,12 @@ impl AddressSpace {
         };
         let metadata = ASRegionMeta { name, perms, start, pages };
         let region: Box<dyn ASRegion> = match inode {
-            Some(inode) => FileRegion::new(metadata, inode.page_cache().unwrap(), offset, is_shared),
-            None if is_shared => SharedRegion::new_free(metadata),
+            Some(inode) => {
+                let dev = inode.metadata().dev;
+                let ino = inode.metadata().ino;
+                FileRegion::new(metadata, inode.page_cache().unwrap(), offset, dev, ino)
+            }
+            None if perms.contains(ASPerms::P) => SharedRegion::new_free(metadata),
             None => LazyRegion::new_free(metadata),
         };
         self.map_region(region);
@@ -365,6 +391,31 @@ impl AddressSpace {
         self.map_region(region);
         unsafe { local_hart().refresh_tlb(self.token); }
         Ok(VirtAddr::from(start).0)
+    }
+
+    pub fn display_maps(&self) -> Vec<String> {
+        let mut maps = vec![];
+        for region in self.regions.values() {
+            if !region.metadata().perms.contains(ASPerms::U) {
+                continue;
+            }
+            let start: VirtAddr = region.metadata().start.into();
+            let end: VirtAddr = region.metadata().end().into();
+            let perms = region.metadata().perms;
+            let (off, dev, ino) = region.off_dev_ino();
+            let (major, minor) = sep_dev(dev);
+            let name = region.metadata().name.as_deref().unwrap_or("");
+            let mut entry = format!(
+                "{:x}-{:x} {} {:08} {:02x}:{:02x} {}",
+                start.0, end.0, perms, off, major, minor, ino,
+            );
+            let padding = 72usize.checked_sub(entry.len()).unwrap_or(0) + 1;
+            entry.push_str(&" ".repeat(padding));
+            entry.push_str(name);
+            entry.push('\n');
+            maps.push(entry);
+        }
+        maps
     }
 }
 
@@ -483,7 +534,7 @@ impl AddressSpace {
                 }
                 let region = LazyRegion::new_framed(
                     ASRegionMeta {
-                        name: None,
+                        name: Some(linker.to_string()),
                         perms,
                         start: start_vpn,
                         pages: end_vpn - start_vpn,

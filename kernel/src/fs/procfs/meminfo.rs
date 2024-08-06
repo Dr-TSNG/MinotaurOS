@@ -13,7 +13,6 @@ use crate::sched::ffi::TimeSpec;
 pub struct MeminfoInode {
     metadata: InodeMeta,
     fs: Weak<ProcFileSystem>,
-
 }
 
 impl MeminfoInode {
@@ -24,7 +23,7 @@ impl MeminfoInode {
                 0,
                 0,
                 0,
-                InodeMode::S_IFCHR | InodeMode::from_bits_truncate(0o444),
+                InodeMode::S_IFREG | InodeMode::from_bits_truncate(0o444),
                 "meminfo".to_string(),
                 "meminfo".to_string(),
                 Some(parent),

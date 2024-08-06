@@ -16,7 +16,8 @@ pub struct FileRegion {
     cache: Arc<PageCache>,
     pages: Vec<PageState>,
     offset: usize,
-    is_shared: bool,
+    dev: u64,
+    ino: usize,
 }
 
 enum PageState {
@@ -75,7 +76,8 @@ impl ASRegion for FileRegion {
                     cache: self.cache.clone(),
                     pages: off.drain(..size).collect(),
                     offset: self.offset + start,
-                    is_shared: self.is_shared,
+                    dev: self.dev,
+                    ino: self.ino,
                 };
                 regions.push(Box::new(mid));
             }
@@ -89,7 +91,8 @@ impl ASRegion for FileRegion {
                     cache: self.cache.clone(),
                     pages: off,
                     offset: self.offset + start + size,
-                    is_shared: self.is_shared,
+                    dev: self.dev,
+                    ino: self.ino,
                 };
                 regions.push(Box::new(right));
             }
@@ -105,7 +108,8 @@ impl ASRegion for FileRegion {
                 cache: self.cache.clone(),
                 pages: off,
                 offset: self.offset + size,
-                is_shared: self.is_shared,
+                dev: self.dev,
+                ino: self.ino,
             };
             regions.push(Box::new(right));
             self.metadata.pages = size;
@@ -149,7 +153,8 @@ impl ASRegion for FileRegion {
             cache: self.cache.clone(),
             pages: new_pages,
             offset: self.offset,
-            is_shared: self.is_shared,
+            dev: self.dev,
+            ino: self.ino,
         };
         Box::new(new_region)
     }
@@ -165,13 +170,13 @@ impl ASRegion for FileRegion {
         match temp {
             PageState::Free => temp = PageState::Clean,
             PageState::Clean => {
-                if self.is_shared {
-                    temp = PageState::Dirty;
-                } else {
+                if self.metadata.perms.contains(ASPerms::P) {
                     let frame = alloc_user_frames(1)?;
                     let page = self.cache.ppn_of(page_num + self.offset).unwrap();
                     frame.ppn.byte_array().copy_from_slice(page.byte_array());
                     temp = PageState::Private(frame);
+                } else {
+                    temp = PageState::Dirty;
                 }
             }
             PageState::Dirty => panic!("Page should not be dirty"),
@@ -185,15 +190,19 @@ impl ASRegion for FileRegion {
         core::mem::swap(&mut temp, &mut self.pages[page_num]);
         Ok(self.map_one(root_pt, page_num, true))
     }
+
+    fn off_dev_ino(&self) -> (usize, u64, usize) {
+        (self.offset, self.dev, self.ino)
+    }
 }
 
 impl FileRegion {
-    pub fn new(metadata: ASRegionMeta, cache: Arc<PageCache>, offset: usize, is_shared: bool) -> Box<Self> {
+    pub fn new(metadata: ASRegionMeta, cache: Arc<PageCache>, offset: usize, dev: u64, ino: usize) -> Box<Self> {
         let mut pages = vec![];
         for _ in 0..metadata.pages {
             pages.push(PageState::Free);
         }
-        let region = Self { metadata, cache, pages, offset, is_shared };
+        let region = Self { metadata, cache, pages, offset, dev, ino };
         Box::new(region)
     }
 
