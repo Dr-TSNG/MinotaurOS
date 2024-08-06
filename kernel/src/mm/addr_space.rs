@@ -400,7 +400,7 @@ impl AddressSpace {
         };
         let metadata = ASRegionMeta {
             name: Some(format!("/dev/shm/{}", id)),
-            perms: ASPerms::U | ASPerms::R | ASPerms::W | ASPerms::X,
+            perms: ASPerms::U | ASPerms::S | ASPerms::R | ASPerms::W | ASPerms::X,
             start,
             pages: shm.len(),
             offset: 0,

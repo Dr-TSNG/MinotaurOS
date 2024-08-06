@@ -58,9 +58,6 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
     }
     let prot = MapProt::from_bits_truncate(prot);
     let flags = MapFlags::from_bits_truncate(flags);
-    if flags.contains(MapFlags::MAP_PRIVATE) && flags.contains(MapFlags::MAP_SHARED) {
-        return Err(Errno::EINVAL);
-    }
     let start = match addr {
         0 => None,
         _ => flags.contains(MapFlags::MAP_FIXED).then_some(VirtAddr(addr).into()),
@@ -82,10 +79,10 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
         inode.metadata().page_cache.as_ref().ok_or(Errno::ENODEV)?;
         let name = inode.mnt_ns_path(&proc_inner.mnt_ns)?;
         proc_inner.addr_space.lock()
-            .mmap(Some(name), start, len.div_ceil(PAGE_SIZE), prot.into(), Some(inode), offset / PAGE_SIZE)
+            .mmap(Some(name), start, len.div_ceil(PAGE_SIZE), perms, Some(inode), offset)
     } else {
         proc_inner.addr_space.lock()
-            .mmap(None, start, len.div_ceil(PAGE_SIZE), prot.into(), None, 0)
+            .mmap(None, start, len.div_ceil(PAGE_SIZE), perms, None, 0)
     }
 }
 
