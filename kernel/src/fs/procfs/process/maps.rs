@@ -21,10 +21,7 @@ pub struct MapsInode {
 }
 
 impl MapsInode {
-    pub fn new(
-        fs: Arc<ProcFileSystem>,
-        parent: Arc<ProcessDirInode>,
-    ) -> Arc<Self> {
+    pub fn new(fs: Arc<ProcFileSystem>, parent: Arc<ProcessDirInode>) -> Arc<Self> {
         Arc::new(Self {
             metadata: InodeMeta::new(
                 fs.ino_pool.fetch_add(1, Ordering::Relaxed),

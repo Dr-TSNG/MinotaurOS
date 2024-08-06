@@ -30,14 +30,8 @@ pub async fn resolve_path(
     }
     let should_be_dir = path.ends_with('/');
     let proc_inner = current_process().inner.lock();
-
-    let mut path = normalize_path(path);
+    let path = normalize_path(path);
     debug!("[resolve_path] dirfd: {}, path: {:?}", dirfd, path);
-
-    // TODO: Remove the hack
-    if path == "/proc/self/exe" {
-        path = proc_inner.exe.clone();
-    }
 
     let mnt_ns = proc_inner.mnt_ns.clone();
     let inode = if is_absolute_path(&path) {

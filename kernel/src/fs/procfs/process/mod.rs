@@ -7,14 +7,18 @@ use async_trait::async_trait;
 use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
+use crate::fs::procfs::process::exe::ExeInode;
 use crate::fs::procfs::process::maps::MapsInode;
+use crate::fs::procfs::process::mounts::MountsInode;
 use crate::fs::procfs::ProcFileSystem;
 use crate::process::Process;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
 
+mod exe;
 mod maps;
+mod mounts;
 
 pub struct ProcessDirInode {
     metadata: InodeMeta,
@@ -61,7 +65,9 @@ impl ProcessDirInode {
 impl ProcessDirInner {
     fn init_children(&mut self, this: Arc<ProcessDirInode>) -> SyscallResult {
         let fs = this.fs.upgrade().ok_or(Errno::EIO)?;
-        self.children.insert("maps".to_string(), MapsInode::new(fs, this.clone()));
+        self.children.insert("exe".to_string(), ExeInode::new(fs.clone(), this.clone()));
+        self.children.insert("maps".to_string(), MapsInode::new(fs.clone(), this.clone()));
+        self.children.insert("mounts".to_string(), MountsInode::new(fs.clone(), this.clone()));
         self.initialized = true;
         Ok(())
     }
