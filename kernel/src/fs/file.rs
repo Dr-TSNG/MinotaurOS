@@ -184,6 +184,9 @@ impl File for DirFile {
 
     async fn readdir(&self) -> SyscallResult<Option<(usize, Arc<dyn Inode>)>> {
         let inode = self.metadata.inode.as_ref().unwrap();
+        if inode.metadata().inner.lock().unlinked {
+            return Err(Errno::ENOENT);
+        }
         let mut pos = self.pos.lock().await;
         let inode = match *pos {
             0 => inode.clone(),
