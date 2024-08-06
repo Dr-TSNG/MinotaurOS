@@ -165,6 +165,7 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
     }
 }
 
+#[cfg(feature = "tombstone")]
 pub fn dump_tombstone(signal: Signal) {
     if signal != Signal::SIGSEGV {
         return;
@@ -178,4 +179,9 @@ pub fn dump_tombstone(signal: Signal) {
     error!("Backtrace:");
     error!("todo");
     error!("═════ End of stack trace ═════");
+}
+
+#[cfg(not(feature = "tombstone"))]
+pub fn dump_tombstone(_signal: Signal) {
+    // do nothing
 }

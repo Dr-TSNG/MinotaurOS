@@ -1,11 +1,9 @@
-use alloc::string::ToString;
 use alloc::sync::Arc;
 use smoltcp::phy::DeviceCapabilities;
 use smoltcp::time::Instant;
 use virtio_drivers::device::net::{RxBuffer, VirtIONet};
 use virtio_drivers::transport::mmio::{MmioTransport, VirtIOHeader};
 use crate::arch::VirtAddr;
-use crate::driver::DeviceMeta;
 use crate::driver::virtio::VirtioHal;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
@@ -18,16 +16,11 @@ type Net = VirtIONet<VirtioHal, MmioTransport, QUEUE_SIZE>;
 
 
 pub struct VirtIONetDevice {
-    metadata: DeviceMeta,
     base_addr: VirtAddr,
     dev: LateInit<Arc<Mutex<Net>>>,
 }
 
 impl VirtIONetDevice {
-    pub fn metadata(&self) -> &DeviceMeta {
-        &self.metadata
-    }
-
     pub fn init(&self) {
         unsafe {
             let header = self.base_addr.as_ptr().cast::<VirtIOHeader>().as_mut().unwrap();
@@ -102,7 +95,6 @@ impl smoltcp::phy::TxToken for VirtioTxToken {
 impl VirtIONetDevice {
     pub fn new(base_addr: VirtAddr) -> Self {
         Self {
-            metadata: DeviceMeta::new(0, 0, "virtio-net".to_string()),
             base_addr,
             dev: LateInit::new(),
         }

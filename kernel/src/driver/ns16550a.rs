@@ -20,6 +20,7 @@ pub struct UartDevice {
     buf: AtomicU8,
 }
 
+#[allow(unused)]
 impl UartDevice {
     pub fn new(base_addr: VirtAddr) -> Self {
         Self {

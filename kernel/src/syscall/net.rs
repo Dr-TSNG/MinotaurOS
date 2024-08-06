@@ -193,7 +193,7 @@ pub fn sys_setsockopt(
     level: u32,
     optname: u32,
     optval_ptr: usize,
-    optlen: u32,
+    _optlen: u32,
 ) -> SyscallResult<usize> {
     info!("[sys_setsockopt] socketfd: {}",sockfd);
     let socket = current_process().inner.lock()

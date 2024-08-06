@@ -33,6 +33,8 @@ impl File for UnixSocket {
         self.write_end.write(buf).await
     }
 }
+
+#[allow(unused)]
 #[async_trait]
 impl Socket for UnixSocket {
     fn set_send_buf_size(&self, size: usize) -> SyscallResult<()> {

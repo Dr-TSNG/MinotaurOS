@@ -25,7 +25,7 @@ use crate::sync::mutex::Mutex;
 pub enum FileSystemType {
     DEVFS = 0x62646576,
     EXT4 = 0xef53,
-    FAT32 = 0x4d44,
+    // FAT32 = 0x4d44,
     TMPFS = 0x01021994,
     PROCFS = 0x9fa0,
 }
@@ -35,7 +35,7 @@ impl Display for FileSystemType {
         match self {
             FileSystemType::DEVFS => write!(f, "devtmpfs"),
             FileSystemType::EXT4 => write!(f, "ext4"),
-            FileSystemType::FAT32 => write!(f, "fat32"),
+            // FileSystemType::FAT32 => write!(f, "fat32"),
             FileSystemType::TMPFS => write!(f, "tmpfs"),
             FileSystemType::PROCFS => write!(f, "proc"),
         }

@@ -4,7 +4,7 @@ use crate::driver::random::KRNG;
 use crate::mm::protect::user_slice_w;
 use crate::result::{Errno, SyscallResult};
 
-pub fn sys_getpriority(which: i32, who: i32) -> SyscallResult<usize> {
+pub fn sys_getpriority(_which: i32, _who: i32) -> SyscallResult<usize> {
     // 10 -> 10
     // 20 -> 0
     // 30 -> -10

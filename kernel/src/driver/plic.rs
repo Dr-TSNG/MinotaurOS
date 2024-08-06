@@ -42,7 +42,33 @@ impl PLIC {
             self.complete(context_id, intr);
         }
     }
+}
 
+#[allow(unused)]
+impl PLIC {
+    fn priority_ptr(&self, intr_id: usize) -> *mut u32 {
+        (self.base_addr + intr_id * 4).as_ptr().cast()
+    }
+
+    fn pending_ptr(&self, intr_id: usize) -> *mut u32 {
+        (self.base_addr + 0x1000 + 4 * (intr_id / 32)).as_ptr().cast()
+    }
+
+    fn intr_enable_ptr(&self, context_id: usize, intr_id: usize) -> *mut u32 {
+        (self.base_addr + 0x2000 + 0x80 * context_id + 4 * (intr_id / 32)).as_ptr().cast()
+    }
+
+    fn threshold_ptr(&self, context_id: usize) -> *mut u32 {
+        (self.base_addr + 0x200000 + 0x1000 * context_id).as_ptr().cast()
+    }
+
+    fn claim_complete_ptr(&self, context_id: usize) -> *mut u32 {
+        (self.base_addr + 0x200000 + 0x1000 * context_id + 4).as_ptr().cast()
+    }
+}
+
+#[allow(unused)]
+impl PLIC {
     fn get_priority(&self, intr_id: usize) -> u32 {
         unsafe { self.priority_ptr(intr_id).read_volatile() & 7 }
     }
@@ -89,27 +115,5 @@ impl PLIC {
 
     fn complete(&self, context_id: usize, intr_id: usize) {
         unsafe { self.claim_complete_ptr(context_id).write_volatile(intr_id as u32); }
-    }
-}
-
-impl PLIC {
-    fn priority_ptr(&self, intr_id: usize) -> *mut u32 {
-        (self.base_addr + intr_id * 4).as_ptr().cast()
-    }
-
-    fn pending_ptr(&self, intr_id: usize) -> *mut u32 {
-        (self.base_addr + 0x1000 + 4 * (intr_id / 32)).as_ptr().cast()
-    }
-
-    fn intr_enable_ptr(&self, context_id: usize, intr_id: usize) -> *mut u32 {
-        (self.base_addr + 0x2000 + 0x80 * context_id + 4 * (intr_id / 32)).as_ptr().cast()
-    }
-
-    fn threshold_ptr(&self, context_id: usize) -> *mut u32 {
-        (self.base_addr + 0x200000 + 0x1000 * context_id).as_ptr().cast()
-    }
-
-    fn claim_complete_ptr(&self, context_id: usize) -> *mut u32 {
-        (self.base_addr + 0x200000 + 0x1000 * context_id + 4).as_ptr().cast()
     }
 }

@@ -31,7 +31,6 @@ impl SignalHandler {
 
     pub fn k_terminate(signal: Signal) {
         info!("Default signal handler for {:?}: terminate", signal);
-        #[cfg(feature = "tombstone")]
         dump_tombstone(signal);
         current_thread().terminate(signal as u32 + 128);
     }

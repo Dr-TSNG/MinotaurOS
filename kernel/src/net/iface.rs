@@ -10,9 +10,6 @@ use crate::sched::time::cpu_time;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
 
-const IP: &str = "10.0.2.15"; // QEMU user networking default IP
-const GATEWAY: &str = "10.0.2.2"; // QEMU user networking gateway
-
 pub static NET_INTERFACE: LateInit<Mutex<NetInterface>> = LateInit::new();
 
 pub struct NetInterface {

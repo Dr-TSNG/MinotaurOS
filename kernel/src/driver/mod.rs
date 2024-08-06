@@ -80,13 +80,6 @@ pub enum Device {
 }
 
 impl Device {
-    pub fn metadata(&self) -> &DeviceMeta {
-        match self {
-            Device::Block(dev) => dev.metadata(),
-            Device::Character(dev) => dev.metadata(),
-        }
-    }
-
     fn init(&self) {
         match self {
             Device::Block(dev) => dev.init(),
