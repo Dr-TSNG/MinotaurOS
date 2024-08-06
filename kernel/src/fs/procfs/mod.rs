@@ -20,14 +20,17 @@ mod meminfo;
 
 pub struct ProcFileSystem {
     vfsmeta: FileSystemMeta,
+    flags: VfsFlags,
     ino_pool: AtomicUsize,
     root: LateInit<Arc<RootInode>>,
 }
 
 impl ProcFileSystem {
-    pub fn new(source: &str, flags: VfsFlags, parent: Option<Arc<dyn Inode>>) -> Arc<Self> {
+    pub fn new(mut flags: VfsFlags, parent: Option<Arc<dyn Inode>>) -> Arc<Self> {
+        flags |= VfsFlags::ST_WRITE | VfsFlags::ST_RELATIME;
         let fs = Arc::new(Self {
-            vfsmeta: FileSystemMeta::new(0, source, FileSystemType::PROCFS, flags),
+            vfsmeta: FileSystemMeta::new(0, "proc", FileSystemType::PROCFS),
+            flags,
             ino_pool: AtomicUsize::new(1),
             root: LateInit::new(),
         });
@@ -39,6 +42,10 @@ impl ProcFileSystem {
 impl FileSystem for ProcFileSystem {
     fn metadata(&self) -> &FileSystemMeta {
         &self.vfsmeta
+    }
+
+    fn flags(&self) -> VfsFlags {
+        self.flags
     }
 
     fn root(&self) -> Arc<dyn Inode> {

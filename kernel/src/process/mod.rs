@@ -28,7 +28,7 @@ use crate::process::ffi::{CloneFlags, CpuSet};
 use crate::process::monitor::MONITORS;
 use crate::process::thread::event_bus::Event;
 use crate::process::thread::resource::ResourceUsage;
-use crate::process::thread::Thread;
+use crate::process::thread::{Thread, TokenSet};
 use crate::process::thread::tid::TidTracker;
 use crate::process::token::AccessToken;
 use crate::processor::{current_process, current_thread, current_trap_ctx, SYSTEM_SHUTDOWN};
@@ -42,10 +42,9 @@ use crate::sync::futex::FutexQueue;
 use crate::sync::mutex::{IrqReMutex, Mutex};
 use crate::trap::context::TrapContext;
 
-pub type Tid = i32;
 pub type Pid = i32;
-pub type Gid = i32;
 pub type Uid = u16;
+pub type Gid = u16;
 
 pub struct Process {
     /// 进程的 pid
@@ -62,7 +61,7 @@ pub struct ProcessInner {
     /// 进程组
     pub pgid: Arc<TidTracker>,
     /// 进程的线程组
-    pub threads: BTreeMap<Tid, Weak<Thread>>,
+    pub threads: BTreeMap<Pid, Weak<Thread>>,
     /// 地址空间
     pub addr_space: Arc<Mutex<AddressSpace>>,
     /// 挂载命名空间
@@ -77,14 +76,6 @@ pub struct ProcessInner {
     pub cwd: String,
     /// 可执行文件路径
     pub exe: String,
-    /// 用户 ID
-    pub uid: Uid,
-    /// 组 ID
-    pub gid: Uid,
-    /// 有效用户 ID
-    pub euid: Uid,
-    /// 有效组 ID
-    pub egid: Uid,
     /// 文件创建权限掩码
     pub umask: InodeMode,
     /// 退出状态
@@ -114,17 +105,21 @@ impl Process {
                 timers: Default::default(),
                 cwd: String::from("/"),
                 exe: String::from("/init"),
-                uid: 0,
-                gid: 0,
-                euid: 0,
-                egid: 0,
                 umask: InodeMode::S_IWGRP | InodeMode::S_IWOTH,
                 exit_code: None,
             }),
         });
 
         let trap_ctx = TrapContext::new(entry, USER_STACK_TOP.0);
-        let thread = Thread::new(process.clone(), trap_ctx, Some(pid.clone()), SignalController::new(), CpuSet::new(1), None);
+        let thread = Thread::new(
+            process.clone(),
+            trap_ctx,
+            TokenSet::default(),
+            Some(pid.clone()),
+            SignalController::new(),
+            CpuSet::new(1),
+            None,
+        );
         process.inner.lock().threads.insert(pid.0, Arc::downgrade(&thread));
 
         let mut monitors = MONITORS.lock();
@@ -276,10 +271,6 @@ impl Process {
                     timers: Default::default(),
                     cwd: proc_inner.cwd.clone(),
                     exe: proc_inner.exe.clone(),
-                    uid: proc_inner.egid,
-                    gid: proc_inner.egid,
-                    euid: proc_inner.euid,
-                    egid: proc_inner.egid,
                     umask: proc_inner.umask,
                     exit_code: None,
                 }),
@@ -299,7 +290,15 @@ impl Process {
             };
             let new_cpu_set = current_thread().cpu_set.lock().clone();
             let vfork_from = is_vfork.then(|| current_thread().clone());
-            let new_thread = Thread::new(new_process.clone(), trap_ctx, Some(new_pid.clone()), signals, new_cpu_set, vfork_from);
+            let new_thread = Thread::new(
+                new_process.clone(),
+                trap_ctx,
+                current_thread().inner().token_set.clone(),
+                Some(new_pid.clone()),
+                signals,
+                new_cpu_set,
+                vfork_from,
+            );
             new_process.inner.lock().threads.insert(new_pid.0, Arc::downgrade(&new_thread));
             proc_inner.children.push(new_process.clone());
 
@@ -327,7 +326,7 @@ impl Process {
         tls: usize,
         ptid: usize,
         ctid: usize,
-    ) -> SyscallResult<Tid> {
+    ) -> SyscallResult<Pid> {
         let new_thread = self.inner.lock().pipe_ref_mut(|proc_inner| {
             user_slice_r(stack, size_of::<usize>() * 2)?;
             let entry = unsafe {
@@ -349,7 +348,15 @@ impl Process {
             };
 
             let new_cpu_set = current_thread().cpu_set.lock().clone();
-            let new_thread = Thread::new(self.clone(), trap_ctx, None, signals, new_cpu_set, None);
+            let new_thread = Thread::new(
+                self.clone(),
+                trap_ctx,
+                current_thread().inner().token_set.clone(),
+                None,
+                signals,
+                new_cpu_set,
+                None,
+            );
             let new_tid = new_thread.tid.0;
             proc_inner.threads.insert(new_tid, Arc::downgrade(&new_thread));
 
@@ -358,11 +365,11 @@ impl Process {
                 *ptid = new_tid;
             }
             if flags.contains(CloneFlags::CLONE_CHILD_CLEARTID) {
-                user_transmute_w::<Tid>(ctid)?.ok_or(Errno::EINVAL)?;
+                user_transmute_w::<Pid>(ctid)?.ok_or(Errno::EINVAL)?;
                 new_thread.inner().tid_address.clear = Some(VirtAddr(ctid));
             }
             if flags.contains(CloneFlags::CLONE_CHILD_SETTID) {
-                user_transmute_w::<Tid>(ctid)?.ok_or(Errno::EINVAL)?;
+                user_transmute_w::<Pid>(ctid)?.ok_or(Errno::EINVAL)?;
                 new_thread.inner().tid_address.set = Some(VirtAddr(ctid));
             }
 
@@ -379,12 +386,6 @@ impl Process {
         Ok(new_tid)
     }
 
-    pub fn token(&self) -> AccessToken {
-        self.inner.lock().pipe_ref(|it| {
-            AccessToken::new(it.euid, it.egid)
-        })
-    }
-
     pub fn terminate(&self, exit_code: u32) {
         let mut proc_inner = self.inner.lock();
         proc_inner.exit_code = Some(exit_code);
@@ -396,7 +397,7 @@ impl Process {
         });
     }
 
-    pub fn on_thread_exit(&self, tid: Tid, exit_code: u32) {
+    pub fn on_thread_exit(&self, tid: Pid, exit_code: u32) {
         info!("Thread {} exited with code {}", tid, exit_code);
         let monitor = MONITORS.lock();
         let mut proc_inner = self.inner.lock();

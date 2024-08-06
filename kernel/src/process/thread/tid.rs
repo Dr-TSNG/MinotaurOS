@@ -1,12 +1,12 @@
 use crate::mm::allocator::IdAllocator;
 use crate::process::monitor::MONITORS;
-use crate::process::Tid;
+use crate::process::Pid;
 use crate::sync::mutex::IrqMutex;
 
 static TID_ALLOCATOR: IrqMutex<IdAllocator> = IrqMutex::new(IdAllocator::new(1));
 
 #[derive(Eq, PartialEq)]
-pub struct TidTracker(pub Tid);
+pub struct TidTracker(pub Pid);
 
 impl TidTracker {
     pub fn new() -> Self {

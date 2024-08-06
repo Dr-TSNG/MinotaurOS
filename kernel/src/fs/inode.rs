@@ -6,12 +6,12 @@ use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use downcast_rs::{DowncastSync, impl_downcast};
-use crate::fs::ffi::{AccessMode, InodeMode, OpenFlags};
+use crate::fs::ffi::{AccessMode, InodeMode, OpenFlags, VfsFlags};
 use crate::fs::file::{CharacterFile, DirFile, File, FileMeta, RegularFile};
 use crate::fs::file_system::{FileSystem, MountNamespace};
 use crate::fs::page_cache::PageCache;
 use crate::process::token::AccessToken;
-use crate::process::Uid;
+use crate::process::{Gid, Uid};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
@@ -42,7 +42,7 @@ pub struct InodeMetaInner {
     /// uid
     pub uid: Uid,
     /// gid
-    pub gid: Uid,
+    pub gid: Gid,
     /// 访问权限
     pub mode: InodeMode,
     /// 硬链接数
@@ -67,7 +67,7 @@ impl InodeMeta {
         ino: usize,
         dev: u64,
         uid: Uid,
-        gid: Uid,
+        gid: Gid,
         mode: InodeMode,
         name: String,
         path: String,
@@ -217,19 +217,12 @@ impl_downcast!(sync Inode);
 
 impl dyn Inode {
     pub fn open(self: Arc<Self>, flags: OpenFlags, token: AccessToken) -> SyscallResult<Arc<dyn File>> {
-        let acc = self.proc_access(token);
         if flags.contains(OpenFlags::O_RDWR) {
-            if !acc.contains(AccessMode::R_OK | AccessMode::W_OK) {
-                return Err(Errno::EACCES);
-            }
+            self.proc_access(token, AccessMode::R_OK | AccessMode::W_OK)?;
         } else if flags.contains(OpenFlags::O_WRONLY) {
-            if !acc.contains(AccessMode::W_OK) {
-                return Err(Errno::EACCES);
-            }
+            self.proc_access(token, AccessMode::W_OK)?;
         } else if !flags.contains(OpenFlags::O_DIRECTORY) { // O_RDONLY
-            if !acc.contains(AccessMode::R_OK) {
-                return Err(Errno::EACCES);
-            }
+            self.proc_access(token, AccessMode::R_OK)?;
         }
         match self.metadata().ifmt {
             InodeMode::S_IFCHR => Ok(CharacterFile::new(FileMeta::new(Some(self), flags))),
@@ -275,9 +268,7 @@ impl dyn Inode {
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
-        if !self.proc_access(token).contains(AccessMode::X_OK) {
-            return Err(Errno::EACCES);
-        }
+        self.proc_access(token, AccessMode::X_OK)?;
         // 这里不能放到 match 里面，否则锁会被延后释放
         let inode = self.metadata().inner.lock().mounts.get(name).cloned();
         match inode {
@@ -290,9 +281,7 @@ impl dyn Inode {
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
-        if !self.proc_access(token).contains(AccessMode::R_OK) {
-            return Err(Errno::EACCES);
-        }
+        self.proc_access(token, AccessMode::R_OK)?;
         self.clone().do_lookup_idx(idx).await.map(|inode| {
             let name = &self.metadata().name;
             self.metadata().inner.lock().mounts.get(name).cloned().unwrap_or(inode)
@@ -303,9 +292,7 @@ impl dyn Inode {
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
-        if !self.proc_access(token).contains(AccessMode::W_OK) {
-            return Err(Errno::EACCES);
-        }
+        self.proc_access(token, AccessMode::W_OK)?;
         self.do_create(mode, name, token).await
     }
 
@@ -313,9 +300,7 @@ impl dyn Inode {
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
-        if !self.proc_access(token).contains(AccessMode::W_OK) {
-            return Err(Errno::EACCES);
-        }
+        self.proc_access(token, AccessMode::W_OK)?;
         self.do_symlink(mode, name, target, token).await
     }
 
@@ -323,9 +308,7 @@ impl dyn Inode {
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
-        if !self.proc_access(token).contains(AccessMode::W_OK) {
-            return Err(Errno::EACCES);
-        }
+        self.proc_access(token, AccessMode::W_OK)?;
         self.do_movein(name, inode).await
     }
 
@@ -333,9 +316,7 @@ impl dyn Inode {
         if self.metadata().inner.lock().mounts.get(name).is_some() {
             return Err(Errno::EBUSY);
         }
-        if !self.proc_access(token).contains(AccessMode::W_OK) {
-            return Err(Errno::EACCES);
-        }
+        self.proc_access(token, AccessMode::W_OK)?;
         let inode = self.clone().lookup_name(name, token).await?;
         if let Some(page_cache) = &inode.metadata().page_cache {
             page_cache.set_deleted();
@@ -347,9 +328,7 @@ impl dyn Inode {
         if !self.metadata().ifmt.is_lnk() {
             return Err(Errno::EINVAL);
         }
-        if !self.proc_access(token).contains(AccessMode::R_OK) {
-            return Err(Errno::EACCES);
-        }
+        self.proc_access(token, AccessMode::R_OK)?;
         self.do_readlink().await
     }
 
@@ -367,11 +346,12 @@ impl dyn Inode {
         Ok(path)
     }
 
-    pub fn proc_access(&self, token: AccessToken) -> AccessMode {
+    pub fn proc_access(&self, token: AccessToken, attempt: AccessMode) -> SyscallResult {
+        let fs = self.file_system().upgrade().unwrap();
         let inner = self.metadata().inner.lock();
         let bypass_rw = token.uid == 0;
         let bypass_x = token.uid == 0 && self.metadata().ifmt.is_dir();
-        if inner.uid == token.uid {
+        let mode = if inner.uid == token.uid {
             AccessMode::new(
                 bypass_rw | inner.mode.contains(InodeMode::S_IRUSR),
                 bypass_rw | inner.mode.contains(InodeMode::S_IWUSR),
@@ -389,7 +369,19 @@ impl dyn Inode {
                 bypass_rw | inner.mode.contains(InodeMode::S_IWOTH),
                 bypass_x | inner.mode.contains(InodeMode::S_IXOTH),
             )
+        };
+        if attempt.contains(AccessMode::W_OK)
+            && fs.flags().contains(VfsFlags::ST_RDONLY) {
+            return Err(Errno::EROFS);
         }
+        if attempt.contains(AccessMode::X_OK) && !self.metadata().ifmt.is_dir()
+            && fs.flags().contains(VfsFlags::ST_NOEXEC) {
+            return Err(Errno::EACCES);
+        }
+        if !mode.contains(attempt) {
+            return Err(Errno::EACCES);
+        }
+        Ok(())
     }
 }
 

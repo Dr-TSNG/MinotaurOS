@@ -1,15 +1,13 @@
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
 use riscv::register::{scause, sepc, stval};
 use riscv::register::scause::{Exception, Interrupt, Trap};
 use crate::arch::VirtAddr;
 use crate::driver::BOARD_INFO;
 use crate::mm::addr_space::ASPerms;
-use crate::processor::current_thread;
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::time::set_next_trigger;
 use crate::sched::timer::query_timer;
-use crate::signal::ffi::Signal;
 
 #[no_mangle]
 fn trap_from_kernel() -> bool {
@@ -61,10 +59,7 @@ fn handle_page_fault(addr: VirtAddr, perform: ASPerms) -> SyscallResult {
             error!("Fatal page fault: Out of memory, kill process");
             thread.process.terminate(Errno::ENOSPC as u32 + 128);
         }
-        Err(e) => {
-            error!("Page fault failed: {:?}, send SIGSEGV", e);
-            current_thread().recv_signal(Signal::SIGSEGV);
-        }
+        Err(e) => warn!("Page fault failed: {:?}", e),
     };
     res
 }

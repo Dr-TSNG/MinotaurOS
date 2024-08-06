@@ -10,13 +10,35 @@ use crate::fs::ffi::{AccessMode, AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::mm::protect::{user_transmute_r, user_transmute_str, user_transmute_w};
 use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
-use crate::process::{Gid, Pid, Tid, Uid};
+use crate::process::{Pid, Uid};
 use crate::process::monitor::MONITORS;
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::{suspend_now, yield_now};
 use crate::signal::ffi::Signal;
+
+pub async fn sys_acct(filename: usize) -> SyscallResult<usize> {
+    let token = current_thread().token();
+    if token.uid != 0 {
+        return Err(Errno::EPERM);
+    }
+    let path = user_transmute_str(filename, PATH_MAX)?;
+    match path {
+        Some(path) => {
+            let inode = resolve_path(AT_FDCWD, path, true, token).await?;
+            if inode.metadata().ifmt.is_dir() {
+                return Err(Errno::EISDIR);
+            }
+            if !inode.metadata().ifmt.is_reg() {
+                return Err(Errno::EACCES);
+            }
+            inode.proc_access(token, AccessMode::W_OK)?;
+        }
+        None => (),
+    }
+    Ok(0)
+}
 
 pub fn sys_exit(exit_code: u32) -> SyscallResult<usize> {
     current_thread().terminate(exit_code << 8);
@@ -37,7 +59,7 @@ pub fn sys_set_tid_address(tid: usize) -> SyscallResult<usize> {
     Ok(current_thread().tid.0 as usize)
 }
 
-pub fn sys_sched_setaffinity(tid: Tid, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
+pub fn sys_sched_setaffinity(tid: Pid, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
     if cpusetsize != size_of::<CpuSet>() {
         return Err(Errno::EINVAL);
     }
@@ -50,7 +72,7 @@ pub fn sys_sched_setaffinity(tid: Tid, cpusetsize: usize, mask: usize) -> Syscal
     Ok(0)
 }
 
-pub fn sys_sched_getaffinity(tid: Tid, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
+pub fn sys_sched_getaffinity(tid: Pid, cpusetsize: usize, mask: usize) -> SyscallResult<usize> {
     if cpusetsize != size_of::<CpuSet>() {
         return Err(Errno::EINVAL);
     }
@@ -95,7 +117,7 @@ pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
     handled.then_some(0).ok_or(Errno::EINVAL)
 }
 
-pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
+pub fn sys_tkill(tid: Pid, signal: usize) -> SyscallResult<usize> {
     let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
     if let Some(thread) = MONITORS.lock().thread.get(tid).upgrade() {
         thread.recv_signal(signal);
@@ -104,7 +126,7 @@ pub fn sys_tkill(tid: Tid, signal: usize) -> SyscallResult<usize> {
     Err(Errno::EINVAL)
 }
 
-pub fn sys_tgkill(tgid: Pid, tid: Tid, signal: usize) -> SyscallResult<usize> {
+pub fn sys_tgkill(tgid: Pid, tid: Pid, signal: usize) -> SyscallResult<usize> {
     let signal = Signal::try_from(signal).map_err(|_| Errno::EINVAL)?;
     let monitors = MONITORS.lock();
     let process = monitors.process.get(tgid).upgrade().ok_or(Errno::ESRCH)?;
@@ -115,13 +137,98 @@ pub fn sys_tgkill(tgid: Pid, tid: Tid, signal: usize) -> SyscallResult<usize> {
     Ok(0)
 }
 
-pub fn sys_setuid(uid: Uid) -> SyscallResult<usize> {
-    let mut proc_inner = current_process().inner.lock();
-    proc_inner.euid = uid;
+pub fn sys_setregid(rgid: Uid, egid: Uid) -> SyscallResult<usize> {
+    let token_set = &mut current_thread().inner().token_set;
+    if rgid != Uid::MAX {
+        token_set.rgid = rgid;
+    }
+    if egid != Uid::MAX {
+        token_set.egid = egid;
+    }
     Ok(0)
 }
 
-pub fn sys_setpgid(pid: Pid, pgid: Gid) -> SyscallResult<usize> {
+pub fn sys_setgid(gid: Uid) -> SyscallResult<usize> {
+    let token_set = &mut current_thread().inner().token_set;
+    if token_set.euid == 0 {
+        token_set.rgid = gid;
+        token_set.egid = gid;
+    }
+    Ok(0)
+}
+
+pub fn sys_setreuid(ruid: Uid, euid: Uid) -> SyscallResult<usize> {
+    let token_set = &mut current_thread().inner().token_set;
+    if ruid != Uid::MAX {
+        token_set.ruid = ruid;
+    }
+    if euid != Uid::MAX {
+        token_set.euid = euid;
+    }
+    Ok(0)
+}
+
+pub fn sys_setuid(uid: Uid) -> SyscallResult<usize> {
+    let token_set = &mut current_thread().inner().token_set;
+    if token_set.euid == 0 {
+        token_set.ruid = uid;
+        token_set.suid = uid;
+    }
+    token_set.euid = uid;
+    Ok(0)
+}
+
+pub fn sys_setresuid(ruid: Uid, euid: Uid, suid: Uid) -> SyscallResult<usize> {
+    let token_set = &mut current_thread().inner().token_set;
+    if ruid != Uid::MAX {
+        token_set.ruid = ruid;
+    }
+    if euid != Uid::MAX {
+        token_set.euid = euid;
+    }
+    if suid != Uid::MAX {
+        token_set.suid = suid;
+    }
+    Ok(0)
+}
+
+pub fn sys_getresuid(ruid: usize, euid: usize, suid: usize) -> SyscallResult<usize> {
+    let ruid = user_transmute_w::<Uid>(ruid)?.ok_or(Errno::EINVAL)?;
+    let euid = user_transmute_w::<Uid>(euid)?.ok_or(Errno::EINVAL)?;
+    let suid = user_transmute_w::<Uid>(suid)?.ok_or(Errno::EINVAL)?;
+    let token_set = &current_thread().inner().token_set;
+    *ruid = token_set.ruid;
+    *euid = token_set.euid;
+    *suid = token_set.suid;
+    Ok(0)
+}
+
+pub fn sys_setresgid(rgid: Uid, egid: Uid, sgid: Uid) -> SyscallResult<usize> {
+    let token_set = &mut current_thread().inner().token_set;
+    if rgid != Uid::MAX {
+        token_set.rgid = rgid;
+    }
+    if egid != Uid::MAX {
+        token_set.egid = egid;
+    }
+    if sgid != Uid::MAX {
+        token_set.sgid = sgid;
+    }
+    Ok(0)
+}
+
+pub fn sys_getresgid(rgid: usize, egid: usize, sgid: usize) -> SyscallResult<usize> {
+    let rgid = user_transmute_w::<Uid>(rgid)?.ok_or(Errno::EINVAL)?;
+    let egid = user_transmute_w::<Uid>(egid)?.ok_or(Errno::EINVAL)?;
+    let sgid = user_transmute_w::<Uid>(sgid)?.ok_or(Errno::EINVAL)?;
+    let token_set = &current_thread().inner().token_set;
+    *rgid = token_set.rgid;
+    *egid = token_set.egid;
+    *sgid = token_set.sgid;
+    Ok(0)
+}
+
+pub fn sys_setpgid(pid: Pid, pgid: Pid) -> SyscallResult<usize> {
     let mut monitors = MONITORS.lock();
     let proc = match pid {
         0 => current_process().clone(),
@@ -213,23 +320,19 @@ pub fn sys_getppid() -> SyscallResult<usize> {
 }
 
 pub fn sys_getuid() -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    Ok(proc_inner.uid as usize)
+    Ok(current_thread().inner().token_set.ruid as usize)
 }
 
 pub fn sys_geteuid() -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    Ok(proc_inner.euid as usize)
+    Ok(current_thread().inner().token_set.euid as usize)
 }
 
 pub fn sys_getgid() -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    Ok(proc_inner.gid as usize)
+    Ok(current_thread().inner().token_set.rgid as usize)
 }
 
 pub fn sys_getegid() -> SyscallResult<usize> {
-    let proc_inner = current_process().inner.lock();
-    Ok(proc_inner.egid as usize)
+    Ok(current_thread().inner().token_set.egid as usize)
 }
 
 pub fn sys_gettid() -> SyscallResult<usize> {
@@ -280,14 +383,12 @@ pub async fn sys_execve(path: usize, args: usize, envs: usize) -> SyscallResult<
         envs_vec.push(CString::new("LD_LIBRARY_PATH=/:/lib:/lib/glibc:/lib/musl").unwrap());
     }
 
-    let token = current_process().token();
+    let token = current_thread().token();
     let inode = resolve_path(AT_FDCWD, path, true, token).await?;
     if inode.metadata().ifmt == InodeMode::S_IFDIR {
         return Err(Errno::EISDIR);
     }
-    if !inode.proc_access(token).contains(AccessMode::X_OK) {
-        return Err(Errno::EACCES);
-    }
+    inode.proc_access(token, AccessMode::X_OK)?;
     current_process().execve(inode, &args_vec, &envs_vec, token).await
 }
 

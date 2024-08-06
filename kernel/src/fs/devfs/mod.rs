@@ -25,14 +25,17 @@ mod urandom;
 
 pub struct DevFileSystem {
     vfsmeta: FileSystemMeta,
+    flags: VfsFlags,
     ino_pool: AtomicUsize,
     root: LateInit<Arc<RootInode>>,
 }
 
 impl DevFileSystem {
-    pub fn new(source: &str, flags: VfsFlags, parent: Option<Arc<dyn Inode>>) -> Arc<Self> {
+    pub fn new(mut flags: VfsFlags, parent: Option<Arc<dyn Inode>>) -> Arc<Self> {
+        flags |= VfsFlags::ST_WRITE | VfsFlags::ST_RELATIME;
         let fs = Arc::new(Self {
-            vfsmeta: FileSystemMeta::new(0, source, FileSystemType::DEVFS, flags),
+            vfsmeta: FileSystemMeta::new(0, "dev", FileSystemType::DEVFS),
+            flags,
             ino_pool: AtomicUsize::new(1),
             root: LateInit::new(),
         });
@@ -44,6 +47,10 @@ impl DevFileSystem {
 impl FileSystem for DevFileSystem {
     fn metadata(&self) -> &FileSystemMeta {
         &self.vfsmeta
+    }
+
+    fn flags(&self) -> VfsFlags {
+        self.flags
     }
 
     fn root(&self) -> Arc<dyn Inode> {

@@ -25,6 +25,10 @@ pub async fn resolve_path(
     token: AccessToken,
 ) -> SyscallResult<Arc<dyn Inode>> {
     assert_ne!(current_process().inner.locked_by(), local_hart().id);
+    if path.is_empty() {
+        return Err(Errno::ENOENT);
+    }
+    let should_be_dir = path.ends_with('/');
     let proc_inner = current_process().inner.lock();
 
     let mut path = normalize_path(path);
@@ -36,20 +40,24 @@ pub async fn resolve_path(
     }
 
     let mnt_ns = proc_inner.mnt_ns.clone();
-    if is_absolute_path(&path) {
+    let inode = if is_absolute_path(&path) {
         drop(proc_inner);
-        mnt_ns.lookup_absolute(&path, follow_link, token).await
+        mnt_ns.lookup_absolute(&path, follow_link, token).await?
     } else if dirfd == AT_FDCWD {
         let cwd = proc_inner.cwd.clone();
         drop(proc_inner);
         let inode = mnt_ns.lookup_absolute(&cwd, follow_link, token).await?;
-        mnt_ns.lookup_relative(inode, &path, follow_link, token).await
+        mnt_ns.lookup_relative(inode, &path, follow_link, token).await?
     } else {
         let fd_impl = proc_inner.fd_table.get(dirfd)?;
         let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
         drop(proc_inner);
-        mnt_ns.lookup_relative(inode, &path, follow_link, token).await
+        mnt_ns.lookup_relative(inode, &path, follow_link, token).await?
+    };
+    if should_be_dir && !inode.metadata().ifmt.is_dir() {
+        return Err(Errno::ENOTDIR);
     }
+    Ok(inode)
 }
 
 pub fn is_absolute_path(path: &str) -> bool {

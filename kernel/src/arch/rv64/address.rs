@@ -12,19 +12,19 @@ pub const SV39_VPN_BITS: usize = 9;
 pub const SV39_VPN_MASK: usize = 0x1FF;
 
 /// Definitions
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct PhysAddr(pub usize);
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct PhysPageNum(pub usize);
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct VirtAddr(pub usize);
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct VirtPageNum(pub usize);
 

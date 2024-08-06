@@ -3,13 +3,15 @@ use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 
 pub const MAX_HARTS: usize = 4;
 pub const MAX_ASID: usize = 256;
+pub const MAX_SYMLINKS: usize = 40;
 
 pub const KERNEL_PADDR_BASE: PhysAddr = PhysAddr(0x8020_0000);
 pub const KERNEL_VADDR_BASE: VirtAddr = VirtAddr(0xFFFF_FFFF_8020_0000);
 pub const KERNEL_ADDR_OFFSET: usize = KERNEL_VADDR_BASE.0 - KERNEL_PADDR_BASE.0;
 pub const KERNEL_MMIO_BASE: VirtAddr = VirtAddr(0xFFFF_FFFF_9000_0000);
 pub const TRAMPOLINE_BASE: VirtAddr = VirtAddr(0xFFFF_FFFF_8FFF_E000);
-pub const DYNAMIC_LINKER_BASE: usize = 1 << 37;
+pub const DYNAMIC_LINKER_BASE: VirtAddr = VirtAddr(0x20_0000_0000);
+pub const USER_LOAD_BASE: VirtAddr = VirtAddr(0x1000_0000);
 pub const USER_STACK_TOP: VirtAddr = VirtAddr(0xFFFF_FFFF_8000_0000);
 
 const KB: usize = 1024;

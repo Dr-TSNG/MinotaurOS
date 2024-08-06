@@ -15,6 +15,7 @@ mod wrapper;
 pub struct Ext4FileSystem {
     device: Arc<dyn BlockDevice>,
     vfsmeta: FileSystemMeta,
+    flags: VfsFlags,
     ext4: Ext4,
     driver_lock: AsyncMutex<()>,
     root: ManuallyDrop<LateInit<Arc<Ext4Inode>>>,
@@ -28,7 +29,8 @@ impl Ext4FileSystem {
         let dev = device.metadata().dev_id;
         let fs = Arc::new(Ext4FileSystem {
             device: device.clone(),
-            vfsmeta: FileSystemMeta::new(dev, "/dev/sda1", FileSystemType::EXT4, flags),
+            vfsmeta: FileSystemMeta::new(dev, "/dev/sda1", FileSystemType::EXT4),
+            flags,
             ext4: Ext4::new(device),
             driver_lock: AsyncMutex::new(()),
             root: ManuallyDrop::new(LateInit::new()),
@@ -41,6 +43,10 @@ impl Ext4FileSystem {
 impl FileSystem for Ext4FileSystem {
     fn metadata(&self) -> &FileSystemMeta {
         &self.vfsmeta
+    }
+
+    fn flags(&self) -> VfsFlags {
+        self.flags
     }
 
     fn root(&self) -> Arc<dyn Inode> {
