@@ -70,9 +70,9 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
         start, len, prot, flags, fd, offset,
     );
     let mut perms = ASPerms::from(prot);
-    if flags.contains(MapFlags::MAP_PRIVATE) {
-        perms |= ASPerms::P;
-    } else if !flags.contains(MapFlags::MAP_SHARED) {
+    if flags.contains(MapFlags::MAP_SHARED) {
+        perms |= ASPerms::S;
+    } else if !flags.contains(MapFlags::MAP_PRIVATE) {
         return Err(Errno::EINVAL);
     }
     let proc_inner = current_process().inner.lock();

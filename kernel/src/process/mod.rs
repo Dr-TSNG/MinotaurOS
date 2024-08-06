@@ -88,7 +88,7 @@ impl Process {
         elf_data: &[u8],
     ) -> SyscallResult<Arc<Self>> {
         let (addr_space, entry, _) =
-            AddressSpace::from_elf(&mnt_ns, "/init", elf_data, AccessToken::root()).await?;
+            AddressSpace::from_elf(&mnt_ns, "/init", 0, 0, elf_data, AccessToken::root()).await?;
         let pid = Arc::new(TidTracker::new());
 
         let process = Arc::new(Process {

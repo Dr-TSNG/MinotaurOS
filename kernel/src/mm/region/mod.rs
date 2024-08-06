@@ -44,10 +44,6 @@ pub trait ASRegion: Send + Sync {
     fn fault_handler(&mut self, root_pt: PageTable, vpn: VirtPageNum) -> SyscallResult<Vec<HeapFrameTracker>> {
         Err(Errno::EINVAL)
     }
-
-    fn off_dev_ino(&self) -> (usize, u64, usize) {
-        (0, 0, 0)
-    }
 }
 
 impl dyn ASRegion {
@@ -72,6 +68,9 @@ pub struct ASRegionMeta {
     pub start: VirtPageNum,
     /// 映射的页数
     pub pages: usize,
+    pub offset: usize,
+    pub dev: u64,
+    pub ino: usize,
 }
 
 impl ASRegionMeta {

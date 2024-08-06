@@ -43,7 +43,7 @@ bitflags! {
         const W = 1 << 1;
         const X = 1 << 2;
         const U = 1 << 3;
-        const P = 1 << 4;
+        const S = 1 << 4;
         const RWX = Self::R.bits | Self::W.bits | Self::X.bits;
     }
 }
@@ -61,7 +61,11 @@ impl Display for ASPerms {
         append(ASPerms::R, 'r')?;
         append(ASPerms::W, 'w')?;
         append(ASPerms::X, 'x')?;
-        append(ASPerms::P, 'p')?;
+        if self.contains(ASPerms::S) {
+            append(ASPerms::U, 's')?;
+        } else {
+            append(ASPerms::U, 'p')?;
+        }
         Ok(())
     }
 }
@@ -131,8 +135,10 @@ impl AddressSpace {
         }
         drop(snapshots);
 
+        let dev = inode.metadata().dev;
+        let ino = inode.metadata().ino;
         let data = inode.open(OpenFlags::O_RDONLY, token)?.read_all().await?;
-        let mut snapshot = Self::from_elf(mnt_ns, &exe, &data, token).await?;
+        let mut snapshot = Self::from_elf(mnt_ns, &exe, dev, ino, &data, token).await?;
         let this = (snapshot.0.fork(), snapshot.1, snapshot.2.clone());
         let mut snapshots = EXE_SNAPSHOTS.lock();
         snapshots.put(exe.to_string(), snapshot);
@@ -143,6 +149,8 @@ impl AddressSpace {
     pub async fn from_elf(
         mnt_ns: &MountNamespace,
         name: &str,
+        dev: u64,
+        ino: usize,
         data: &[u8],
         token: AccessToken,
     ) -> SyscallResult<(Self, usize, Vec<Aux>)> {
@@ -189,6 +197,9 @@ impl AddressSpace {
                         perms,
                         start: start_vpn,
                         pages: end_vpn - start_vpn,
+                        offset: phdr.p_offset as usize,
+                        dev,
+                        ino,
                     },
                     &data[phdr.file_range()],
                     start_addr.page_offset(2),
@@ -207,6 +218,9 @@ impl AddressSpace {
             perms: ASPerms::U | ASPerms::R | ASPerms::W,
             start: ustack_bottom_vpn,
             pages: ustack_top_vpn - ustack_bottom_vpn,
+            offset: 0,
+            dev: 0,
+            ino: 0,
         });
         addr_space.map_region(region);
         debug!("[addr_space] Map user stack: {:?} - {:?}", ustack_bottom_vpn, ustack_top_vpn);
@@ -217,6 +231,9 @@ impl AddressSpace {
             perms: ASPerms::U | ASPerms::R | ASPerms::W,
             start: max_end_vpn,
             pages: max_end_vpn - max_end_vpn,
+            offset: 0,
+            dev: 0,
+            ino: 0,
         });
         addr_space.map_region(region);
         addr_space.heap = max_end_vpn..max_end_vpn;
@@ -332,14 +349,14 @@ impl AddressSpace {
             }
             left
         };
-        let metadata = ASRegionMeta { name, perms, start, pages };
+        let mut metadata = ASRegionMeta { name, perms, start, pages, offset, dev: 0, ino: 0 };
         let region: Box<dyn ASRegion> = match inode {
             Some(inode) => {
-                let dev = inode.metadata().dev;
-                let ino = inode.metadata().ino;
-                FileRegion::new(metadata, inode.page_cache().unwrap(), offset, dev, ino)
+                metadata.dev = inode.metadata().dev;
+                metadata.ino = inode.metadata().ino;
+                FileRegion::new(metadata, inode.page_cache().unwrap())
             }
-            None if perms.contains(ASPerms::P) => SharedRegion::new_free(metadata),
+            None if perms.contains(ASPerms::S) => SharedRegion::new_free(metadata),
             None => LazyRegion::new_free(metadata),
         };
         self.map_region(region);
@@ -383,9 +400,12 @@ impl AddressSpace {
         };
         let metadata = ASRegionMeta {
             name: Some(format!("/dev/shm/{}", id)),
-            perms: ASPerms::R | ASPerms::W | ASPerms::X | ASPerms::U,
+            perms: ASPerms::U | ASPerms::R | ASPerms::W | ASPerms::X,
             start,
             pages: shm.len(),
+            offset: 0,
+            dev: 0,
+            ino: 0,
         };
         let region = SharedRegion::new_reffed(metadata, &shm);
         self.map_region(region);
@@ -402,7 +422,9 @@ impl AddressSpace {
             let start: VirtAddr = region.metadata().start.into();
             let end: VirtAddr = region.metadata().end().into();
             let perms = region.metadata().perms;
-            let (off, dev, ino) = region.off_dev_ino();
+            let off = region.metadata().offset;
+            let dev = region.metadata().dev;
+            let ino = region.metadata().ino;
             let (major, minor) = sep_dev(dev);
             let name = region.metadata().name.as_deref().unwrap_or("");
             let mut entry = format!(
@@ -481,6 +503,9 @@ impl AddressSpace {
                 perms: map.perms,
                 start: vpn_start,
                 pages: vpn_end - vpn_start,
+                offset: 0,
+                dev: 0,
+                ino: 0,
             };
             let region = DirectRegion::new(metadata, ppn_start);
             self.map_region(region);
@@ -493,9 +518,12 @@ impl AddressSpace {
         let region = LazyRegion::new_framed(
             ASRegionMeta {
                 name: Some("[trampoline]".to_string()),
-                perms: ASPerms::R | ASPerms::X | ASPerms::U,
+                perms: ASPerms::U | ASPerms::R | ASPerms::X,
                 start: TRAMPOLINE_BASE.into(),
                 pages: 1,
+                offset: 0,
+                dev: 0,
+                ino: 0,
             },
             &trampoline,
             0,
@@ -511,7 +539,7 @@ impl AddressSpace {
         token: AccessToken,
     ) -> SyscallResult<VirtAddr> {
         let inode = mnt_ns.lookup_absolute(linker, true, token).await?;
-        let file = inode.open(OpenFlags::O_RDONLY, AccessToken::root()).unwrap();
+        let file = inode.clone().open(OpenFlags::O_RDONLY, AccessToken::root()).unwrap();
         let data = file.read_all().await.unwrap();
         let elf = Elf::parse(&data).map_err(|_| Errno::ENOEXEC)?;
 
@@ -538,6 +566,9 @@ impl AddressSpace {
                         perms,
                         start: start_vpn,
                         pages: end_vpn - start_vpn,
+                        offset: phdr.p_offset as usize,
+                        dev: inode.metadata().dev,
+                        ino: inode.metadata().ino,
                     },
                     &data[phdr.file_range()],
                     start_addr.page_offset(2),

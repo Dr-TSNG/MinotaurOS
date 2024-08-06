@@ -15,9 +15,6 @@ pub struct FileRegion {
     metadata: ASRegionMeta,
     cache: Arc<PageCache>,
     pages: Vec<PageState>,
-    offset: usize,
-    dev: u64,
-    ino: usize,
 }
 
 enum PageState {
@@ -71,13 +68,11 @@ impl ASRegion for FileRegion {
                     metadata: ASRegionMeta {
                         start: self.metadata.start + start,
                         pages: size,
+                        offset: self.metadata.offset + start,
                         ..self.metadata.clone()
                     },
                     cache: self.cache.clone(),
                     pages: off.drain(..size).collect(),
-                    offset: self.offset + start,
-                    dev: self.dev,
-                    ino: self.ino,
                 };
                 regions.push(Box::new(mid));
             }
@@ -86,13 +81,11 @@ impl ASRegion for FileRegion {
                     metadata: ASRegionMeta {
                         start: self.metadata.start + start + size,
                         pages: self.metadata.pages - start - size,
+                        offset: self.metadata.offset + start + size,
                         ..self.metadata.clone()
                     },
                     cache: self.cache.clone(),
                     pages: off,
-                    offset: self.offset + start + size,
-                    dev: self.dev,
-                    ino: self.ino,
                 };
                 regions.push(Box::new(right));
             }
@@ -103,13 +96,11 @@ impl ASRegion for FileRegion {
                 metadata: ASRegionMeta {
                     start: self.metadata.start + size,
                     pages: self.metadata.pages - size,
+                    offset: self.metadata.offset + size,
                     ..self.metadata.clone()
                 },
                 cache: self.cache.clone(),
                 pages: off,
-                offset: self.offset + size,
-                dev: self.dev,
-                ino: self.ino,
             };
             regions.push(Box::new(right));
             self.metadata.pages = size;
@@ -152,9 +143,6 @@ impl ASRegion for FileRegion {
             metadata: self.metadata.clone(),
             cache: self.cache.clone(),
             pages: new_pages,
-            offset: self.offset,
-            dev: self.dev,
-            ino: self.ino,
         };
         Box::new(new_region)
     }
@@ -170,13 +158,13 @@ impl ASRegion for FileRegion {
         match temp {
             PageState::Free => temp = PageState::Clean,
             PageState::Clean => {
-                if self.metadata.perms.contains(ASPerms::P) {
+                if self.metadata.perms.contains(ASPerms::S) {
+                    temp = PageState::Dirty;
+                } else {
                     let frame = alloc_user_frames(1)?;
-                    let page = self.cache.ppn_of(page_num + self.offset).unwrap();
+                    let page = self.cache.ppn_of(page_num + self.metadata.offset).unwrap();
                     frame.ppn.byte_array().copy_from_slice(page.byte_array());
                     temp = PageState::Private(frame);
-                } else {
-                    temp = PageState::Dirty;
                 }
             }
             PageState::Dirty => panic!("Page should not be dirty"),
@@ -190,19 +178,15 @@ impl ASRegion for FileRegion {
         core::mem::swap(&mut temp, &mut self.pages[page_num]);
         Ok(self.map_one(root_pt, page_num, true))
     }
-
-    fn off_dev_ino(&self) -> (usize, u64, usize) {
-        (self.offset, self.dev, self.ino)
-    }
 }
 
 impl FileRegion {
-    pub fn new(metadata: ASRegionMeta, cache: Arc<PageCache>, offset: usize, dev: u64, ino: usize) -> Box<Self> {
+    pub fn new(metadata: ASRegionMeta, cache: Arc<PageCache>) -> Box<Self> {
         let mut pages = vec![];
         for _ in 0..metadata.pages {
             pages.push(PageState::Free);
         }
-        let region = Self { metadata, cache, pages, offset, dev, ino };
+        let region = Self { metadata, cache, pages };
         Box::new(region)
     }
 
@@ -223,8 +207,8 @@ impl FileRegion {
                 let (ppn, flags) = match &self.pages[page_num] {
                     PageState::Free => (PhysPageNum(0), PTEFlags::empty()),
                     PageState::Clean => {
-                        block_on(self.cache.load(page_num + self.offset)).unwrap();
-                        let page = self.cache.ppn_of(page_num + self.offset).unwrap();
+                        block_on(self.cache.load(page_num + self.metadata.offset)).unwrap();
+                        let page = self.cache.ppn_of(page_num + self.metadata.offset).unwrap();
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
                         if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
                         // No W
@@ -232,8 +216,8 @@ impl FileRegion {
                         (page, flags)
                     }
                     PageState::Dirty => {
-                        block_on(self.cache.load(page_num + self.offset)).unwrap();
-                        let page = self.cache.ppn_of(page_num + self.offset).unwrap();
+                        block_on(self.cache.load(page_num + self.metadata.offset)).unwrap();
+                        let page = self.cache.ppn_of(page_num + self.metadata.offset).unwrap();
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
                         if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
                         if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
@@ -274,7 +258,7 @@ impl FileRegion {
     }
 
     fn unmap_one(&self, mut pt: PageTable, page_num: usize) {
-        block_on(self.cache.sync((page_num + self.offset) * PAGE_SIZE, PAGE_SIZE)).unwrap();
+        block_on(self.cache.sync((page_num + self.metadata.offset) * PAGE_SIZE, PAGE_SIZE)).unwrap();
         let vpn = self.metadata.start + page_num;
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);
