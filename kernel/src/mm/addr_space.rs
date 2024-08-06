@@ -11,7 +11,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use bitflags::bitflags;
 use goblin::elf::Elf;
 use goblin::elf::header::ET_DYN;
-use goblin::elf::program_header::{PT_LOAD, PT_PHDR};
+use goblin::elf::program_header::PT_LOAD;
 use lazy_static::lazy_static;
 use log::{debug, info};
 use lru::LruCache;
