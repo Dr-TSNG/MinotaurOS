@@ -1,14 +1,15 @@
 mod fs;
+mod misc;
 mod mm;
+mod net;
 mod process;
 mod signal;
 mod sync;
 mod system;
 mod time;
-mod net;
 
-use core::mem::size_of;
 use fs::*;
+use misc::*;
 use mm::*;
 use net::*;
 use process::*;
@@ -17,13 +18,10 @@ use sync::*;
 use system::*;
 use time::*;
 
-use log::{debug, info, warn};
+use log::{debug, warn};
 use num_enum::FromPrimitive;
 use crate::fs::fd::FdNum;
-
-use crate::mm::protect::{user_slice_w, user_transmute_w};
 use crate::process::{Gid, Pid, Uid};
-
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::strace;
@@ -313,7 +311,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Prlimit => syscall!(sys_prlimit, args[0] as Pid, args[1] as u32, args[2], args[3]),
         SyscallCode::Renameat2 => async_syscall!(sys_renameat2, args[0] as FdNum, args[1], args[2] as FdNum, args[3], args[4] as u32),
         // SyscallCode::Seccomp
-        SyscallCode::Getrandom => async_syscall!(sys_getrandom, args[0], args[1], args[2] as u32),
+        SyscallCode::Getrandom => syscall!(sys_getrandom, args[0], args[1], args[2] as u32),
         // SyscallCode::MemfdCreate
         // SyscallCode::Membarrier
         // SyscallCode::CopyFileRange
@@ -330,56 +328,3 @@ fn dummy() -> SyscallResult<usize> {
     debug!("Dummy syscall");
     Ok(0)
 }
-
-pub fn sys_getcpu(cpu: usize,node: usize,tcache: usize) -> SyscallResult<usize>{
-    info!("[sys_getcpu] cpu: {}, node: {}", cpu, node);
-    // 获取当前 CPU 和 NUMA 节点编号
-    let (current_cpu, current_node) = get_current_cpu_and_node();
-    // 尝试将当前 CPU 写入用户提供的指针位置
-    if cpu != 0 {
-        if let Some(cpu_ptr) = user_transmute_w::<u32>(cpu)? {
-            *cpu_ptr = current_cpu;
-        } else {
-            return Err(Errno::EINVAL);
-        }
-    }
-
-    // 尝试将当前 NUMA 节点写入用户提供的指针位置
-    if node != 0 {
-        if let Some(node_ptr) = user_transmute_w::<u32>(node)? {
-            *node_ptr = current_node;
-        } else {
-            return Err(Errno::EINVAL);
-        }
-    }
-
-    Ok(0)
-}
-
-fn get_current_cpu_and_node() -> (u32,u32){
-    let num = local_hart().id as u32;
-    (num,0)
-}
-
-pub fn sys_getpriority(which: i32,who: i32) -> SyscallResult<usize>{
-    // 10 -> 10
-    // 20 -> 0
-    // 30 -> -10
-    // 这里为了通过第一个测试，直接全部返回 0 ，进程/线程/用户的 优先级 没有实现之前的做法。
-    return Ok(20);
-}
-
-pub async fn sys_getrandom(buf: usize, buflen: usize, _flags: u32) -> SyscallResult<usize> {
-    // 暂时先将随机数全部写为0
-    if buf == 0{
-        return Err(Errno::EINVAL);
-    }
-    let buf = user_slice_w(buf, buflen * size_of::<u8>())?;
-    let buf:&mut[u8] = bytemuck::cast_slice_mut(buf);
-    for i in 0..buflen{
-        buf[i] = 0
-    }
-    Ok(buflen)
-}
-
-

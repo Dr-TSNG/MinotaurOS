@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use log::info;
 use crate::fs::ffi::OpenFlags;
 use crate::net::netaddress::SockAddr;
-use crate::result::Errno::EINVAL;
 
 pub struct UnixSocket {
     metadata: FileMeta,
@@ -59,7 +58,6 @@ impl Socket for UnixSocket {
     fn peer_name(&self) -> SyscallResult<SockAddr> {
         Err(Errno::EINVAL)
     }
-
 
     fn shutdown(&self, how: u32) -> SyscallResult<()> {
         info!("[UnixSocket::shutdown] how {}", how);

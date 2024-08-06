@@ -181,13 +181,8 @@ impl Socket for UdpSocket {
     }
 
     fn peer_name(&self) -> SyscallResult<SockAddr> {
-        let res = self.inner.lock().remote_endpoint.map(Into::into);
-        match res {
-            Some(sockaddr) => Ok(sockaddr),
-            _ => Err(Errno::ENOTCONN),
-        }
+        self.inner.lock().remote_endpoint.map(Into::into).ok_or(Errno::ENOTCONN)
     }
-
 
     fn shutdown(&self, how: u32) -> SyscallResult {
         warn!("[udp] (handle {}) shutdown: how {}", self.handle, how);

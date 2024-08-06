@@ -9,6 +9,7 @@ use crate::fs::ffi::UTS_NAME;
 use crate::mm::allocator::free_user_memory;
 use crate::mm::protect::{user_slice_w, user_transmute_w};
 use crate::process::monitor::MONITORS;
+use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::time::cpu_time;
 use crate::syscall::system::ffi::{SysInfo, SyslogCmd};
@@ -105,6 +106,29 @@ pub fn sys_syslog(cmd: i32, buf: usize, len: usize) -> SyscallResult<usize> {
 pub fn sys_uname(buf: usize) -> SyscallResult<usize> {
     let user_buf = user_slice_w(buf, UTS_NAME.as_bytes().len())?;
     user_buf.copy_from_slice(UTS_NAME.as_bytes());
+    Ok(0)
+}
+
+pub fn sys_getcpu(cpu: usize, node: usize, _tcache: usize) -> SyscallResult<usize> {
+    info!("[sys_getcpu] cpu: {}, node: {}", cpu, node);
+    // 获取当前 CPU 和 NUMA 节点编号
+    let (current_cpu, current_node) = (local_hart().id, 0);
+    // 尝试将当前 CPU 写入用户提供的指针位置
+    if cpu != 0 {
+        if let Some(cpu_ptr) = user_transmute_w::<u32>(cpu)? {
+            *cpu_ptr = current_cpu as u32;
+        } else {
+            return Err(Errno::EINVAL);
+        }
+    }
+    // 尝试将当前 NUMA 节点写入用户提供的指针位置
+    if node != 0 {
+        if let Some(node_ptr) = user_transmute_w::<u32>(node)? {
+            *node_ptr = current_node;
+        } else {
+            return Err(Errno::EINVAL);
+        }
+    }
     Ok(0)
 }
 

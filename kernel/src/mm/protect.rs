@@ -53,9 +53,6 @@ pub fn user_slice_r(addr: usize, len: usize) -> SyscallResult<&'static [u8]> {
     if len == 0 {
         return Ok(&[]);
     }
-    if addr.checked_add(len).is_none() {
-        return Err(Errno::EFAULT);
-    }
     let addr = VirtAddr(addr);
     check_slice_readable(addr, len)?;
     let bytes = unsafe { core::slice::from_raw_parts(addr.as_ptr(), len) };
@@ -66,9 +63,6 @@ pub fn user_slice_w(addr: usize, len: usize) -> SyscallResult<&'static mut [u8]>
     if len == 0 {
         return Ok(&mut []);
     }
-    if addr.checked_add(len).is_none() {
-        return Err(Errno::EFAULT);
-    }
     let addr = VirtAddr(addr);
     check_slice_writable(addr, len)?;
     let bytes = unsafe { core::slice::from_raw_parts_mut(addr.as_ptr(), len) };
@@ -76,6 +70,9 @@ pub fn user_slice_w(addr: usize, len: usize) -> SyscallResult<&'static mut [u8]>
 }
 
 fn check_slice_readable(addr: VirtAddr, len: usize) -> SyscallResult {
+    if addr.0.checked_add(len).is_none() {
+        return Err(Errno::EFAULT);
+    }
     let _guard = KIntrGuard::new();
     local_hart().on_page_test = true;
     let start = addr.floor();
@@ -91,10 +88,9 @@ fn check_slice_readable(addr: VirtAddr, len: usize) -> SyscallResult {
 }
 
 fn check_slice_writable(addr: VirtAddr, len: usize) -> SyscallResult {
-    if 0xFFFFFFFFFFFFFFFF - addr.0 < len{
-    	return Err(Errno::EFAULT);
+    if addr.0.checked_add(len).is_none() {
+        return Err(Errno::EFAULT);
     }
-
     let _guard = KIntrGuard::new();
     local_hart().on_page_test = true;
     let start = addr.floor();
