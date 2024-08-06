@@ -177,6 +177,7 @@ pub enum SyscallCode {
     Madvise = 233,
     Wait4 = 260,
     Prlimit = 261,
+    ClockAdjtime = 266,
     Renameat2 = 276,
     Seccomp = 277,
     Getrandom = 278,
