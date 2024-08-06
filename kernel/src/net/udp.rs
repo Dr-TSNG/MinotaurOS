@@ -180,8 +180,8 @@ impl Socket for UdpSocket {
             .unwrap_or_else(|| SockAddr::In4(SockAddrIn4::default()))
     }
 
-    fn peer_name(&self) -> Option<SockAddr> {
-        self.inner.lock().remote_endpoint.map(Into::into)
+    fn peer_name(&self) -> SyscallResult<SockAddr> {
+        self.inner.lock().remote_endpoint.map(Into::into).ok_or(Errno::ENOTCONN)
     }
 
     fn shutdown(&self, how: u32) -> SyscallResult {

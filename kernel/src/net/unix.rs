@@ -55,8 +55,8 @@ impl Socket for UnixSocket {
         todo!()
     }
 
-    fn peer_name(&self) -> Option<SockAddr> {
-        todo!()
+    fn peer_name(&self) -> SyscallResult<SockAddr> {
+        Err(Errno::EINVAL)
     }
 
     fn shutdown(&self, how: u32) -> SyscallResult<()> {

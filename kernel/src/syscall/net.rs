@@ -83,7 +83,7 @@ pub async fn sys_connect(sockfd: FdNum, addr: usize, addrlen: u32) -> SyscallRes
 pub fn sys_getsockname(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallResult<usize> {
     let socket = current_process().inner.lock()
         .fd_table.get(sockfd)?.file.as_socket()?;
-    let addrlen = user_transmute_w::<u32>(addrlen)?.ok_or(Errno::EINVAL)?;
+    let addrlen = user_transmute_w::<u32>(addrlen)?.ok_or(Errno::EFAULT)?;
     let addr = user_slice_w(addr, *addrlen as usize)?;
     let addr_buf = socket.sock_name();
     copy_back_addr(addr, &addr_buf);
@@ -93,9 +93,9 @@ pub fn sys_getsockname(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallRes
 pub fn sys_getpeername(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallResult<usize> {
     let socket = current_process().inner.lock()
         .fd_table.get(sockfd)?.file.as_socket()?;
-    let addrlen = user_transmute_w::<u32>(addrlen)?.ok_or(Errno::EINVAL)?;
+    let addrlen = user_transmute_w::<u32>(addrlen)?.ok_or(Errno::EFAULT)?;
     let addr = user_slice_w(addr, *addrlen as usize)?;
-    let addr_buf = socket.peer_name().ok_or(Errno::ENOTCONN)?;
+    let addr_buf = socket.peer_name()?;
     copy_back_addr(addr, &addr_buf);
     Ok(0)
 }

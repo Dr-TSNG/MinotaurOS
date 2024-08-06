@@ -262,7 +262,7 @@ impl AddressSpace {
             Ok(())
         } else {
             info!("[addr_space] Page access violation: {:?} - {:?} / {:?}", addr, perform, region.metadata().perms);
-            Err(Errno::EACCES)
+            Err(Errno::EFAULT)
         }
     }
 

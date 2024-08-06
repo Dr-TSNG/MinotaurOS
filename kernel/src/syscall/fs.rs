@@ -29,8 +29,11 @@ use crate::sched::time::real_time;
 use crate::signal::ffi::SigSet;
 
 pub fn sys_getcwd(buf: usize, size: usize) -> SyscallResult<usize> {
-    if buf == 0 || size == 0 {
-        return Err(Errno::EINVAL);
+    if size == 0 {
+        return Err(Errno::ERANGE);
+    }
+    if buf == 0 && size > 1 {
+        return Err(Errno::EFAULT);
     }
     let cwd = current_process().inner.lock().cwd.clone();
     if cwd.len() + 1 > size {
@@ -374,6 +377,9 @@ pub fn sys_pipe2(fds: usize, flags: u32) -> SyscallResult<usize> {
 }
 
 pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<usize> {
+    if count <= 1 {
+        return Err(Errno::EINVAL);
+    }
     let file = current_process().inner.lock().fd_table.get(fd)?.file;
     let inode = file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
     if inode.metadata().ifmt != InodeMode::S_IFDIR {

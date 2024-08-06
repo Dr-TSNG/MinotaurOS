@@ -1,13 +1,15 @@
 mod fs;
+mod misc;
 mod mm;
+mod net;
 mod process;
 mod signal;
 mod sync;
 mod system;
 mod time;
-mod net;
 
 use fs::*;
+use misc::*;
 use mm::*;
 use net::*;
 use process::*;
@@ -120,6 +122,7 @@ pub enum SyscallCode {
     RtSigprocmask = 135,
     RtSigtimedwait = 137,
     RtSigreturn = 139,
+    GetPriority = 141,
     Setregid = 143,
     Setgid = 144,
     Setreuid = 145,
@@ -137,6 +140,7 @@ pub enum SyscallCode {
     Setrlimit = 164,
     Getrusage = 165,
     Umask = 166,
+    GetCpu = 168,
     GetTimeOfDay = 169,
     Getpid = 172,
     Getppid = 173,
@@ -150,6 +154,7 @@ pub enum SyscallCode {
     Shmctl = 195,
     Shmat = 196,
     Socket = 198,
+    SocketPair = 199,
     Bind = 200,
     Listen = 201,
     Accept = 202,
@@ -250,6 +255,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::RtSigprocmask => syscall!(sys_rt_sigprocmask, args[0] as i32, args[1], args[2]),
         SyscallCode::RtSigtimedwait => syscall!(sys_rt_sigtimedwait, args[0], args[1], args[2]),
         SyscallCode::RtSigreturn => syscall!(sys_rt_sigreturn),
+        SyscallCode::GetPriority => syscall!(sys_getpriority,args[0] as i32,args[1] as i32),
         SyscallCode::Setregid => syscall!(sys_setregid, args[0] as Gid, args[1] as Gid),
         SyscallCode::Setgid => syscall!(sys_setgid, args[0] as Gid),
         SyscallCode::Setreuid => syscall!(sys_setreuid, args[0] as Uid, args[1] as Uid),
@@ -267,6 +273,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Setrlimit => syscall!(sys_setrlimit, args[0] as u32, args[1]),
         SyscallCode::Getrusage => syscall!(sys_getrusage, args[0] as i32, args[1]),
         SyscallCode::Umask => syscall!(sys_umask, args[0] as u32),
+        SyscallCode::GetCpu => syscall!(sys_getcpu,args[0],args[1],args[2]),
         SyscallCode::GetTimeOfDay => syscall!(sys_gettimeofday, args[0], args[1]),
         SyscallCode::Getpid => syscall!(sys_getpid),
         SyscallCode::Getppid => syscall!(sys_getppid),
@@ -280,6 +287,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Shmctl => syscall!(sys_shmctl, args[0] as i32, args[1] as i32, args[2]),
         SyscallCode::Shmat => syscall!(sys_shmat, args[0] as i32, args[1], args[2] as u32),
         SyscallCode::Socket => syscall!(sys_socket, args[0] as u32, args[1] as u32, args[2] as u32),
+        SyscallCode::SocketPair => syscall!(sys_socketpair,args[0] as u32,args[1] as u32,args[2] as u32,args[3]),
         SyscallCode::Bind => syscall!(sys_bind, args[0] as FdNum, args[1], args[2] as u32),
         SyscallCode::Listen => syscall!(sys_listen, args[0] as FdNum, args[1] as u32),
         SyscallCode::Accept => async_syscall!(sys_accept, args[0] as FdNum, args[1], args[2]),
@@ -303,7 +311,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Prlimit => syscall!(sys_prlimit, args[0] as Pid, args[1] as u32, args[2], args[3]),
         SyscallCode::Renameat2 => async_syscall!(sys_renameat2, args[0] as FdNum, args[1], args[2] as FdNum, args[3], args[4] as u32),
         // SyscallCode::Seccomp
-        // SyscallCode::Getrandom
+        SyscallCode::Getrandom => syscall!(sys_getrandom, args[0], args[1], args[2] as u32),
         // SyscallCode::MemfdCreate
         // SyscallCode::Membarrier
         // SyscallCode::CopyFileRange

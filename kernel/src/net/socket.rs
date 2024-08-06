@@ -82,7 +82,7 @@ pub trait Socket: File {
 
     fn sock_name(&self) -> SockAddr;
 
-    fn peer_name(&self) -> Option<SockAddr>;
+    fn peer_name(&self) -> SyscallResult<SockAddr>;
 
     fn shutdown(&self, how: u32) -> SyscallResult;
 
