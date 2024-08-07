@@ -14,7 +14,7 @@ use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
 bitflags! {
-    #[derive(Default)]
+    #[derive(Copy, Clone, Default, Eq, PartialEq)]
     pub struct Event: u32 {
         const CHILD_EXIT = 1 << 0;
         const KILL_THREAD = 1 << 1;

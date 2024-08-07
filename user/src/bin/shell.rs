@@ -26,6 +26,7 @@ extern "C" fn sigchld_handler(signal: i32) {
 }
 
 fn init_shell() {
+    mount("tmpfs", "/bin", "tmpfs", VfsFlags::empty(), None);
     run_cmd("echo Linking busybox applets...");
     let mut pipes = [0, 0];
     sys_pipe(&mut pipes);
@@ -57,11 +58,9 @@ fn main() {
     sys_mkdir("/tmp", 0);
     sys_mkdir("/sys", 0);
     sys_mkdir("/etc", 0);
-    let flags = VfsFlags::ST_WRITE | VfsFlags::ST_RELATIME;
-    mount("dev", "/dev", "devtmpfs", flags, None);
-    mount("proc", "/proc", "proc", flags, None);
-    mount("tmpfs", "/bin", "tmpfs", flags, None);
-    mount("tmpfs", "/tmp", "tmpfs", flags, None);
+    mount("dev", "/dev", "devtmpfs", VfsFlags::empty(), None);
+    mount("proc", "/proc", "proc", VfsFlags::empty(), None);
+    mount("tmpfs", "/tmp", "tmpfs", VfsFlags::empty(), None);
     let mut sa = SigAction::default();
     sa.sa_handler = sigchld_handler as usize;
     sigaction(SIGCHLD, Some(&sa), None);
@@ -73,5 +72,5 @@ fn main() {
     run_cmd("echo root:x:0:0::/:/busybox sh > /etc/passwd");
     run_cmd("echo nobody:x:65534:65534:Kernel Overflow User:/:/usr/bin/nologin >> /etc/passwd");
     
-    run_cmd("sh");
+    run_cmd("busybox sh");
 }

@@ -38,13 +38,14 @@ use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
 bitflags! {
+    #[derive(Copy, Clone)]
     pub struct ASPerms: u8 {
         const R = 1 << 0;
         const W = 1 << 1;
         const X = 1 << 2;
         const U = 1 << 3;
         const S = 1 << 4;
-        const RWX = Self::R.bits | Self::W.bits | Self::X.bits;
+        const RWX = Self::R.bits() | Self::W.bits() | Self::X.bits();
     }
 }
 
@@ -206,7 +207,7 @@ impl AddressSpace {
                 )?;
                 max_end_vpn = region.metadata().end();
                 addr_space.map_region(region);
-                debug!("[addr_space] Map elf section: {:?} - {:?} for {:?}", start_vpn, end_vpn, perms);
+                debug!("[addr_space] Map elf section: {:?} - {:?} for {}", start_vpn, end_vpn, perms);
             }
         }
 
@@ -301,7 +302,7 @@ impl AddressSpace {
             unsafe { local_hart().refresh_tlb(self.token); }
             Ok(())
         } else {
-            info!("[addr_space] Page access violation: {:?} - {:?} / {:?}", addr, perform, region.metadata().perms);
+            info!("[addr_space] Page access violation: {:?} - {} / {}", addr, perform, region.metadata().perms);
             Err(Errno::EFAULT)
         }
     }

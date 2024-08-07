@@ -27,6 +27,7 @@ pub struct FloatContext {
 
 bitflags! {
     #[repr(transparent)]
+    #[derive(Clone, Debug)]
     struct FloatStatus: u32 {
         const IS_DIRTY      = 1 << 0; // 当前寄存器是否被修改
         const TRAP_RELOAD   = 1 << 1; // 是否需要恢复

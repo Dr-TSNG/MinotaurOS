@@ -63,7 +63,7 @@ impl FileSystem for ProcFileSystem {
     }
 
     fn flags(&self) -> VfsFlags {
-        self.flags
+        self.flags.clone()
     }
 
     fn root(&self) -> Arc<dyn Inode> {

@@ -9,6 +9,7 @@ use crate::fs::fd::FdNum;
 use crate::sched::ffi::TimeSpec;
 
 bitflags! {
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     pub struct OpenFlags: u32 {
         const O_RDONLY    =        0o0;
         const O_WRONLY    =        0o1;
@@ -44,6 +45,7 @@ impl OpenFlags {
 }
 
 bitflags! {
+    #[derive(Debug, Eq, PartialEq)]
     pub struct RenameFlags: u32 {
         /// Default behavior.
         const RENAME_DEFAULT = 0;
@@ -57,6 +59,7 @@ bitflags! {
 }
 
 bitflags! {
+    #[derive(Clone)]
     pub struct VfsFlags: u32 {
         /// Mount read-only
         const ST_RDONLY      = 1;
@@ -90,7 +93,7 @@ bitflags! {
 }
 
 impl Display for VfsFlags {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         let mut flags = Vec::new();
         if self.contains(VfsFlags::ST_RDONLY) {
             flags.push("ro");
@@ -148,6 +151,7 @@ pub enum FcntlCmd {
 }
 
 bitflags! {
+    #[derive(Copy, Clone, Eq, PartialEq)]
     pub struct InodeMode: u32 {
         const S_IFIFO  = 0x1000;
         const S_IFCHR  = 0x2000;
@@ -163,16 +167,16 @@ bitflags! {
         const S_IRUSR  = 0x0100;
         const S_IWUSR  = 0x0080;
         const S_IXUSR  = 0x0040;
-        const S_IRWXU  = Self::S_IRUSR.bits | Self::S_IWUSR.bits | Self::S_IXUSR.bits;
+        const S_IRWXU  = Self::S_IRUSR.bits() | Self::S_IWUSR.bits() | Self::S_IXUSR.bits();
         const S_IRGRP  = 0x0020;
         const S_IWGRP  = 0x0010;
         const S_IXGRP  = 0x0008;
-        const S_IRWXG  = Self::S_IRGRP.bits | Self::S_IWGRP.bits | Self::S_IXGRP.bits;
+        const S_IRWXG  = Self::S_IRGRP.bits() | Self::S_IWGRP.bits() | Self::S_IXGRP.bits();
         const S_IROTH  = 0x0004;
         const S_IWOTH  = 0x0002;
         const S_IXOTH  = 0x0001;
-        const S_IRWXO  = Self::S_IROTH.bits | Self::S_IWOTH.bits | Self::S_IXOTH.bits;
-        const S_ACCESS = Self::S_IRWXU.bits | Self::S_IRWXG.bits | Self::S_IRWXO.bits;
+        const S_IRWXO  = Self::S_IROTH.bits() | Self::S_IWOTH.bits() | Self::S_IXOTH.bits();
+        const S_ACCESS = Self::S_IRWXU.bits() | Self::S_IRWXG.bits() | Self::S_IRWXO.bits();
     }
 }
 
@@ -202,9 +206,9 @@ impl Display for InodeMode {
             };
             f.write_str(s)
         };
-        rwx((self.bits & 0o700) >> 6)?;
-        rwx((self.bits & 0o070) >> 3)?;
-        rwx(self.bits & 0o007)?;
+        rwx((self.bits() & 0o700) >> 6)?;
+        rwx((self.bits() & 0o070) >> 3)?;
+        rwx(self.bits() & 0o007)?;
         Ok(())
     }
 }
@@ -224,7 +228,7 @@ impl InodeMode {
 
     pub fn from_bits_access(bits: u32) -> Option<Self> {
         Self::from_bits(bits).take_if(|mode| {
-            (mode.difference(InodeMode::S_ACCESS)).is_empty()
+            mode.difference(InodeMode::S_ACCESS).is_empty()
         })
     }
 
@@ -378,7 +382,7 @@ pub struct KernelStatfs {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, AsBytes, FromZeroes, FromBytes)]
+#[derive(Copy, Clone, Debug, AsBytes, FromZeroes, FromBytes)]
 pub struct PollFd {
     /// Fd
     pub fd: FdNum,
@@ -388,11 +392,13 @@ pub struct PollFd {
     pub revents: PollEvents,
 }
 
+/// Poll events
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug, AsBytes, FromZeroes, FromBytes)]
+pub struct PollEvents(i16);
+
 bitflags! {
-    /// Poll events
-    #[repr(transparent)]
-    #[derive(AsBytes, FromZeroes, FromBytes)]
-    pub struct PollEvents: i16 {
+    impl PollEvents: i16 {
         /// There is data to read
         const POLLIN = 1 << 0;
         /// Execption about fd
@@ -407,7 +413,6 @@ bitflags! {
         const POLLNVAL = 1 << 5;
     }
 }
-
 
 pub const FD_SET_SIZE: usize = 1024;
 pub const FD_SET_LEN: usize = FD_SET_SIZE / (8 * size_of::<usize>());

@@ -46,9 +46,7 @@ bitflags! {
 
 impl Default for RecvFromFlags {
     fn default() -> Self {
-        Self {
-            bits: RecvFromFlags::MSG_NOTHING.bits,
-        }
+        RecvFromFlags::MSG_NOTHING
     }
 }
 
