@@ -6,7 +6,7 @@ pub mod token;
 
 use alloc::collections::BTreeMap;
 use alloc::ffi::CString;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -427,6 +427,12 @@ impl Process {
                 break;
             }
         }
+    }
+}
+
+impl Process{
+    pub fn print_stat(&self) -> String{
+        "Ok".to_string()
     }
 }
 
