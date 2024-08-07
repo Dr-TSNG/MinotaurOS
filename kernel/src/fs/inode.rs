@@ -98,6 +98,19 @@ impl InodeMeta {
         Self { key, ino, dev, ifmt, name, path, parent, page_cache, inner: Arc::new(Mutex::new(inner)) }
     }
 
+    pub fn new_simple(
+        ino: usize,
+        uid: Uid,
+        gid: Gid,
+        mode: InodeMode,
+        name: String,
+        parent: Arc<dyn Inode>,
+    ) -> Self {
+        let time = TimeSpec::default();
+        let path = format!("{}/{}", parent.metadata().path, name);
+        Self::new(ino, 0, uid, gid, mode, name, path, Some(parent), None, time, time, time, 0)
+    }
+
     pub fn movein(
         inode: &dyn Inode,
         name: String,

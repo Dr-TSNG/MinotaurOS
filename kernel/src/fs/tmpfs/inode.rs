@@ -6,8 +6,8 @@ use alloc::sync::{Arc, Weak};
 use core::sync::atomic::Ordering;
 use async_trait::async_trait;
 use log::debug;
+use macros::InodeFactory;
 use crate::fs::ffi::InodeMode;
-use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::page_cache::PageCache;
 use crate::fs::tmpfs::TmpFileSystem;
@@ -16,6 +16,7 @@ use crate::result::{Errno, SyscallResult};
 use crate::sched::time::real_time;
 use crate::sync::mutex::AsyncMutex;
 
+#[derive(InodeFactory)]
 pub struct TmpfsInode {
     metadata: InodeMeta,
     fs: Weak<TmpFileSystem>,
@@ -190,15 +191,5 @@ impl InodeInternal for TmpfsInode {
     async fn do_readlink(self: Arc<Self>) -> SyscallResult<String> {
         let inner = self.inner.lock().await;
         Ok(inner.link.clone())
-    }
-}
-
-impl Inode for TmpfsInode {
-    fn metadata(&self) -> &InodeMeta {
-        &self.metadata
-    }
-
-    fn file_system(&self) -> Weak<dyn FileSystem> {
-        self.fs.clone()
     }
 }

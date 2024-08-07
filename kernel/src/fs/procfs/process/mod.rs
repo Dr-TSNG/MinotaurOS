@@ -4,8 +4,8 @@ use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use core::sync::atomic::Ordering;
 use async_trait::async_trait;
+use macros::InodeFactory;
 use crate::fs::ffi::InodeMode;
-use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::procfs::process::exe::ExeInode;
 use crate::fs::procfs::process::maps::MapsInode;
@@ -13,13 +13,13 @@ use crate::fs::procfs::process::mounts::MountsInode;
 use crate::fs::procfs::ProcFileSystem;
 use crate::process::Process;
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
 
 mod exe;
 mod maps;
 mod mounts;
 
+#[derive(InodeFactory)]
 pub struct ProcessDirInode {
     metadata: InodeMeta,
     fs: Weak<ProcFileSystem>,
@@ -40,20 +40,13 @@ impl ProcessDirInode {
         process: Arc<Process>,
     ) -> Arc<Self> {
         Arc::new(Self {
-            metadata: InodeMeta::new(
+            metadata: InodeMeta::new_simple(
                 fs.ino_pool.fetch_add(1, Ordering::Relaxed),
                 0,
                 0,
-                0,
-                InodeMode::S_IFDIR | InodeMode::from_bits_truncate(0o555),
+                InodeMode::S_IFDIR | InodeMode::from_bits_retain(0o555),
                 process.pid.0.to_string(),
-                process.pid.0.to_string(),
-                Some(parent),
-                None,
-                TimeSpec::default(),
-                TimeSpec::default(),
-                TimeSpec::default(),
-                0,
+                parent,
             ),
             fs: Arc::downgrade(&fs),
             process: Arc::downgrade(&process),
@@ -95,15 +88,5 @@ impl InodeInternal for ProcessDirInode {
             Some(inode) => Ok(inode.clone()),
             None => Err(Errno::ENOENT),
         }
-    }
-}
-
-impl Inode for ProcessDirInode {
-    fn metadata(&self) -> &InodeMeta {
-        &self.metadata
-    }
-
-    fn file_system(&self) -> Weak<dyn FileSystem> {
-        self.fs.clone()
     }
 }

@@ -5,6 +5,7 @@ use alloc::sync::{Arc, Weak};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use tap::Tap;
+use macros::InodeFactory;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
@@ -71,6 +72,7 @@ impl FileSystem for ProcFileSystem {
     }
 }
 
+#[derive(InodeFactory)]
 struct RootInode {
     metadata: InodeMeta,
     fs: Weak<ProcFileSystem>,
@@ -85,7 +87,7 @@ impl RootInode {
                 0,
                 0,
                 0,
-                InodeMode::S_IFDIR | InodeMode::from_bits_truncate(0o555),
+                InodeMode::S_IFDIR | InodeMode::from_bits_retain(0o555),
                 String::new(),
                 String::new(),
                 parent,
@@ -121,15 +123,5 @@ impl InodeInternal for RootInode {
 
     async fn do_lookup_idx(self: Arc<Self>, idx: usize) -> SyscallResult<Arc<dyn Inode>> {
         self.children.lock().values().nth(idx).cloned().ok_or(Errno::ENOENT)
-    }
-}
-
-impl Inode for RootInode {
-    fn metadata(&self) -> &InodeMeta {
-        &self.metadata
-    }
-
-    fn file_system(&self) -> Weak<dyn FileSystem> {
-        self.fs.clone()
     }
 }
