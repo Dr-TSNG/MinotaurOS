@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use core::cmp::min;
 use core::mem::size_of;
 use core::time::Duration;
+use futures::future::ok;
 use log::{debug, info, warn};
 use tap::Tap;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
@@ -68,7 +69,7 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
 
 pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
     let cmd = FcntlCmd::try_from(cmd).map_err(|_| Errno::EINVAL)?;
-    debug!("[fcntl] fd: {}, cmd: {:?}, arg2: {}", fd, cmd, arg2);
+    warn!("[fcntl] fd: {}, cmd: {:?}, arg2: {}", fd, cmd, arg2);
     let proc_inner = &mut *current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get_mut(fd)?;
     match cmd {
@@ -96,6 +97,12 @@ pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
             let new_flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
             let mut old_flags = fd_impl.file.metadata().flags.lock();
             *old_flags = (*old_flags - OpenFlags::O_STATUS) | (new_flags & OpenFlags::O_STATUS);
+            Ok(0)
+        }
+        FcntlCmd::F_SETPIPE_SZ => {
+            Ok(0)
+        }
+        FcntlCmd::F_GETPIPE_SZ => {
             Ok(0)
         }
     }
@@ -607,6 +614,10 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     };
     current_thread().signals.set_mask(mask_bak);
     ret
+}
+
+pub async fn sys_splice(infd: FdNum, off_in: usize, outfd: FdNum, off_out: usize, len: usize, flag: u32) -> SyscallResult<usize> {
+    Ok(1)
 }
 
 pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {
