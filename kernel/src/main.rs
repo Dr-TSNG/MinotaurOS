@@ -33,6 +33,7 @@ mod sched;
 mod signal;
 mod sync;
 mod syscall;
+mod system;
 mod trap;
 
 use core::arch::{asm, global_asm};

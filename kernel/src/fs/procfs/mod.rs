@@ -13,6 +13,7 @@ use crate::fs::procfs::meminfo::MeminfoInode;
 use crate::fs::procfs::mounts::MountsInode;
 use crate::fs::procfs::process::ProcessDirInode;
 use crate::fs::procfs::self_::SelfInode;
+use crate::fs::procfs::sys::new_sys_dir;
 use crate::process::monitor::MONITORS;
 use crate::process::{Pid, Process};
 use crate::result::{Errno, SyscallResult};
@@ -23,7 +24,9 @@ use crate::sync::once::LateInit;
 mod mounts;
 mod meminfo;
 mod process;
+mod ndir;
 mod self_;
+mod sys;
 
 pub struct ProcFileSystem {
     vfsmeta: FileSystemMeta,
@@ -104,6 +107,7 @@ impl RootInode {
             it.insert("mounts".to_string(), MountsInode::new(fs.clone(), root.clone()));
             it.insert("meminfo".to_string(), MeminfoInode::new(fs.clone(), root.clone()));
             it.insert("self".to_string(), SelfInode::new(fs.clone(), root.clone()));
+            it.insert("sys".to_string(), new_sys_dir(fs.clone(), root.clone()));
             for process in MONITORS.lock().process.all() {
                 it.insert(
                     process.pid.0.to_string(),
