@@ -1,5 +1,4 @@
 use core::cmp::max;
-use bitvec_rs::BitVec;
 use buddy_system_allocator::FrameAllocator;
 use log::warn;
 use crate::arch::{kvaddr_to_paddr, PAGE_SIZE, PhysPageNum};
@@ -52,13 +51,6 @@ impl UserFrameAllocator {
         self.0.dealloc(tracker.ppn.0, tracker.pages);
         self.2 -= tracker.pages;
     }
-}
-
-struct Segment {
-    start: PhysPageNum,
-    end: PhysPageNum,
-    bitmap: BitVec,
-    cur: usize,
 }
 
 /// 分配连续的用户页帧

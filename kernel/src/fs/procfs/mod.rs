@@ -10,6 +10,10 @@ use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::procfs::meminfo::MeminfoInode;
 use crate::fs::procfs::mounts::MountsInode;
+use crate::fs::procfs::process::ProcessDirInode;
+use crate::fs::procfs::self_::SelfInode;
+use crate::process::monitor::MONITORS;
+use crate::process::{Pid, Process};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
@@ -17,6 +21,8 @@ use crate::sync::once::LateInit;
 
 mod mounts;
 mod meminfo;
+mod process;
+mod self_;
 
 pub struct ProcFileSystem {
     vfsmeta: FileSystemMeta,
@@ -36,6 +42,18 @@ impl ProcFileSystem {
         });
         fs.root.init(RootInode::new(&fs, parent));
         fs
+    }
+
+    pub fn add_process(self: Arc<Self>, process: Arc<Process>) {
+        let root = self.root.clone();
+        root.children.lock().insert(
+            process.pid.0.to_string(),
+            ProcessDirInode::new(self, root.clone(), process),
+        );
+    }
+
+    pub fn remove_process(self: Arc<Self>, pid: Pid) {
+        self.root.children.lock().remove(&pid.to_string());
     }
 }
 
@@ -83,6 +101,13 @@ impl RootInode {
         root.children.lock().tap_mut(|it| {
             it.insert("mounts".to_string(), MountsInode::new(fs.clone(), root.clone()));
             it.insert("meminfo".to_string(), MeminfoInode::new(fs.clone(), root.clone()));
+            it.insert("self".to_string(), SelfInode::new(fs.clone(), root.clone()));
+            for process in MONITORS.lock().process.all() {
+                it.insert(
+                    process.pid.0.to_string(),
+                    ProcessDirInode::new(fs.clone(), root.clone(), process),
+                );
+            }
         });
         root
     }

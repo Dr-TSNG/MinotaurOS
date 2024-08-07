@@ -89,3 +89,55 @@ pub struct TMS {
     pub tms_cutime: u64,
     pub tms_cstime: u64,
 }
+
+#[repr(C)]
+#[derive(Copy, Clone, AsBytes, FromZeroes, FromBytes)]
+pub struct Timex {
+    /// Mode selector
+    pub modes: i32,
+    _pad1: i32,
+    /// Time offset (nanoseconds)
+    pub offset: usize,
+    /// Frequency offset
+    pub freq: usize,
+    /// Maximum error (microseconds)
+    pub maxerror: usize,
+    /// Estimated error (microseconds)
+    pub esterror: usize,
+    /// Clock command/status
+    pub status: i32,
+    _pad2: i32,
+    /// PLL (phase-locked loop) time constant
+    pub constant: usize,
+    /// Clock precision (microseconds, read-only)
+    pub precision: usize,
+    /// Clock frequency tolerance (read-only)
+    pub tolerance: usize,
+    /// Current time (read-only, except for [ADJ_SETOFFSET]);
+    /// upon return, time.tv_usec contains nanoseconds,
+    /// if [STA_NANO] status flag is set, otherwise microseconds
+    pub time: TimeVal,
+    /// Microseconds between clock ticks
+    pub tick: usize,
+    /// PPS (pulse per second) frequency (read-only)
+    pub ppsfreq: usize,
+    /// PPS jitter (read-only); nanoseconds,
+    /// if [STA_NANO] status flag is set, otherwise microseconds
+    pub jitter: usize,
+    /// PPS interval duration (seconds, read-only)
+    pub shift: i32,
+    _pad3: i32,
+    /// PPS stability (read-only)
+    pub stabil: usize,
+    /// PPS count of jitter limit exceeded events (read-only)
+    pub jitcnt: usize,
+    /// PPS count of calibration intervals (read-only)
+    pub calcnt: usize,
+    /// PPS count of calibration errors (read-only)
+    pub errcnt: usize,
+    /// PPS count of stability limit exceeded events (read-only)
+    pub stbcnt: usize,
+    /// TAI offset, as set by previous ADJ_TAI operation (seconds, read-only)
+    pub tai: i32,
+    _pad4: i32,
+}

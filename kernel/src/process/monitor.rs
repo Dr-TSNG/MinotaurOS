@@ -1,5 +1,5 @@
 use alloc::collections::{BTreeMap, BTreeSet};
-use alloc::sync::Weak;
+use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use crate::process::{Pid, Process};
@@ -56,6 +56,10 @@ impl ProcessMonitor {
         self.0.values().fold(0, |acc, p| {
             if p.strong_count() > 0 { acc + 1 } else { acc }
         })
+    }
+
+    pub fn all(&self) -> Vec<Arc<Process>> {
+        self.0.values().filter_map(|p| p.upgrade()).collect()
     }
 
     pub fn get(&self, pid: Pid) -> Weak<Process> {

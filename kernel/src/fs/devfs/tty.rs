@@ -134,6 +134,7 @@ impl File for TtyFile {
 
 #[repr(usize)]
 #[derive(TryFromPrimitive)]
+#[allow(non_camel_case_types)]
 enum TermiosType {
     /// Get the current serial port settings.
     TCGETS = 0x5401,

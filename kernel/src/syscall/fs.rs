@@ -9,14 +9,11 @@ use tap::Tap;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use macros::suspend;
 use crate::arch::PAGE_SIZE;
-use crate::fs::devfs::DevFileSystem;
 use crate::fs::fd::{FdNum, FileDescriptor};
 use crate::fs::ffi::{AT_FDCWD, AT_REMOVEDIR, MAX_DIRENT_SIZE, DirentType, FcntlCmd, InodeMode, IoVec, KernelStat, LinuxDirent, MAX_NAME_LEN, OpenFlags, PATH_MAX, RenameFlags, PollFd, VfsFlags, FdSet, FD_SET_LEN, PollEvents, KernelStatfs, AT_SYMLINK_NOFOLLOW, AccessMode};
 use crate::fs::file::Seek;
 use crate::fs::path::{resolve_path, split_last_path};
 use crate::fs::pipe::Pipe;
-use crate::fs::procfs::ProcFileSystem;
-use crate::fs::tmpfs::TmpFileSystem;
 use crate::mm::protect::{user_slice_r, user_slice_w, user_transmute_r, user_transmute_str, user_transmute_w};
 use crate::process::thread::event_bus::Event;
 use crate::process::{Gid, Uid};
@@ -179,7 +176,7 @@ pub async fn sys_umount2(target: usize, flags: u32) -> SyscallResult<usize> {
     if !target.metadata().ifmt.is_dir() {
         return Err(Errno::ENOTDIR);
     }
-    mnt_ns.unmount(target).await?;
+    mnt_ns.unmount(target)?;
     Ok(0)
 }
 
@@ -200,25 +197,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
     if !target.metadata().ifmt.is_dir() {
         return Err(Errno::ENOTDIR);
     }
-    match fstype {
-        "devtmpfs" => {
-            mnt_ns.mount(target, flags, |p| {
-                DevFileSystem::new(flags, Some(p))
-            }).await?;
-        }
-        "proc" => {
-            mnt_ns.mount(target, flags, |p| {
-                ProcFileSystem::new(flags, Some(p))
-            }).await?;
-        }
-        "tmpfs" => {
-            mnt_ns.mount(target, flags, |p| {
-                TmpFileSystem::new(source, flags, Some(p))
-            }).await?;
-        }
-        _ => return Err(Errno::ENODEV),
-    }
-
+    mnt_ns.mount(source, target, fstype, flags)?;
     Ok(0)
 }
 

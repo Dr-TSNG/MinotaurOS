@@ -4,10 +4,11 @@ use core::time::Duration;
 use log::{debug, warn};
 use macros::suspend;
 use crate::mm::protect::{user_transmute_r, user_transmute_w};
+use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::{CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID, ITimerType, ITimerVal, TIMER_ABSTIME, TimeSpec, TimeVal, TMS};
-use crate::sched::{sleep_for, spawn_kernel_thread};
+use crate::sched::{sleep_for, spawn_kernel_thread, suspend_now};
 use crate::sched::time::{cpu_time, GLOBAL_CLOCK, real_time};
 use crate::sched::timer::TimerFuture;
 use crate::signal::ffi::Signal;
@@ -122,22 +123,26 @@ pub fn sys_clock_getres(clock_id: usize, buf: usize) -> SyscallResult<usize> {
     }
 }
 
-#[suspend]
 pub async fn sys_clock_nanosleep(clock_id: usize, flags: i32, rqtp: usize, remain: usize) -> SyscallResult<usize> {
-    let rqtp = *user_transmute_r::<TimeSpec>(rqtp)?.ok_or(Errno::EINVAL)?;
-    let clock_time = GLOBAL_CLOCK.get(clock_id).ok_or(Errno::EINVAL)?;
+    let rqtp = *user_transmute_r::<TimeSpec>(rqtp)?.ok_or(Errno::EFAULT)?;
+    let clock_time = GLOBAL_CLOCK.get(clock_id).ok_or(Errno::EFAULT)?;
     let now = cpu_time();
     let sleep_time = if flags & TIMER_ABSTIME != 0 {
-        clock_time + Duration::from(rqtp)
+        Duration::from(rqtp).checked_sub(now + clock_time).unwrap_or_default()
     } else {
-        clock_time + now + Duration::from(rqtp)
+        Duration::from(rqtp)
     };
-    sleep_for(sleep_time).await?;
-    if remain != 0 {
-        let rest = sleep_time.checked_sub(cpu_time() - now).unwrap_or_default();
-        *user_transmute_w::<TimeSpec>(remain)?.ok_or(Errno::EINVAL)? = rest.into();
+    let ret = suspend_now(None, Event::all(), pin!(sleep_for(sleep_time))).await;
+    match ret {
+        Ok(()) => Ok(0),
+        Err(e) => {
+            if remain != 0 && flags & TIMER_ABSTIME == 0 {
+                let rest = sleep_time.checked_sub(cpu_time() - now).unwrap_or_default();
+                *user_transmute_w::<TimeSpec>(remain)?.ok_or(Errno::EFAULT)? = rest.into();
+            }
+            Err(e)
+        }
     }
-    Ok(0)
 }
 
 pub fn sys_times(buf: usize) -> SyscallResult<usize> {

@@ -55,6 +55,8 @@ pub struct InodeMetaInner {
     pub ctime: TimeSpec,
     /// 文件大小
     pub size: isize,
+    /// 是否已经被删除
+    pub unlinked: bool,
     /// 挂载点
     pub mounts: BTreeMap<String, Arc<dyn Inode>>,
 }
@@ -87,6 +89,7 @@ impl InodeMeta {
             mtime,
             ctime,
             size,
+            unlinked: false,
             mounts: BTreeMap::new(),
         };
         let key = KEY_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -265,6 +268,9 @@ impl dyn Inode {
     }
 
     pub async fn lookup_name(self: Arc<Self>, name: &str, token: AccessToken) -> SyscallResult<Arc<dyn Inode>> {
+        if self.metadata().inner.lock().unlinked {
+            return Err(Errno::ENOENT);
+        }
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
@@ -278,6 +284,9 @@ impl dyn Inode {
     }
 
     pub async fn lookup_idx(self: Arc<Self>, idx: usize, token: AccessToken) -> SyscallResult<Arc<dyn Inode>> {
+        if self.metadata().inner.lock().unlinked {
+            return Err(Errno::ENOENT);
+        }
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
@@ -289,6 +298,9 @@ impl dyn Inode {
     }
 
     pub async fn create(self: Arc<Self>, mode: InodeMode, name: &str, token: AccessToken) -> SyscallResult<Arc<dyn Inode>> {
+        if self.metadata().inner.lock().unlinked {
+            return Err(Errno::ENOENT);
+        }
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
@@ -297,6 +309,9 @@ impl dyn Inode {
     }
 
     pub async fn symlink(self: Arc<Self>, mode: InodeMode, name: &str, target: &str, token: AccessToken) -> SyscallResult {
+        if self.metadata().inner.lock().unlinked {
+            return Err(Errno::ENOENT);
+        }
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
@@ -305,6 +320,9 @@ impl dyn Inode {
     }
 
     pub async fn movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>, token: AccessToken) -> SyscallResult {
+        if self.metadata().inner.lock().unlinked {
+            return Err(Errno::ENOENT);
+        }
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
@@ -313,11 +331,15 @@ impl dyn Inode {
     }
 
     pub async fn unlink(self: Arc<Self>, name: &str, token: AccessToken) -> SyscallResult {
+        if self.metadata().inner.lock().unlinked {
+            return Err(Errno::ENOENT);
+        }
         if self.metadata().inner.lock().mounts.get(name).is_some() {
             return Err(Errno::EBUSY);
         }
         self.proc_access(token, AccessMode::W_OK)?;
         let inode = self.clone().lookup_name(name, token).await?;
+        inode.metadata().inner.lock().unlinked = true;
         if let Some(page_cache) = &inode.metadata().page_cache {
             page_cache.set_deleted();
         }

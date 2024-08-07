@@ -104,6 +104,7 @@ impl PhysAddr {
     pub fn floor(&self) -> PhysPageNum {
         PhysPageNum(self.0 / SV39_PAGE_SIZE)
     }
+    #[allow(unused)]
     pub fn ceil(&self) -> PhysPageNum {
         PhysPageNum(self.0.div_ceil(SV39_PAGE_SIZE))
     }
@@ -164,6 +165,7 @@ impl VirtPageNum {
         }
         idx
     }
+    #[allow(unused)]
     pub fn step_lv0(&self) -> VirtPageNum {
         VirtPageNum(self.0 + (1 << (SV39_VPN_BITS * 2)))
     }

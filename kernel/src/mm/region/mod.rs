@@ -51,7 +51,8 @@ impl dyn ASRegion {
     ///
     /// SAFETY: 需要手动调用 `map` 或 `unmap` 来更新页表
     pub fn set_perms(&mut self, perms: ASPerms) {
-        self.metadata_mut().perms = perms;
+        let s_perms = &mut self.metadata_mut().perms;
+        *s_perms = (*s_perms - ASPerms::RWX) | (perms & ASPerms::RWX);
     }
 }
 
@@ -67,6 +68,9 @@ pub struct ASRegionMeta {
     pub start: VirtPageNum,
     /// 映射的页数
     pub pages: usize,
+    pub offset: usize,
+    pub dev: u64,
+    pub ino: usize,
 }
 
 impl ASRegionMeta {

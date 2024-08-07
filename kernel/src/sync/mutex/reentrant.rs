@@ -16,7 +16,7 @@ pub struct ReMutex<T: ?Sized, S: MutexStrategy> {
 
 pub struct ReMutexGuard<'a, T: ?Sized, S: MutexStrategy> {
     mutex: &'a ReMutex<T, S>,
-    guard: S::GuardData,
+    _guard: S::GuardData,
 }
 
 unsafe impl<T: ?Sized + Send, S: MutexStrategy> Sync for ReMutex<T, S> {}
@@ -52,7 +52,7 @@ impl<T, S: MutexStrategy> ReMutex<T, S> {
         }
         Some(ReMutexGuard {
             mutex: self,
-            guard: S::new_guard(),
+            _guard: S::new_guard(),
         })
     }
 

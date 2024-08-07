@@ -15,8 +15,6 @@ pub struct FileRegion {
     metadata: ASRegionMeta,
     cache: Arc<PageCache>,
     pages: Vec<PageState>,
-    offset: usize,
-    is_shared: bool,
 }
 
 enum PageState {
@@ -70,12 +68,11 @@ impl ASRegion for FileRegion {
                     metadata: ASRegionMeta {
                         start: self.metadata.start + start,
                         pages: size,
+                        offset: self.metadata.offset + start * PAGE_SIZE,
                         ..self.metadata.clone()
                     },
                     cache: self.cache.clone(),
                     pages: off.drain(..size).collect(),
-                    offset: self.offset + start,
-                    is_shared: self.is_shared,
                 };
                 regions.push(Box::new(mid));
             }
@@ -84,12 +81,11 @@ impl ASRegion for FileRegion {
                     metadata: ASRegionMeta {
                         start: self.metadata.start + start + size,
                         pages: self.metadata.pages - start - size,
+                        offset: self.metadata.offset + (start + size) * PAGE_SIZE,
                         ..self.metadata.clone()
                     },
                     cache: self.cache.clone(),
                     pages: off,
-                    offset: self.offset + start + size,
-                    is_shared: self.is_shared,
                 };
                 regions.push(Box::new(right));
             }
@@ -100,12 +96,11 @@ impl ASRegion for FileRegion {
                 metadata: ASRegionMeta {
                     start: self.metadata.start + size,
                     pages: self.metadata.pages - size,
+                    offset: self.metadata.offset + size * PAGE_SIZE,
                     ..self.metadata.clone()
                 },
                 cache: self.cache.clone(),
                 pages: off,
-                offset: self.offset + size,
-                is_shared: self.is_shared,
             };
             regions.push(Box::new(right));
             self.metadata.pages = size;
@@ -148,8 +143,6 @@ impl ASRegion for FileRegion {
             metadata: self.metadata.clone(),
             cache: self.cache.clone(),
             pages: new_pages,
-            offset: self.offset,
-            is_shared: self.is_shared,
         };
         Box::new(new_region)
     }
@@ -165,11 +158,11 @@ impl ASRegion for FileRegion {
         match temp {
             PageState::Free => temp = PageState::Clean,
             PageState::Clean => {
-                if self.is_shared {
+                if self.metadata.perms.contains(ASPerms::S) {
                     temp = PageState::Dirty;
                 } else {
                     let frame = alloc_user_frames(1)?;
-                    let page = self.cache.ppn_of(page_num + self.offset).unwrap();
+                    let page = self.cache.ppn_of(page_num + self.metadata.offset / PAGE_SIZE).unwrap();
                     frame.ppn.byte_array().copy_from_slice(page.byte_array());
                     temp = PageState::Private(frame);
                 }
@@ -188,12 +181,12 @@ impl ASRegion for FileRegion {
 }
 
 impl FileRegion {
-    pub fn new(metadata: ASRegionMeta, cache: Arc<PageCache>, offset: usize, is_shared: bool) -> Box<Self> {
+    pub fn new(metadata: ASRegionMeta, cache: Arc<PageCache>) -> Box<Self> {
         let mut pages = vec![];
         for _ in 0..metadata.pages {
             pages.push(PageState::Free);
         }
-        let region = Self { metadata, cache, pages, offset, is_shared };
+        let region = Self { metadata, cache, pages };
         Box::new(region)
     }
 
@@ -214,8 +207,8 @@ impl FileRegion {
                 let (ppn, flags) = match &self.pages[page_num] {
                     PageState::Free => (PhysPageNum(0), PTEFlags::empty()),
                     PageState::Clean => {
-                        block_on(self.cache.load(page_num + self.offset)).unwrap();
-                        let page = self.cache.ppn_of(page_num + self.offset).unwrap();
+                        block_on(self.cache.load(page_num + self.metadata.offset / PAGE_SIZE)).unwrap();
+                        let page = self.cache.ppn_of(page_num + self.metadata.offset / PAGE_SIZE).unwrap();
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
                         if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
                         // No W
@@ -223,8 +216,8 @@ impl FileRegion {
                         (page, flags)
                     }
                     PageState::Dirty => {
-                        block_on(self.cache.load(page_num + self.offset)).unwrap();
-                        let page = self.cache.ppn_of(page_num + self.offset).unwrap();
+                        block_on(self.cache.load(page_num + self.metadata.offset / PAGE_SIZE)).unwrap();
+                        let page = self.cache.ppn_of(page_num + self.metadata.offset / PAGE_SIZE).unwrap();
                         let mut flags = PTEFlags::V | PTEFlags::A | PTEFlags::D | PTEFlags::U;
                         if self.metadata.perms.contains(ASPerms::R) { flags |= PTEFlags::R; }
                         if self.metadata.perms.contains(ASPerms::W) { flags |= PTEFlags::W; }
@@ -265,7 +258,7 @@ impl FileRegion {
     }
 
     fn unmap_one(&self, mut pt: PageTable, page_num: usize) {
-        block_on(self.cache.sync((page_num + self.offset) * PAGE_SIZE, PAGE_SIZE)).unwrap();
+        block_on(self.cache.sync(page_num * PAGE_SIZE + self.metadata.offset, PAGE_SIZE)).unwrap();
         let vpn = self.metadata.start + page_num;
         for (i, idx) in vpn.indexes().iter().enumerate() {
             let pte = pt.get_pte_mut(*idx);

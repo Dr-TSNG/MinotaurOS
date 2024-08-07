@@ -66,7 +66,7 @@ pub fn sys_rt_sigprocmask(how: i32, nset: usize, oset: usize) -> SyscallResult<u
     Ok(0)
 }
 
-pub fn sys_rt_sigtimedwait(uset: usize, uinfo: usize, uts: usize) -> SyscallResult<usize> {
+pub fn sys_rt_sigtimedwait(_uset: usize, _uinfo: usize, _uts: usize) -> SyscallResult<usize> {
     // TODO: implement sys_rt_sigtimedwait
     Ok(0)
 }

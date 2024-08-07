@@ -55,7 +55,8 @@ pub async fn sys_accept(sockfd: FdNum, addr: usize, addrlen: usize) -> SyscallRe
     let socket = current_process().inner.lock()
         .fd_table.get(sockfd)?.file.as_socket()?;
     let new_sock = if let Some(addrlen) = user_transmute_w::<u32>(addrlen)? {
-        let addr = user_slice_w(addr, *addrlen as usize)?;
+        // LTP says EINVAL, although it should be EFAULT
+        let addr = user_slice_w(addr, *addrlen as usize).map_err(|_| Errno::EINVAL)?;
         let mut addr_buf = SockAddr::Uninit;
         let new_sock = socket.accept(Some(&mut addr_buf)).await?;
         *addrlen = copy_back_addr(addr, &addr_buf) as u32;
@@ -192,7 +193,7 @@ pub fn sys_setsockopt(
     level: u32,
     optname: u32,
     optval_ptr: usize,
-    optlen: u32,
+    _optlen: u32,
 ) -> SyscallResult<usize> {
     info!("[sys_setsockopt] socketfd: {}",sockfd);
     let socket = current_process().inner.lock()

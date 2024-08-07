@@ -42,7 +42,8 @@ impl PageTable {
             PTEType::Page => SlotType::Page(pte.ppn()),
         }
     }
-    
+
+    #[allow(unused)]
     pub fn translate(&self, vaddr: VirtAddr) -> PhysAddr {
         let mut pt = *self;
         let vpn = VirtPageNum::from(vaddr.floor());

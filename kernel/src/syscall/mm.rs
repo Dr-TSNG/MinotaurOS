@@ -1,6 +1,7 @@
 use log::{debug, warn};
 use crate::arch::{PAGE_SIZE, VirtAddr};
 use crate::fs::fd::FdNum;
+use crate::mm::addr_space::ASPerms;
 use crate::mm::ffi::{IPC_PRIVATE, MapFlags, MapProt};
 use crate::processor::current_process;
 use crate::result::{Errno, SyscallResult};
@@ -57,9 +58,6 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
     }
     let prot = MapProt::from_bits_truncate(prot);
     let flags = MapFlags::from_bits_truncate(flags);
-    if flags.contains(MapFlags::MAP_PRIVATE) && flags.contains(MapFlags::MAP_SHARED) {
-        return Err(Errno::EINVAL);
-    }
     let start = match addr {
         0 => None,
         _ => flags.contains(MapFlags::MAP_FIXED).then_some(VirtAddr(addr).into()),
@@ -68,7 +66,12 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
         "[mmap] start: {:?}, len: {:#x}, prot: {:?}, flags: {:?}, fd: {:?}, offset: {}",
         start, len, prot, flags, fd, offset,
     );
-    let is_shared = flags.contains(MapFlags::MAP_SHARED);
+    let mut perms = ASPerms::from(prot);
+    if flags.contains(MapFlags::MAP_SHARED) {
+        perms |= ASPerms::S;
+    } else if !flags.contains(MapFlags::MAP_PRIVATE) {
+        return Err(Errno::EINVAL);
+    }
     let proc_inner = current_process().inner.lock();
     if !flags.contains(MapFlags::MAP_ANONYMOUS) && fd != -1 {
         let fd_impl = proc_inner.fd_table.get(fd)?;
@@ -76,10 +79,10 @@ pub fn sys_mmap(addr: usize, len: usize, prot: u32, flags: u32, fd: FdNum, offse
         inode.metadata().page_cache.as_ref().ok_or(Errno::ENODEV)?;
         let name = inode.mnt_ns_path(&proc_inner.mnt_ns)?;
         proc_inner.addr_space.lock()
-            .mmap(Some(name), start, len.div_ceil(PAGE_SIZE), prot.into(), Some(inode), offset / PAGE_SIZE, is_shared)
+            .mmap(Some(name), start, len.div_ceil(PAGE_SIZE), perms, Some(inode), offset)
     } else {
         proc_inner.addr_space.lock()
-            .mmap(None, start, len.div_ceil(PAGE_SIZE), prot.into(), None, 0, is_shared)
+            .mmap(None, start, len.div_ceil(PAGE_SIZE), perms, None, 0)
     }
 }
 
