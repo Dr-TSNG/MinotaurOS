@@ -433,7 +433,20 @@ impl Process {
 
 impl Process{
     pub fn print_stat(&self) -> String{
-        "Ok".to_string()
+        use alloc::format;
+        let pid = self.pid.0.clone();
+        let stat = "R".to_string();
+        let inner = self.inner.lock();
+        let exe_name = inner.exe.clone();
+        let o_ppid = inner.parent.upgrade();
+        let ppid;
+        if o_ppid.is_none(){
+            ppid = 0;
+        }else{
+            ppid = o_ppid.unwrap().pid.0.clone();
+        }
+        let pgrp = inner.pgid.0.clone();
+        format!("{} ({}) {} {} {}",pid,exe_name,stat,ppid,pgrp)
     }
 }
 
