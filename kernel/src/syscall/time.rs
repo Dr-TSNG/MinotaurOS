@@ -7,6 +7,7 @@ use crate::mm::protect::{user_transmute_r, user_transmute_w};
 use crate::process::thread::event_bus::Event;
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
+use crate::result::Errno::{EFAULT, EINVAL};
 use crate::sched::ffi::{CLOCK_PROCESS_CPUTIME_ID, CLOCK_THREAD_CPUTIME_ID, ITimerType, ITimerVal, TIMER_ABSTIME, TimeSpec, TimeVal, TMS};
 use crate::sched::{sleep_for, spawn_kernel_thread, suspend_now};
 use crate::sched::time::{cpu_time, GLOBAL_CLOCK, real_time};
@@ -160,6 +161,9 @@ pub fn sys_times(buf: usize) -> SyscallResult<usize> {
 }
 
 pub fn sys_gettimeofday(tv: usize, _tz: usize) -> SyscallResult<usize> {
+    if _tz == -1i32 as usize{
+        return Err(EFAULT);
+    }
     *user_transmute_w::<TimeVal>(tv)?.ok_or(Errno::EINVAL)? = real_time().into();
     Ok(0)
 }
