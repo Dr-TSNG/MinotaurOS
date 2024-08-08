@@ -3,7 +3,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ffi::c_char;
-use core::mem::size_of;
+use core::mem::{size_of, swap};
 use async_trait::async_trait;
 
 use bitflags::bitflags;
@@ -119,3 +119,51 @@ pub fn sys_inotify_init1(flags: u32) -> SyscallResult<usize>{
     Ok(0)
 }
 
+#[repr(i32)]
+enum SchedPolicy{
+    SchedFifo =  1,
+    SchedRr =  2,
+    SchedOther =  0,
+    SchedBatch =  3,
+    SchedIdle = 5,
+    SchedDeadline =  6,
+    InVaild = -1,
+}
+
+impl From<i32> for SchedPolicy{
+    fn from(value: i32) -> Self {
+        match value {
+            1 => SchedPolicy::SchedFifo,
+            2 => SchedPolicy::SchedRr,
+            0 => SchedPolicy::SchedOther,
+            3 => SchedPolicy::SchedBatch,
+            5 => SchedPolicy::SchedIdle,
+            6 => SchedPolicy::SchedDeadline,
+            _ => SchedPolicy::InVaild,
+        }
+    }
+}
+
+pub fn sys_sched_get_priority_max(policy: i32)-> SyscallResult<usize>{
+    match policy.into() {
+        SchedPolicy::SchedFifo => Ok(99),
+        SchedPolicy::SchedRr => Ok(99),
+        SchedPolicy::SchedOther => Ok(0),
+        SchedPolicy::SchedBatch => Ok(0),
+        SchedPolicy::SchedIdle => Ok(0),
+        SchedPolicy::SchedDeadline => Ok(0),
+        SchedPolicy::InVaild => Err(EINVAL),
+    }
+}
+
+pub fn sys_sched_get_priority_min(policy: i32)-> SyscallResult<usize>{
+    match policy.into() {
+        SchedPolicy::SchedFifo => Ok(1),
+        SchedPolicy::SchedRr => Ok(1),
+        SchedPolicy::SchedOther => Ok(0),
+        SchedPolicy::SchedBatch => Ok(0),
+        SchedPolicy::SchedIdle => Ok(0),
+        SchedPolicy::SchedDeadline => Ok(0),
+        SchedPolicy::InVaild => Err(EINVAL),
+    }
+}
