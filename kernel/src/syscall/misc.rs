@@ -1,12 +1,14 @@
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ffi::c_char;
 use core::mem::size_of;
+use async_trait::async_trait;
 
 use bitflags::bitflags;
 use rand::Rng;
-use zerocopy::{AsBytes, FromBytes};
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
 use crate::driver::random::KRNG;
 use crate::fs::ffi::OpenFlags;
@@ -50,7 +52,7 @@ pub const EVENT_BUF_LEN: usize = 1024 * (EVENT_SIZE + 16);
 // 移动事件: 当一个文件或目录被移动时，会生成一对事件：IN_MOVED_FROM 和 IN_MOVED_TO。
 // 事件 cookie 可以将这两个事件联系起来，表明它们是同一次移动操作的两部分。
 #[repr(C)]
-#[derive(Copy, Clone, AsBytes, FromBytes)]
+#[derive(Copy, Clone, AsBytes, FromBytes,FromZeroes)]
 pub struct InotifyEvent {
     pub wd: i32,        // 监视描述符
     pub mask: u32,      // 事件掩码
@@ -66,6 +68,7 @@ pub struct InotifyFile{
     events: Arc<Mutex<Vec<InotifyEvent>>>,
 }
 
+#[async_trait]
 impl File for InotifyFile{
     fn metadata(&self) -> &FileMeta {
         &self.metadata
