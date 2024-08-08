@@ -91,7 +91,7 @@ pub struct AddressSpace {
     /// System V 共享内存
     sysv_shm: Arc<Mutex<SysVShm>>,
     /// 堆范围
-    heap: Range<VirtPageNum>,
+    heap: Range<VirtAddr>,
     /// 堆最大位置
     heap_max: VirtPageNum,
 }
@@ -106,7 +106,7 @@ impl AddressSpace {
             regions: BTreeMap::new(),
             pt_dirs: vec![],
             sysv_shm: Default::default(),
-            heap: VirtPageNum(0)..VirtPageNum(0),
+            heap: VirtAddr(0)..VirtAddr(0),
             heap_max: VirtPageNum(0),
         };
         addr_space.pt_dirs.push(root_pt_page);
@@ -237,7 +237,7 @@ impl AddressSpace {
             ino: 0,
         });
         addr_space.map_region(region);
-        addr_space.heap = max_end_vpn..max_end_vpn;
+        addr_space.heap = max_end_vpn.into()..max_end_vpn.into();
         addr_space.heap_max = max_end_vpn + USER_HEAP_SIZE_MAX / PAGE_SIZE;
         debug!("[addr_space] Map user heap: {:?} - {:?}", max_end_vpn, max_end_vpn);
 
@@ -307,25 +307,25 @@ impl AddressSpace {
         }
     }
 
-    pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult<VirtPageNum> {
+    pub fn set_brk(&mut self, addr: VirtAddr) -> SyscallResult<usize> {
         let heap_end = self.heap.end;
-        if addr.floor() < self.heap.start {
-            return Ok(heap_end);
+        if addr < self.heap.start {
+            return Ok(heap_end.0);
         }
-        if addr.floor() >= self.heap_max {
+        if addr >= self.heap_max.into() {
             return Err(Errno::ENOMEM);
         }
-        let brk = self.regions.get_mut(&self.heap.start).unwrap();
-        if addr.ceil() < heap_end {
-            brk.split(0, heap_end - addr.ceil());
+        let brk = self.regions.get_mut(&self.heap.start.into()).unwrap();
+        if addr < heap_end {
+            brk.split(0, heap_end.ceil() - addr.ceil());
             // 只有减少堆大小时才需要即时更新页表，增加堆大小时会在下次访问时更新
             self.pt_dirs.extend(brk.map(self.root_pt, true));
             unsafe { local_hart().refresh_tlb(self.token); }
-        } else if addr.ceil() > heap_end {
-            brk.extend(addr.ceil() - heap_end);
+        } else if addr > heap_end {
+            brk.extend(addr.ceil() - heap_end.ceil());
         }
-        self.heap.end = addr.ceil();
-        Ok(self.heap.end)
+        self.heap.end = addr;
+        Ok(addr.0)
     }
 
     pub fn mmap(
