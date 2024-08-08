@@ -166,7 +166,7 @@ pub const SIG_UNBLOCK: u32 = 1;
 pub const SIG_SETMASK: u32 = 2;
 
 bitflags! {
-    #[derive(Default)]
+    #[derive(Copy, Clone, Default)]
     pub struct SigSet: u64 {
         const SIGHUP    = 1 << (1 - 1);
         const SIGINT    = 1 << (2 - 1);
@@ -309,7 +309,7 @@ pub fn sys_access(path: &str, mode: u32) -> isize {
 
 pub fn sys_open(path: &str, flags: OpenFlags) -> i32 {
     let path = CString::new(path).unwrap();
-    syscall!(Openat, AT_FDCWD as usize, path.as_ptr() as usize, flags.bits, 0) as i32
+    syscall!(Openat, AT_FDCWD as usize, path.as_ptr() as usize, flags.bits(), 0) as i32
 }
 
 pub fn sys_close(fd: i32) -> isize {
@@ -389,5 +389,5 @@ pub fn mount(source: &str, target: &str, fstype: &str, flags: VfsFlags, data: Op
     let fstype = CString::new(fstype).unwrap();
     let data = data.map(|s| CString::new(s).unwrap());
     let data = data.as_ref().map(|s| s.as_ptr()).unwrap_or(null());
-    syscall!(Mount, source.as_ptr(), target.as_ptr(), fstype.as_ptr(), flags.bits, data)
+    syscall!(Mount, source.as_ptr(), target.as_ptr(), fstype.as_ptr(), flags.bits(), data)
 }
