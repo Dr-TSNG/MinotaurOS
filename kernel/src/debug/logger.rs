@@ -98,7 +98,7 @@ pub const STRACE_COLOR_CODE: u8 = 35; // Purple
 #[macro_export]
 #[cfg(feature = "strace")]
 macro_rules! strace {
-    ($fmt: literal $(, $($arg: tt)+)?) => {
+    ($fmt: literal $(, $($arg: tt)+)?) => {{
         use crate::{
             with_color,
             processor::{current_process, current_thread},
@@ -114,7 +114,7 @@ macro_rules! strace {
             current_thread().tid.0
             $(, $($arg)+)?,
         );
-    }
+    }}
 }
 
 #[macro_export]

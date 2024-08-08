@@ -20,7 +20,7 @@ use crate::config::USER_STACK_TOP;
 use crate::fs::fd::FdTable;
 use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::MountNamespace;
-use crate::fs::inode::Inode;
+use crate::fs::inode::{FCap, Inode};
 use crate::mm::addr_space::AddressSpace;
 use crate::mm::protect::{user_slice_r, user_transmute_w};
 use crate::process::aux::Aux;
@@ -233,6 +233,7 @@ impl Process {
         thread.signals.reset();
         thread.inner().tap_mut(|it| {
             it.trap_ctx = TrapContext::new(entry, user_sp);
+            it.token_set.caps.execve(false, &FCap::default());
             it.tid_address = Default::default();
             it.rusage = ResourceUsage::new();
             if let Some(parent) = it.vfork_from.take() {

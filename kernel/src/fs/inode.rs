@@ -12,6 +12,7 @@ use crate::fs::file_system::{FileSystem, MountNamespace};
 use crate::fs::page_cache::PageCache;
 use crate::process::token::AccessToken;
 use crate::process::{Gid, Uid};
+use crate::process::ffi::CapSet;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
@@ -59,6 +60,13 @@ pub struct InodeMetaInner {
     pub unlinked: bool,
     /// 挂载点
     pub mounts: BTreeMap<String, Arc<dyn Inode>>,
+}
+
+#[derive(Default)]
+pub struct FCap {
+    pub permitted: CapSet,
+    pub inheritable: CapSet,
+    pub effective: CapSet,
 }
 
 impl InodeMeta {
