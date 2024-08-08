@@ -52,10 +52,12 @@ impl Signal {
     }
 }
 
+#[repr(transparent)]
+#[derive(Copy, Clone, Default, Debug, AsBytes, FromZeroes, FromBytes)]
+pub struct SigSet(u64);
+
 bitflags! {
-    #[repr(transparent)]
-    #[derive(Default, AsBytes, FromBytes, FromZeroes)]
-    pub struct SigSet: u64 {
+    impl SigSet: u64 {
         const SIGHUP    = Signal::SIGHUP.sigset_val();
         const SIGINT    = Signal::SIGINT.sigset_val();
         const SIGQUIT   = Signal::SIGQUIT.sigset_val();
@@ -94,7 +96,7 @@ bitflags! {
 
 impl From<Signal> for SigSet {
     fn from(value: Signal) -> Self {
-        unsafe { Self::from_bits_unchecked(value.sigset_val()) }
+        Self::from_bits_retain(value.sigset_val())
     }
 }
 
@@ -116,10 +118,12 @@ pub struct SigAction {
     pub sa_mask: SigSet,
 }
 
+#[repr(transparent)]
+#[derive(Copy, Clone, Default, AsBytes, FromZeroes, FromBytes)]
+pub struct SigActionFlags(u32);
+
 bitflags! {
-    #[repr(transparent)]
-    #[derive(Default, AsBytes, FromZeroes, FromBytes)]
-    pub struct SigActionFlags: u32 {
+    impl SigActionFlags: u32 {
         const SA_NOCLDSTOP = 1;
         const SA_NOCLDWAIT = 2;
         const SA_SIGINFO   = 4;
@@ -161,5 +165,5 @@ impl UContext {
             uc_mcontext: trap_ctx.user_x,
             uc_fcontext: trap_ctx.fctx.user_f,
         }
-    }    
+    }
 }

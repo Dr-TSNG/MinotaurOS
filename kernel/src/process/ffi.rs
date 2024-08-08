@@ -4,6 +4,7 @@ use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use crate::sched::ffi::TimeVal;
 
 bitflags! {
+    #[derive(Copy, Clone, Debug)]
     pub struct CloneFlags: u32 {
         const SIGCHLD = 17;
         const CLONE_VM = 1 << 8;
@@ -34,6 +35,7 @@ bitflags! {
 }
 
 bitflags! {
+    #[derive(Debug)]
     pub struct WaitOptions: u32 {
         const WNOHANG = 1;
         const WUNTRACED = 1 << 1;

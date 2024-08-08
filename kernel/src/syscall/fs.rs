@@ -187,7 +187,7 @@ pub async fn sys_mount(source: usize, target: usize, fstype: usize, flags: u32, 
     let flags = VfsFlags::from_bits_truncate(flags);
     let data = user_transmute_str(data, PATH_MAX)?;
     info!(
-        "[mount] source: {:?}, target: {}, fstype: {}, flags: {:?}, data: {:?}",
+        "[mount] source: {:?}, target: {}, fstype: {}, flags: {}, data: {:?}",
         source, target, fstype, flags, data,
     );
 

@@ -46,7 +46,7 @@ fn trap_from_kernel() -> bool {
 }
 
 fn handle_page_fault(addr: VirtAddr, perform: ASPerms) -> SyscallResult {
-    debug!("Kernel page fault at {:?} for {:?}", addr, perform);
+    debug!("Kernel page fault at {:?} for {}", addr, perform);
     let thread = local_hart()
         .current_thread()
         .expect("Page fault while running kernel thread");

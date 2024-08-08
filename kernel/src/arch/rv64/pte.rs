@@ -2,6 +2,7 @@ use bitflags::*;
 use super::address::PhysPageNum;
 
 bitflags! {
+    #[derive(Eq, PartialEq)]
     pub struct PTEFlags: u8 {
         const V = 1 << 0;
         const R = 1 << 1;

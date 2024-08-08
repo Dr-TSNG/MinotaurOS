@@ -3,13 +3,13 @@ use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use core::sync::atomic::Ordering;
 use async_trait::async_trait;
+use macros::InodeFactory;
 use crate::fs::ffi::InodeMode;
-use crate::fs::file_system::FileSystem;
 use crate::fs::procfs::ProcFileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::result::SyscallResult;
-use crate::sched::ffi::TimeSpec;
 
+#[derive(InodeFactory)]
 pub struct MeminfoInode {
     metadata: InodeMeta,
     fs: Weak<ProcFileSystem>,
@@ -18,20 +18,13 @@ pub struct MeminfoInode {
 impl MeminfoInode {
     pub fn new(fs: Arc<ProcFileSystem>, parent: Arc<dyn Inode>) -> Arc<Self> {
         Arc::new(Self {
-            metadata: InodeMeta::new(
+            metadata: InodeMeta::new_simple(
                 fs.ino_pool.fetch_add(1, Ordering::Relaxed),
                 0,
                 0,
-                0,
-                InodeMode::S_IFREG | InodeMode::from_bits_truncate(0o444),
+                InodeMode::S_IFREG | InodeMode::from_bits_retain(0o444),
                 "meminfo".to_string(),
-                "meminfo".to_string(),
-                Some(parent),
-                None,
-                TimeSpec::default(),
-                TimeSpec::default(),
-                TimeSpec::default(),
-                0,
+                parent,
             ),
             fs: Arc::downgrade(&fs),
         })
@@ -46,8 +39,7 @@ impl InodeInternal for MeminfoInode {
         let len = buf_str.len();
         if offset == len as isize {
             Ok(0)
-        }
-        else {
+        } else {
             buf[..len].copy_from_slice(buf_str.as_bytes());
             Ok(len as isize)
         }
@@ -55,16 +47,6 @@ impl InodeInternal for MeminfoInode {
 
     async fn write_direct(&self, _: &[u8], _: isize) -> SyscallResult<isize> {
         Ok(0)
-    }
-}
-
-impl Inode for MeminfoInode {
-    fn metadata(&self) -> &InodeMeta {
-        &self.metadata
-    }
-
-    fn file_system(&self) -> Weak<dyn FileSystem> {
-        self.fs.clone()
     }
 }
 

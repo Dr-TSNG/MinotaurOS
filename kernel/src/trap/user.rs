@@ -148,7 +148,7 @@ pub fn check_signal() {
 }
 
 fn handle_page_fault(addr: VirtAddr, perform: ASPerms) {
-    debug!("User page fault at {:?} for {:?}", addr, perform);
+    debug!("User page fault at {:?} for {}", addr, perform);
     let res = current_process().inner.lock()
         .addr_space.lock()
         .handle_page_fault(addr, perform);

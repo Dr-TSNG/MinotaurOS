@@ -1,19 +1,18 @@
 use alloc::boxed::Box;
-use alloc::format;
 use alloc::string::ToString;
 use alloc::sync::{Arc, Weak};
 use core::cmp::min;
 use core::sync::atomic::Ordering;
 use async_trait::async_trait;
+use macros::InodeFactory;
 use crate::fs::ffi::InodeMode;
-use crate::fs::file_system::FileSystem;
-use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
+use crate::fs::inode::{InodeInternal, InodeMeta};
 use crate::fs::procfs::process::ProcessDirInode;
 use crate::fs::procfs::ProcFileSystem;
 use crate::process::Process;
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::TimeSpec;
 
+#[derive(InodeFactory)]
 pub struct MapsInode {
     metadata: InodeMeta,
     fs: Weak<ProcFileSystem>,
@@ -23,20 +22,13 @@ pub struct MapsInode {
 impl MapsInode {
     pub fn new(fs: Arc<ProcFileSystem>, parent: Arc<ProcessDirInode>) -> Arc<Self> {
         Arc::new(Self {
-            metadata: InodeMeta::new(
+            metadata: InodeMeta::new_simple(
                 fs.ino_pool.fetch_add(1, Ordering::Relaxed),
                 0,
                 0,
-                0,
-                InodeMode::S_IFREG | InodeMode::from_bits_truncate(0o444),
+                InodeMode::S_IFREG | InodeMode::from_bits_retain(0o444),
                 "maps".to_string(),
-                format!("{}/maps", parent.metadata.name),
-                Some(parent.clone()),
-                None,
-                TimeSpec::default(),
-                TimeSpec::default(),
-                TimeSpec::default(),
-                0,
+                parent.clone(),
             ),
             fs: Arc::downgrade(&fs),
             process: parent.process.clone(),
@@ -68,15 +60,5 @@ impl InodeInternal for MapsInode {
             }
         }
         Ok(pos as isize)
-    }
-}
-
-impl Inode for MapsInode {
-    fn metadata(&self) -> &InodeMeta {
-        &self.metadata
-    }
-
-    fn file_system(&self) -> Weak<dyn FileSystem> {
-        self.fs.clone()
     }
 }

@@ -10,27 +10,25 @@ use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::mm::protect::user_transmute_w;
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::TimeSpec;
 
-pub struct RtcInode(InodeMeta, Weak<DevFileSystem>);
+pub struct RtcInode {
+    metadata: InodeMeta,
+    fs: Weak<DevFileSystem>,
+}
 
 impl RtcInode {
     pub fn new(fs: Arc<DevFileSystem>, parent: Arc<dyn Inode>) -> Arc<Self> {
-        Arc::new(Self(InodeMeta::new(
-            fs.ino_pool.fetch_add(1, Ordering::Relaxed),
-            0,
-            0,
-            0,
-            InodeMode::S_IFCHR | InodeMode::S_IRUSR | InodeMode::S_IWUSR,
-            "rtc".to_string(),
-            "rtc".to_string(),
-            Some(parent),
-            None,
-            TimeSpec::default(),
-            TimeSpec::default(),
-            TimeSpec::default(),
-            512,
-        ), Arc::downgrade(&fs)))
+        Arc::new(Self {
+            metadata: InodeMeta::new_simple(
+                fs.ino_pool.fetch_add(1, Ordering::Relaxed),
+                0,
+                0,
+                InodeMode::S_IFCHR | InodeMode::S_IRUSR | InodeMode::S_IWUSR,
+                "rtc".to_string(),
+                parent,
+            ),
+            fs: Arc::downgrade(&fs),
+        })
     }
 }
 
@@ -48,11 +46,11 @@ impl InodeInternal for RtcInode {
 
 impl Inode for RtcInode {
     fn metadata(&self) -> &InodeMeta {
-        &self.0
+        &self.metadata
     }
 
     fn file_system(&self) -> Weak<dyn FileSystem> {
-        self.1.clone()
+        self.fs.clone()
     }
 
     fn ioctl(&self, _: usize, value: usize, _: usize, _: usize, _: usize) -> SyscallResult<i32> {

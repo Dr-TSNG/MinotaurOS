@@ -50,7 +50,7 @@ impl FileSystem for DevFileSystem {
     }
 
     fn flags(&self) -> VfsFlags {
-        self.flags
+        self.flags.clone()
     }
 
     fn root(&self) -> Arc<dyn Inode> {
@@ -72,7 +72,7 @@ impl RootInode {
                 0,
                 0,
                 0,
-                InodeMode::S_IFDIR | InodeMode::from_bits_truncate(0o755),
+                InodeMode::S_IFDIR | InodeMode::from_bits_retain(0o755),
                 String::new(),
                 String::new(),
                 parent,
