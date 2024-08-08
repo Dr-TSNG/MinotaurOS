@@ -10,7 +10,7 @@ fn run_cmd(cmd: &str) {
         sys_execve(
             "/busybox",
             &["busybox", "sh", "-c", cmd],
-            &["PATH=/:/bin:/lib", "LD_LIBRARY_PATH=/:/lib:/lib/glibc:/lib/musl"],
+            &["PATH=/:/bin:/lib:/ltp/testcases/bin", "LD_LIBRARY_PATH=/:/lib:/lib/glibc:/lib/musl"],
         );
     } else {
         let mut result: i32 = 0;
