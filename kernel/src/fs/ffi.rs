@@ -303,10 +303,10 @@ impl From<InodeMode> for DirentType {
 }
 
 const SYSNAME: &str = "Linux";
-const NODENAME: &str = "Linux";
+const NODENAME: &str = "Minotaur";
 const RELEASE: &str = "5.19.0-42-generic";
 const VERSION: &str = "#43~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Apr 21 16:51:08 UTC 2";
-const MACHINE: &str = "RISC-V SiFive Freedom U740 SoC";
+const MACHINE: &str = "riscv64";
 const DOMAINNAME: &str = "";
 
 #[derive(AsBytes, FromZeroes)]

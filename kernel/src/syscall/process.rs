@@ -9,7 +9,7 @@ use crate::config::USER_STACK_SIZE;
 use crate::fs::ffi::{AccessMode, AT_FDCWD, InodeMode, PATH_MAX};
 use crate::fs::path::resolve_path;
 use crate::mm::protect::{user_transmute_r, user_transmute_str, user_transmute_w};
-use crate::process::ffi::{CloneFlags, CpuSet, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
+use crate::process::ffi::{CapSet, CapUserData, CapUserHeader, CloneFlags, CpuSet, LINUX_CAPABILITY_VERSION_1, LINUX_CAPABILITY_VERSION_2, LINUX_CAPABILITY_VERSION_3, mk_cap_user_data, mk_kernel_cap, PrctlOption, Rlimit, RlimitCmd, RUsage, RUSAGE_SELF, RUSAGE_THREAD, WaitOptions};
 use crate::process::{Pid, Uid};
 use crate::process::monitor::MONITORS;
 use crate::process::thread::event_bus::{Event, WaitPidFuture};
@@ -37,6 +37,70 @@ pub async fn sys_acct(filename: usize) -> SyscallResult<usize> {
         }
         None => (),
     }
+    Ok(0)
+}
+
+pub fn sys_capget(hdrp: usize, datap: usize) -> SyscallResult<usize> {
+    let header = user_transmute_r::<CapUserHeader>(hdrp)?.ok_or(Errno::EFAULT)?;
+    if !matches!(header.version, LINUX_CAPABILITY_VERSION_1 | LINUX_CAPABILITY_VERSION_2 | LINUX_CAPABILITY_VERSION_3) {
+        let header = user_transmute_w::<CapUserHeader>(hdrp)?.ok_or(Errno::EFAULT)?;
+        header.version = LINUX_CAPABILITY_VERSION_3;
+        return Err(Errno::EINVAL);
+    }
+    let thread = match header.pid {
+        ..=-1 => return Err(Errno::EINVAL),
+        0 => current_thread().clone(),
+        _ => MONITORS.lock().thread.get(header.pid).upgrade().ok_or(Errno::ESRCH)?,
+    };
+    let data = user_transmute_w::<[CapUserData; 2]>(datap)?.ok_or(Errno::EFAULT)?;
+    let (low, high) = data.split_at_mut(1);
+    let caps = &mut thread.inner().token_set.caps;
+    mk_cap_user_data(caps.effective, &mut low[0].effective, &mut high[0].effective);
+    mk_cap_user_data(caps.permitted, &mut low[0].permitted, &mut high[0].permitted);
+    mk_cap_user_data(caps.inheritable, &mut low[0].inheritable, &mut high[0].inheritable);
+    Ok(0)
+}
+
+pub fn sys_capset(hdrp: usize, datap: usize) -> SyscallResult<usize> {
+    let header = user_transmute_r::<CapUserHeader>(hdrp)?.ok_or(Errno::EFAULT)?;
+    if !matches!(header.version, LINUX_CAPABILITY_VERSION_1 | LINUX_CAPABILITY_VERSION_2 | LINUX_CAPABILITY_VERSION_3) {
+        let header = user_transmute_w::<CapUserHeader>(hdrp)?.ok_or(Errno::EFAULT)?;
+        header.version = LINUX_CAPABILITY_VERSION_3;
+        return Err(Errno::EINVAL);
+    }
+    let thread = current_thread();
+    if header.pid != 0 && header.pid != current_thread().tid.0 {
+        return Err(Errno::EPERM);
+    }
+    let data = user_transmute_r::<[CapUserData; 2]>(datap)?.ok_or(Errno::EFAULT)?;
+    let caps = &mut thread.inner().token_set.caps;
+    let effective = mk_kernel_cap(data[0].effective, data[1].effective);
+    let permitted = mk_kernel_cap(data[0].permitted, data[1].permitted);
+    let inheritable = mk_kernel_cap(data[0].inheritable, data[1].inheritable);
+
+    // Attempt to add a capability to the permitted set
+    if permitted - caps.permitted != CapSet::empty() {
+        return Err(Errno::EPERM);
+    }
+    // Attempt to set a capability in the effective set that is not in the permitted set
+    if effective - permitted != CapSet::empty() {
+        return Err(Errno::EPERM);
+    }
+
+    if inheritable - caps.bounding != CapSet::empty() {
+        return Err(Errno::EPERM);
+    }
+    if inheritable - permitted != CapSet::empty() && !caps.effective.contains(CapSet::CAP_SETPCAP) {
+        return Err(Errno::EPERM);
+    }
+
+    if thread.tid.0 != current_thread().tid.0 && !caps.effective.contains(CapSet::CAP_SETPCAP) {
+        return Err(Errno::EPERM);
+    }
+
+    caps.effective = effective;
+    caps.permitted = permitted;
+    caps.inheritable = inheritable;
     Ok(0)
 }
 
@@ -307,6 +371,26 @@ pub fn sys_umask(mask: u32) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
     proc_inner.umask = InodeMode::from_bits_access(mask).ok_or(Errno::EINVAL)?;
     Ok(0)
+}
+
+pub fn sys_prctl(option: i32, arg1: usize, _arg2: usize, _arg3: usize, _arg4: usize) -> SyscallResult<usize> {
+    let option = PrctlOption::try_from(option).map_err(|_| Errno::EINVAL)?;
+    match option {
+        PrctlOption::PR_CAPBSET_READ => {
+            let cap = CapSet::from_id(arg1).ok_or(Errno::EINVAL)?;
+            let caps = &current_thread().inner().token_set.caps;
+            Ok(caps.bounding.contains(cap) as usize)
+        }
+        PrctlOption::PR_CAPBSET_DROP => {
+            let cap = CapSet::from_id(arg1).ok_or(Errno::EINVAL)?;
+            let caps = &mut current_thread().inner().token_set.caps;
+            if !caps.effective.contains(CapSet::CAP_SETPCAP) {
+                return Err(Errno::EPERM);
+            }
+            caps.bounding.remove(cap);
+            Ok(0)
+        }
+    }
 }
 
 pub fn sys_getpid() -> SyscallResult<usize> {

@@ -1,9 +1,11 @@
 use alloc::sync::Arc;
 use core::cell::SyncUnsafeCell;
 use log::{debug, info, warn};
+use smart_default::SmartDefault;
 use crate::arch::VirtAddr;
+use crate::fs::inode::FCap;
 use crate::mm::protect::user_transmute_w;
-use crate::process::ffi::CpuSet;
+use crate::process::ffi::{CapSet, CpuSet};
 use crate::process::{Gid, Process, Uid};
 use crate::process::thread::event_bus::{Event, EventBus};
 use crate::process::thread::resource::ResourceUsage;
@@ -47,6 +49,33 @@ pub struct TokenSet {
     pub rgid: Gid,
     pub egid: Gid,
     pub sgid: Gid,
+    pub caps: PCap,
+}
+
+#[derive(Clone, SmartDefault)]
+pub struct PCap {
+    #[default(CapSet::all())]
+    pub permitted: CapSet,
+    #[default(CapSet::all())]
+    pub inheritable: CapSet,
+    #[default(CapSet::all())]
+    pub effective: CapSet,
+    #[default(CapSet::all())]
+    pub bounding: CapSet,
+    #[default(CapSet::all())]
+    pub ambient: CapSet,
+}
+
+impl PCap {
+    pub fn execve(&mut self, f_pri: bool, fcap: &FCap) {
+        *self = Self {
+            ambient: if f_pri { CapSet::empty() } else { self.ambient },
+            permitted: (self.inheritable & fcap.inheritable) | (fcap.permitted & self.bounding) | self.ambient,
+            effective: (self.permitted & fcap.effective) | (self.ambient & !fcap.effective),
+            inheritable: self.inheritable,
+            bounding: self.bounding,
+        };
+    }
 }
 
 #[derive(Default)]

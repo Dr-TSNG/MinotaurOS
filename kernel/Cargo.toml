@@ -37,6 +37,7 @@ num_enum = { version = "0.7.2", default-features = false }
 pin-project = "1.1.5"
 rand = { version = "0.8.5", features = ["alloc", "small_rng"], default-features = false }
 sbi-spec = "0.0.7"
+smart-default = "0.7.1"
 spin = "0.9"
 tap = "1.0"
 time = { version = "0.3", default-features = false }
