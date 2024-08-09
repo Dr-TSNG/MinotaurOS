@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use core::cmp::min;
 use core::mem::size_of;
 use core::time::Duration;
+use futures::future::ok;
 use log::{debug, info, warn};
 use tap::Tap;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
@@ -68,7 +69,7 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
 
 pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
     let cmd = FcntlCmd::try_from(cmd).map_err(|_| Errno::EINVAL)?;
-    debug!("[fcntl] fd: {}, cmd: {:?}, arg2: {}", fd, cmd, arg2);
+    warn!("[fcntl] fd: {}, cmd: {:?}, arg2: {}", fd, cmd, arg2);
     let proc_inner = &mut *current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get_mut(fd)?;
     match cmd {
@@ -98,6 +99,12 @@ pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
             *old_flags = (*old_flags - OpenFlags::O_STATUS) | (new_flags & OpenFlags::O_STATUS);
             Ok(0)
         }
+        FcntlCmd::F_SETPIPE_SZ => {
+            Ok(0)
+        }
+        FcntlCmd::F_GETPIPE_SZ => {
+            Ok(0)
+        }
     }
 }
 
@@ -105,6 +112,38 @@ pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     let ret = fd_impl.file.ioctl(request, arg2, arg3, arg4, arg5).await?;
     Ok(ret as usize)
+}
+
+pub async fn sys_mknodat(dirfd: FdNum, path: usize, mode: u32, dev: u32) -> SyscallResult<usize>{
+    let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+
+    let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
+    //let modes = InodeMode::from_bits(mode).ok_or(Errno::EINVAL)?;
+    debug!("[mknodat] fd: {}, path: {:?}, mode: {:?}, dev: {}", dirfd, path, mode, dev);
+    let token = current_thread().token();
+    let inode = resolve_path(dirfd, &parent, true, token).await?;
+    let mode:InodeMode = match inode.metadata().ifmt {
+        InodeMode::S_IFDIR => {
+            let mode = InodeMode::from_bits_truncate(mode & 0xfffff000);
+            if mode == InodeMode::from_bits_truncate(0)|| mode == InodeMode::S_IFREG{
+                InodeMode::S_IFREG
+            } else if mode == InodeMode::S_IFBLK {
+                InodeMode::S_IFBLK
+            } else if mode == InodeMode::S_IFCHR {
+                InodeMode::S_IFCHR
+            } else if mode == InodeMode::S_IFIFO {
+                InodeMode::S_IFIFO
+            } else if mode == InodeMode::S_IFSOCK  {
+                InodeMode::S_IFSOCK
+            } else {
+                InodeMode::S_IFDIR
+            }
+        },
+        _ => InodeMode::def_dir() - current_process().inner.lock().umask
+    };
+    debug!("[mknodat] fd: {}, path: {:?}, mode: {:?}, dev: {}", dirfd, path, mode, dev);
+    inode.create(mode, &name, token).await?;
+    Ok(0)
 }
 
 pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
@@ -607,6 +646,10 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     };
     current_thread().signals.set_mask(mask_bak);
     ret
+}
+
+pub async fn sys_splice(infd: FdNum, off_in: usize, outfd: FdNum, off_out: usize, len: usize, flag: u32) -> SyscallResult<usize> {
+    Ok(1)
 }
 
 pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {
