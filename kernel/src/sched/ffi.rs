@@ -41,6 +41,13 @@ pub struct ITimerVal {
     pub value: TimeVal,
 }
 
+#[derive(Copy, Clone, Debug, Default, AsBytes, FromZeroes, FromBytes)]
+#[repr(C)]
+pub struct TimeZone {
+    pub minuteswest: i32,
+    pub dsttime: i32,
+}
+
 impl TimeSpec {
     pub fn new(sec: i64, nsec: i64) -> Self {
         Self { sec, nsec }
@@ -140,4 +147,15 @@ pub struct Timex {
     /// TAI offset, as set by previous ADJ_TAI operation (seconds, read-only)
     pub tai: i32,
     _pad4: i32,
+}
+
+#[repr(i32)]
+#[derive(TryFromPrimitive)]
+pub enum SchedPolicy {
+    SchedFifo = 1,
+    SchedRr = 2,
+    SchedOther = 0,
+    SchedBatch = 3,
+    SchedIdle = 5,
+    SchedDeadline = 6,
 }

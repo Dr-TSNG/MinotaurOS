@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 use core::cmp::min;
 use core::mem::size_of;
 use core::time::Duration;
-use futures::future::ok;
 use log::{debug, info, warn};
 use tap::Tap;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
@@ -67,9 +66,13 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
     Ok(new_fd as usize)
 }
 
+pub fn sys_inotify_init(flags: u32) -> SyscallResult<usize> {
+    Ok(0)
+}
+
 pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
     let cmd = FcntlCmd::try_from(cmd).map_err(|_| Errno::EINVAL)?;
-    warn!("[fcntl] fd: {}, cmd: {:?}, arg2: {}", fd, cmd, arg2);
+    debug!("[fcntl] fd: {}, cmd: {:?}, arg2: {}", fd, cmd, arg2);
     let proc_inner = &mut *current_process().inner.lock();
     let fd_impl = proc_inner.fd_table.get_mut(fd)?;
     match cmd {
@@ -648,7 +651,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     ret
 }
 
-pub async fn sys_splice(infd: FdNum, off_in: usize, outfd: FdNum, off_out: usize, len: usize, flag: u32) -> SyscallResult<usize> {
+pub async fn sys_splice(_infd: FdNum, _off_in: usize, outfd: FdNum, off_out: usize, len: usize, flag: u32) -> SyscallResult<usize> {
     Ok(1)
 }
 

@@ -200,6 +200,10 @@ impl File for DirFile {
         *pos += 1;
         Ok(Some((*pos - 1, inode)))
     }
+
+    async fn read(&self, _buf: &mut [u8]) -> SyscallResult<isize> {
+        Err(Errno::EISDIR)
+    }
 }
 
 pub struct RegularFile {

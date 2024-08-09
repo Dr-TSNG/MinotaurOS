@@ -1,6 +1,8 @@
+use alloc::ffi::CString;
 use alloc::vec::Vec;
 use core::fmt::{Display, Formatter};
-use core::mem::size_of;
+use core::mem::{offset_of, size_of};
+use core::ptr::addr_of;
 use bitflags::bitflags;
 use lazy_static::lazy_static;
 use num_enum::TryFromPrimitive;
@@ -232,7 +234,7 @@ impl InodeMode {
     pub fn from_bits_access(bits: u32) -> Self {
         Self::from_bits_retain(bits) & InodeMode::S_ACCESS
     }
-    
+
     pub fn from_bits_misc(bits: u32) -> Self {
         Self::from_bits_retain(bits) & InodeMode::S_MISC
     }
@@ -460,5 +462,55 @@ impl AccessMode {
             mode |= AccessMode::X_OK;
         }
         mode
+    }
+}
+
+// cookie 是事件唯一标识符号，用于将相关事件配对。
+// 移动事件: 当一个文件或目录被移动时，会生成一对事件：IN_MOVED_FROM 和 IN_MOVED_TO。
+// 事件 cookie 可以将这两个事件联系起来，表明它们是同一次移动操作的两部分。
+#[repr(C)]
+#[derive(Clone)]
+pub struct InotifyEvent {
+    /// 监视描述符
+    pub wd: i32,
+    /// 事件掩码
+    pub mask: u32,
+    /// 事件 cookie
+    pub cookie: u32,
+    // 文件名长度
+    pub len: u32,
+    // 文件名（变长）
+    pub name: CString,
+}
+
+impl InotifyEvent {
+    pub fn as_bytes(&self) -> &[u8] {
+        let len = offset_of!(Self, name) + self.name.as_bytes().len();
+        unsafe { core::slice::from_raw_parts(addr_of!(self) as *const u8, len) }
+    }
+}
+
+bitflags! {
+    pub struct InotifyMask: u32 {
+        const IN_ACCESS        = 0x00000001; // 文件被访问（读取）
+        const IN_MODIFY        = 0x00000002; // 文件被修改
+        const IN_ATTRIB        = 0x00000004; // 文件属性被修改
+        const IN_CLOSE_WRITE   = 0x00000008; // 以可写方式打开的文件被关闭
+        const IN_CLOSE_NOWRITE = 0x00000010; // 以不可写方式打开的文件被关闭
+        const IN_OPEN          = 0x00000020; // 文件被打开
+        const IN_MOVED_FROM    = 0x00000040; // 文件从监视的目录中被移走
+        const IN_MOVED_TO      = 0x00000080; // 文件被移动到监视的目录中
+        const IN_CREATE        = 0x00000100; // 监视的目录中创建了文件
+        const IN_DELETE        = 0x00000200; // 监视的目录中删除了文件
+        const IN_DELETE_SELF   = 0x00000400; // 被监视的文件自身被删除
+        const IN_MOVE_SELF     = 0x00000800; // 被监视的文件自身被移动
+        const IN_UNMOUNT       = 0x00002000; // 文件系统被卸载
+        const IN_Q_OVERFLOW    = 0x00004000; // 事件队列溢出
+        const IN_IGNORED       = 0x00008000; // 监视项被忽略
+        const IN_ONLYDIR       = 0x01000000; // 仅监视目录
+        const IN_DONT_FOLLOW   = 0x02000000; // 不跟随符号链接
+        const IN_EXCL_UNLINK   = 0x04000000; // 不生成对已被删除对象的事件
+        const IN_MASK_ADD      = 0x20000000; // 将新的事件掩码加入已存在的掩码中
+        const IN_ISDIR         = 0x40000000; // 事件发生在目录中
     }
 }
