@@ -10,9 +10,9 @@ use crate::fs::ffi::{AccessMode, InodeMode, OpenFlags, VfsFlags};
 use crate::fs::file::{CharacterFile, DirFile, File, FileMeta, RegularFile};
 use crate::fs::file_system::{FileSystem, MountNamespace};
 use crate::fs::page_cache::PageCache;
-use crate::process::token::AccessToken;
 use crate::process::{Gid, Uid};
 use crate::process::ffi::CapSet;
+use crate::process::thread::Audit;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
@@ -178,7 +178,7 @@ pub(super) trait InodeInternal {
         self: Arc<Self>,
         mode: InodeMode,
         name: &str,
-        token: AccessToken,
+        audit: &Audit,
     ) -> SyscallResult<Arc<dyn Inode>> {
         Err(Errno::EPERM)
     }
@@ -189,7 +189,7 @@ pub(super) trait InodeInternal {
         mode: InodeMode,
         name: &str,
         target: &str,
-        token: AccessToken,
+        audit: &Audit,
     ) -> SyscallResult {
         Err(Errno::EPERM)
     }
@@ -240,17 +240,17 @@ pub trait Inode: DowncastSync + InodeInternal {
 impl_downcast!(sync Inode);
 
 impl dyn Inode {
-    pub fn open(self: Arc<Self>, flags: OpenFlags, token: AccessToken) -> SyscallResult<Arc<dyn File>> {
+    pub fn open(self: Arc<Self>, flags: OpenFlags, audit: &Audit) -> SyscallResult<Arc<dyn File>> {
         if flags.contains(OpenFlags::O_RDWR) {
-            self.proc_access(token, AccessMode::R_OK | AccessMode::W_OK)?;
+            self.audit_access(audit, AccessMode::R_OK | AccessMode::W_OK)?;
         } else if flags.contains(OpenFlags::O_WRONLY) {
-            self.proc_access(token, AccessMode::W_OK)?;
+            self.audit_access(audit, AccessMode::W_OK)?;
         } else if !flags.contains(OpenFlags::O_DIRECTORY) { // O_RDONLY
-            self.proc_access(token, AccessMode::R_OK)?;
+            self.audit_access(audit, AccessMode::R_OK)?;
         }
         match self.metadata().ifmt {
             InodeMode::S_IFCHR => Ok(CharacterFile::new(FileMeta::new(Some(self), flags))),
-            InodeMode::S_IFDIR => Ok(DirFile::new(FileMeta::new(Some(self), flags), token)),
+            InodeMode::S_IFDIR => Ok(DirFile::new(FileMeta::new(Some(self), flags), audit.clone())),
             InodeMode::S_IFREG => Ok(RegularFile::new(FileMeta::new(Some(self), flags))),
             _ => Err(Errno::EPERM),
         }
@@ -288,14 +288,14 @@ impl dyn Inode {
         Ok(0)
     }
 
-    pub async fn lookup_name(self: Arc<Self>, name: &str, token: AccessToken) -> SyscallResult<Arc<dyn Inode>> {
+    pub async fn lookup_name(self: Arc<Self>, name: &str, audit: &Audit) -> SyscallResult<Arc<dyn Inode>> {
         if self.metadata().inner.lock().unlinked {
             return Err(Errno::ENOENT);
         }
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
-        self.proc_access(token, AccessMode::X_OK)?;
+        self.audit_access(audit, AccessMode::X_OK)?;
         // 这里不能放到 match 里面，否则锁会被延后释放
         let inode = self.metadata().inner.lock().mounts.get(name).cloned();
         match inode {
@@ -304,62 +304,62 @@ impl dyn Inode {
         }
     }
 
-    pub async fn lookup_idx(self: Arc<Self>, idx: usize, token: AccessToken) -> SyscallResult<Arc<dyn Inode>> {
+    pub async fn lookup_idx(self: Arc<Self>, idx: usize, audit: &Audit) -> SyscallResult<Arc<dyn Inode>> {
         if self.metadata().inner.lock().unlinked {
             return Err(Errno::ENOENT);
         }
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
-        self.proc_access(token, AccessMode::R_OK)?;
+        self.audit_access(audit, AccessMode::R_OK)?;
         self.clone().do_lookup_idx(idx).await.map(|inode| {
             let name = &self.metadata().name;
             self.metadata().inner.lock().mounts.get(name).cloned().unwrap_or(inode)
         })
     }
 
-    pub async fn create(self: Arc<Self>, mode: InodeMode, name: &str, token: AccessToken) -> SyscallResult<Arc<dyn Inode>> {
+    pub async fn create(self: Arc<Self>, mode: InodeMode, name: &str, audit: &Audit) -> SyscallResult<Arc<dyn Inode>> {
         if self.metadata().inner.lock().unlinked {
             return Err(Errno::ENOENT);
         }
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
-        self.proc_access(token, AccessMode::W_OK)?;
-        self.do_create(mode, name, token).await
+        self.audit_access(audit, AccessMode::W_OK)?;
+        self.do_create(mode, name, audit).await
     }
 
-    pub async fn symlink(self: Arc<Self>, mode: InodeMode, name: &str, target: &str, token: AccessToken) -> SyscallResult {
+    pub async fn symlink(self: Arc<Self>, mode: InodeMode, name: &str, target: &str, audit: &Audit) -> SyscallResult {
         if self.metadata().inner.lock().unlinked {
             return Err(Errno::ENOENT);
         }
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
-        self.proc_access(token, AccessMode::W_OK)?;
-        self.do_symlink(mode, name, target, token).await
+        self.audit_access(audit, AccessMode::W_OK)?;
+        self.do_symlink(mode, name, target, audit).await
     }
 
-    pub async fn movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>, token: AccessToken) -> SyscallResult {
+    pub async fn movein(self: Arc<Self>, name: &str, inode: Arc<dyn Inode>, audit: &Audit) -> SyscallResult {
         if self.metadata().inner.lock().unlinked {
             return Err(Errno::ENOENT);
         }
         if !self.metadata().ifmt.is_dir() {
             return Err(Errno::ENOTDIR);
         }
-        self.proc_access(token, AccessMode::W_OK)?;
+        self.audit_access(audit, AccessMode::W_OK)?;
         self.do_movein(name, inode).await
     }
 
-    pub async fn unlink(self: Arc<Self>, name: &str, token: AccessToken) -> SyscallResult {
+    pub async fn unlink(self: Arc<Self>, name: &str, audit: &Audit) -> SyscallResult {
         if self.metadata().inner.lock().unlinked {
             return Err(Errno::ENOENT);
         }
         if self.metadata().inner.lock().mounts.get(name).is_some() {
             return Err(Errno::EBUSY);
         }
-        self.proc_access(token, AccessMode::W_OK)?;
-        let inode = self.clone().lookup_name(name, token).await?;
+        self.audit_access(audit, AccessMode::W_OK)?;
+        let inode = self.clone().lookup_name(name, audit).await?;
         inode.metadata().inner.lock().unlinked = true;
         if let Some(page_cache) = &inode.metadata().page_cache {
             page_cache.set_deleted();
@@ -367,34 +367,37 @@ impl dyn Inode {
         self.do_unlink(inode).await
     }
 
-    pub async fn readlink(self: Arc<Self>, token: AccessToken) -> SyscallResult<String> {
+    pub async fn readlink(self: Arc<Self>, audit: &Audit) -> SyscallResult<String> {
         if !self.metadata().ifmt.is_lnk() {
             return Err(Errno::EINVAL);
         }
-        self.proc_access(token, AccessMode::R_OK)?;
+        self.audit_access(audit, AccessMode::R_OK)?;
         self.do_readlink().await
     }
 
-    pub fn chmod(&self, mode: InodeMode, token: AccessToken) -> SyscallResult {
+    pub fn chmod(&self, mode: InodeMode, audit: &Audit) -> SyscallResult {
         let fs = self.file_system().upgrade().unwrap();
         if fs.flags().contains(VfsFlags::ST_RDONLY) {
             return Err(Errno::EROFS);
         }
         let mut inner = self.metadata().inner.lock();
-        if token.uid != 0 && token.uid != inner.uid {
+        if audit.euid != 0 && audit.euid != inner.uid {
             return Err(Errno::EPERM);
         }
         inner.mode = inner.mode.difference(InodeMode::S_MISC) | mode;
+        if audit.euid != 0 && audit.egid != inner.gid && !audit.sup_gids.contains(&inner.gid) {
+            inner.mode -= InodeMode::S_ISGID;
+        }
         Ok(())
     }
 
-    pub fn chown(&self, uid: Uid, gid: Gid, token: AccessToken) -> SyscallResult {
+    pub fn chown(&self, uid: Uid, gid: Gid, audit: &Audit) -> SyscallResult {
         let fs = self.file_system().upgrade().unwrap();
         if fs.flags().contains(VfsFlags::ST_RDONLY) {
             return Err(Errno::EROFS);
         }
         let mut inner = self.metadata().inner.lock();
-        if token.uid != 0 && token.uid != inner.uid {
+        if audit.euid != 0 && audit.euid != inner.uid {
             return Err(Errno::EPERM);
         }
         if uid != Uid::MAX {
@@ -405,7 +408,7 @@ impl dyn Inode {
         }
         if inner.mode & (InodeMode::S_IXUSR | InodeMode::S_IXGRP | InodeMode::S_IXOTH) != InodeMode::empty() {
             inner.mode -= InodeMode::S_ISUID;
-            if token.uid != 0 || inner.mode.contains(InodeMode::S_IXGRP) {
+            if inner.mode.contains(InodeMode::S_IXGRP) {
                 inner.mode -= InodeMode::S_ISGID;
             }
         }
@@ -421,18 +424,18 @@ impl dyn Inode {
         Ok(path)
     }
 
-    pub fn proc_access(&self, token: AccessToken, attempt: AccessMode) -> SyscallResult {
+    pub fn audit_access(&self, audit: &Audit, attempt: AccessMode) -> SyscallResult {
         let fs = self.file_system().upgrade().unwrap();
         let inner = self.metadata().inner.lock();
-        let bypass_rw = token.uid == 0;
-        let bypass_x = token.uid == 0 && self.metadata().ifmt.is_dir();
-        let mode = if inner.uid == token.uid {
+        let bypass_rw = audit.euid == 0;
+        let bypass_x = audit.euid == 0 && self.metadata().ifmt.is_dir();
+        let mode = if audit.euid == inner.uid {
             AccessMode::new(
                 bypass_rw | inner.mode.contains(InodeMode::S_IRUSR),
                 bypass_rw | inner.mode.contains(InodeMode::S_IWUSR),
                 bypass_x | inner.mode.contains(InodeMode::S_IXUSR),
             )
-        } else if inner.gid == token.gid {
+        } else if audit.egid == inner.gid || audit.sup_gids.contains(&inner.gid) {
             AccessMode::new(
                 bypass_rw | inner.mode.contains(InodeMode::S_IRGRP),
                 bypass_rw | inner.mode.contains(InodeMode::S_IWGRP),

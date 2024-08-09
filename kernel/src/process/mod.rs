@@ -2,7 +2,6 @@ pub mod aux;
 pub mod ffi;
 pub mod monitor;
 pub mod thread;
-pub mod token;
 
 use alloc::collections::BTreeMap;
 use alloc::ffi::CString;
@@ -28,9 +27,8 @@ use crate::process::ffi::{CloneFlags, CpuSet};
 use crate::process::monitor::MONITORS;
 use crate::process::thread::event_bus::Event;
 use crate::process::thread::resource::ResourceUsage;
-use crate::process::thread::{Thread, TokenSet};
+use crate::process::thread::{Thread, Audit};
 use crate::process::thread::tid::TidTracker;
-use crate::process::token::AccessToken;
 use crate::processor::{current_process, current_thread, current_trap_ctx, SYSTEM_SHUTDOWN};
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
@@ -88,7 +86,7 @@ impl Process {
         elf_data: &[u8],
     ) -> SyscallResult<Arc<Self>> {
         let (addr_space, entry, _) =
-            AddressSpace::from_elf(&mnt_ns, "/init", 0, 0, elf_data, AccessToken::root()).await?;
+            AddressSpace::from_elf(&mnt_ns, "/init", 0, 0, elf_data, &Audit::default()).await?;
         let pid = Arc::new(TidTracker::new());
 
         let process = Arc::new(Process {
@@ -114,7 +112,7 @@ impl Process {
         let thread = Thread::new(
             process.clone(),
             trap_ctx,
-            TokenSet::default(),
+            Audit::default(),
             Some(pid.clone()),
             SignalController::new(),
             CpuSet::new(1),
@@ -135,11 +133,11 @@ impl Process {
         inode: Arc<dyn Inode>,
         args: &[CString],
         envs: &[CString],
-        token: AccessToken,
+        audit: &Audit,
     ) -> SyscallResult<usize> {
         let mnt_ns = self.inner.lock().mnt_ns.clone();
         let (addr_space, entry, mut auxv) =
-            AddressSpace::from_inode(&mnt_ns, inode.clone(), token).await?;
+            AddressSpace::from_inode(&mnt_ns, inode.clone(), audit).await?;
 
         current_process().inner.lock().pipe_ref_mut(|proc_inner| {
             if proc_inner.threads.len() > 1 {
@@ -233,7 +231,7 @@ impl Process {
         thread.signals.reset();
         thread.inner().tap_mut(|it| {
             it.trap_ctx = TrapContext::new(entry, user_sp);
-            it.token_set.caps.execve(false, &FCap::default());
+            it.audit.caps.execve(false, &FCap::default());
             it.tid_address = Default::default();
             it.rusage = ResourceUsage::new();
             if let Some(parent) = it.vfork_from.take() {
@@ -294,7 +292,7 @@ impl Process {
             let new_thread = Thread::new(
                 new_process.clone(),
                 trap_ctx,
-                current_thread().inner().token_set.clone(),
+                current_thread().inner().audit.clone(),
                 Some(new_pid.clone()),
                 signals,
                 new_cpu_set,
@@ -356,7 +354,7 @@ impl Process {
             let new_thread = Thread::new(
                 self.clone(),
                 trap_ctx,
-                current_thread().inner().token_set.clone(),
+                current_thread().inner().audit.clone(),
                 None,
                 signals,
                 new_cpu_set,

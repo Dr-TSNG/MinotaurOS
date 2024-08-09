@@ -1,5 +1,6 @@
 use alloc::sync::Arc;
 use core::cell::SyncUnsafeCell;
+use hashbrown::HashSet;
 use log::{debug, info, warn};
 use smart_default::SmartDefault;
 use crate::arch::VirtAddr;
@@ -10,7 +11,6 @@ use crate::process::{Gid, Process, Uid};
 use crate::process::thread::event_bus::{Event, EventBus};
 use crate::process::thread::resource::ResourceUsage;
 use crate::process::thread::tid::TidTracker;
-use crate::process::token::AccessToken;
 use crate::signal::ffi::Signal;
 use crate::signal::SignalController;
 use crate::sync::mutex::Mutex;
@@ -32,7 +32,7 @@ pub struct Thread {
 
 pub struct ThreadInner {
     pub trap_ctx: TrapContext,
-    pub token_set: TokenSet,
+    pub audit: Audit,
     pub sys_can_restart: bool,
     pub sys_last_a0: usize,
     pub tid_address: TidAddress,
@@ -42,13 +42,14 @@ pub struct ThreadInner {
 }
 
 #[derive(Clone, Default)]
-pub struct TokenSet {
+pub struct Audit {
     pub ruid: Uid,
     pub euid: Uid,
     pub suid: Uid,
     pub rgid: Gid,
     pub egid: Gid,
     pub sgid: Gid,
+    pub sup_gids: HashSet<Gid>,
     pub caps: PCap,
 }
 
@@ -88,7 +89,7 @@ impl Thread {
     pub fn new(
         process: Arc<Process>,
         trap_ctx: TrapContext,
-        token_set: TokenSet,
+        token_set: Audit,
         tid: Option<Arc<TidTracker>>,
         signals: SignalController,
         cpu_set: CpuSet,
@@ -97,7 +98,7 @@ impl Thread {
         let tid = tid.unwrap_or_else(|| Arc::new(TidTracker::new()));
         let inner = ThreadInner {
             trap_ctx,
-            token_set,
+            audit: token_set,
             sys_can_restart: false,
             sys_last_a0: 0,
             tid_address: TidAddress::default(),
@@ -119,11 +120,6 @@ impl Thread {
     /// SAFETY: ThreadInner 中的成员在 spawn 后只应该被本地 hart 访问
     pub fn inner(&self) -> &mut ThreadInner {
         unsafe { &mut *self.inner.get() }
-    }
-
-    pub fn token(&self) -> AccessToken {
-        let tokens = &self.inner().token_set;
-        AccessToken::new(tokens.euid, tokens.egid)
     }
 
     pub fn recv_signal(&self, signal: Signal) {

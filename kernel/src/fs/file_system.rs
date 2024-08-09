@@ -15,7 +15,7 @@ use crate::fs::inode::Inode;
 use crate::fs::path::is_absolute_path;
 use crate::fs::procfs::ProcFileSystem;
 use crate::fs::tmpfs::TmpFileSystem;
-use crate::process::token::AccessToken;
+use crate::process::thread::Audit;
 use crate::result::{Errno, SyscallResult};
 use crate::split_path;
 use crate::sync::mutex::Mutex;
@@ -160,11 +160,11 @@ impl MountNamespace {
         &self,
         path: &str,
         follow_link: bool,
-        token: AccessToken,
+        audit: &Audit,
     ) -> SyscallResult<Arc<dyn Inode>> {
         assert!(is_absolute_path(path));
         let root = self.inner.lock().tree.fs.root();
-        let inode = self.lookup_relative(root, &path[1..], follow_link, token).await?;
+        let inode = self.lookup_relative(root, &path[1..], follow_link, audit).await?;
         Ok(inode)
     }
 
@@ -173,7 +173,7 @@ impl MountNamespace {
         parent: Arc<dyn Inode>,
         path: &str,
         follow_link: bool,
-        token: AccessToken,
+        audit: &Audit,
     ) -> SyscallResult<Arc<dyn Inode>> {
         assert!(!is_absolute_path(&path));
         let mut names = split_path!(path).map(|s| s.to_string()).collect::<VecDeque<_>>();
@@ -206,7 +206,7 @@ impl MountNamespace {
                         }
                     }
                 } else {
-                    inode = inode.lookup_name(&name, token).await?;
+                    inode = inode.lookup_name(&name, audit).await?;
                 }
             } else {
                 break Ok(inode);

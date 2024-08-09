@@ -5,7 +5,7 @@ use log::{debug, info};
 use crate::fs::fd::FdNum;
 use crate::fs::ffi::AT_FDCWD;
 use crate::fs::inode::Inode;
-use crate::process::token::AccessToken;
+use crate::process::thread::Audit;
 use crate::processor::current_process;
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
@@ -22,7 +22,7 @@ pub async fn resolve_path(
     dirfd: FdNum,
     path: &str,
     follow_link: bool,
-    token: AccessToken,
+    audit: &Audit,
 ) -> SyscallResult<Arc<dyn Inode>> {
     assert_ne!(current_process().inner.locked_by(), local_hart().id);
     if path.is_empty() {
@@ -36,17 +36,17 @@ pub async fn resolve_path(
     let mnt_ns = proc_inner.mnt_ns.clone();
     let inode = if is_absolute_path(&path) {
         drop(proc_inner);
-        mnt_ns.lookup_absolute(&path, follow_link, token).await?
+        mnt_ns.lookup_absolute(&path, follow_link, audit).await?
     } else if dirfd == AT_FDCWD {
         let cwd = proc_inner.cwd.clone();
         drop(proc_inner);
-        let inode = mnt_ns.lookup_absolute(&cwd, follow_link, token).await?;
-        mnt_ns.lookup_relative(inode, &path, follow_link, token).await?
+        let inode = mnt_ns.lookup_absolute(&cwd, follow_link, audit).await?;
+        mnt_ns.lookup_relative(inode, &path, follow_link, audit).await?
     } else {
         let fd_impl = proc_inner.fd_table.get(dirfd)?;
         let inode = fd_impl.file.metadata().inode.clone().ok_or(Errno::ENOENT)?;
         drop(proc_inner);
-        mnt_ns.lookup_relative(inode, &path, follow_link, token).await?
+        mnt_ns.lookup_relative(inode, &path, follow_link, audit).await?
     };
     if should_be_dir && !inode.metadata().ifmt.is_dir() {
         return Err(Errno::ENOTDIR);

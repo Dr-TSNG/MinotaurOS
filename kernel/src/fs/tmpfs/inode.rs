@@ -11,7 +11,7 @@ use crate::fs::ffi::InodeMode;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::page_cache::PageCache;
 use crate::fs::tmpfs::TmpFileSystem;
-use crate::process::token::AccessToken;
+use crate::process::thread::Audit;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::time::real_time;
 use crate::sync::mutex::AsyncMutex;
@@ -90,7 +90,7 @@ impl InodeInternal for TmpfsInode {
         }
     }
 
-    async fn do_create(self: Arc<Self>, mode: InodeMode, name: &str, token: AccessToken) -> SyscallResult<Arc<dyn Inode>> {
+    async fn do_create(self: Arc<Self>, mode: InodeMode, name: &str, audit: &Audit) -> SyscallResult<Arc<dyn Inode>> {
         debug!("[tmpfs] Create file {} for {}", name, mode);
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let mut inner = self.inner.lock().await;
@@ -106,8 +106,8 @@ impl InodeInternal for TmpfsInode {
             metadata: InodeMeta::new(
                 fs.ino_pool.fetch_add(1, Ordering::Relaxed),
                 0,
-                token.uid,
-                token.gid,
+                audit.euid,
+                audit.egid,
                 mode,
                 name.to_string(),
                 format!("{}/{}", self.metadata().path, name),
@@ -126,7 +126,7 @@ impl InodeInternal for TmpfsInode {
         Ok(inode)
     }
 
-    async fn do_symlink(self: Arc<Self>, mode: InodeMode, name: &str, target: &str, token: AccessToken) -> SyscallResult {
+    async fn do_symlink(self: Arc<Self>, mode: InodeMode, name: &str, target: &str, audit: &Audit) -> SyscallResult {
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let mut inner = self.inner.lock().await;
         if inner.children.contains_key(name) {
@@ -137,8 +137,8 @@ impl InodeInternal for TmpfsInode {
             metadata: InodeMeta::new(
                 fs.ino_pool.fetch_add(1, Ordering::Relaxed),
                 0,
-                token.uid,
-                token.gid,
+                audit.euid,
+                audit.egid,
                 mode,
                 name.to_string(),
                 format!("{}/{}", self.metadata().path, name),

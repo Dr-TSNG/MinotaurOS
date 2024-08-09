@@ -16,7 +16,7 @@ use crate::fs::ffi::InodeMode;
 use crate::fs::file_system::FileSystem;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::page_cache::PageCache;
-use crate::process::token::AccessToken;
+use crate::process::thread::Audit;
 use crate::result::{Errno, SyscallResult};
 
 pub struct Ext4Inode {
@@ -205,7 +205,7 @@ impl InodeInternal for Ext4Inode {
         }
     }
 
-    async fn do_create(self: Arc<Self>, mode: InodeMode, name: &str, token: AccessToken) -> SyscallResult<Arc<dyn Inode>> {
+    async fn do_create(self: Arc<Self>, mode: InodeMode, name: &str, audit: &Audit) -> SyscallResult<Arc<dyn Inode>> {
         debug!("[ext4] Create file: {}", name);
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
@@ -226,8 +226,8 @@ impl InodeInternal for Ext4Inode {
             metadata: InodeMeta::new(
                 file.inode() as usize,
                 fs.device.metadata().dev_id,
-                token.uid,
-                token.gid,
+                audit.euid,
+                audit.egid,
                 mode,
                 name.to_string(),
                 path,
@@ -246,7 +246,7 @@ impl InodeInternal for Ext4Inode {
         Ok(inode)
     }
 
-    async fn do_symlink(self: Arc<Self>, mode: InodeMode, name: &str, target: &str, token: AccessToken) -> SyscallResult {
+    async fn do_symlink(self: Arc<Self>, mode: InodeMode, name: &str, target: &str, audit: &Audit) -> SyscallResult {
         debug!("[ext4] Symlink {} -> {}", name, target);
         let fs = self.fs.upgrade().ok_or(Errno::EIO)?;
         let _guard = fs.driver_lock.lock().await;
@@ -260,8 +260,8 @@ impl InodeInternal for Ext4Inode {
             metadata: InodeMeta::new(
                 inode as usize,
                 fs.device.metadata().dev_id,
-                token.uid,
-                token.gid,
+                audit.euid,
+                audit.egid,
                 mode,
                 name.to_string(),
                 path,

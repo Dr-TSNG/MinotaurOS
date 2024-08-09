@@ -70,7 +70,11 @@ fn main() {
     run_cmd("touch sort.src");
 
     run_cmd("echo root:x:0:0::/:/busybox sh > /etc/passwd");
+    run_cmd("echo daemon:x:2:2::/:/bin/nologin >> /etc/passwd");
     run_cmd("echo nobody:x:65534:65534:Kernel Overflow User:/:/usr/bin/nologin >> /etc/passwd");
+    run_cmd("echo root:x:0: > /etc/group");
+    run_cmd("echo daemon:x:2: >> /etc/group");
+    run_cmd("echo nobody:x:65534: >> /etc/group");
     
     run_cmd("busybox sh");
 }
