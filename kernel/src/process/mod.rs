@@ -7,7 +7,7 @@ use alloc::collections::BTreeMap;
 use alloc::ffi::CString;
 use alloc::string::String;
 use alloc::sync::{Arc, Weak};
-use alloc::vec;
+use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
@@ -426,6 +426,18 @@ impl Process {
                 break;
             }
         }
+    }
+}
+
+impl Process {
+    pub fn print_stat(&self) -> String {
+        let state = "R";
+        let inner = self.inner.lock();
+        let ppid = match inner.parent.upgrade() {
+            Some(parent) => parent.pid.0,
+            None => 0,
+        };
+        format!("{} ({}) {} {} {}", self.pid.0, inner.exe, state, ppid, inner.pgid.0)
     }
 }
 

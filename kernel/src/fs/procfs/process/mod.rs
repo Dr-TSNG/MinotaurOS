@@ -10,6 +10,7 @@ use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::procfs::process::exe::ExeInode;
 use crate::fs::procfs::process::maps::MapsInode;
 use crate::fs::procfs::process::mounts::MountsInode;
+use crate::fs::procfs::process::stat::StatInode;
 use crate::fs::procfs::ProcFileSystem;
 use crate::process::Process;
 use crate::result::{Errno, SyscallResult};
@@ -18,6 +19,7 @@ use crate::sync::mutex::Mutex;
 mod exe;
 mod maps;
 mod mounts;
+mod stat;
 
 #[derive(InodeFactory)]
 pub struct ProcessDirInode {
@@ -61,6 +63,7 @@ impl ProcessDirInner {
         self.children.insert("exe".to_string(), ExeInode::new(fs.clone(), this.clone()));
         self.children.insert("maps".to_string(), MapsInode::new(fs.clone(), this.clone()));
         self.children.insert("mounts".to_string(), MountsInode::new(fs.clone(), this.clone()));
+        self.children.insert("stat".to_string(), StatInode::new(fs.clone(), this.clone()));
         self.initialized = true;
         Ok(())
     }

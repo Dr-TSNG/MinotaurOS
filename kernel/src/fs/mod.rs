@@ -20,6 +20,7 @@ pub mod page_cache;
 pub mod pipe;
 pub mod procfs;
 pub mod tmpfs;
+mod inotify;
 
 pub fn init() -> SyscallResult<Arc<MountNamespace>> {
     let mut root_dev = None;
