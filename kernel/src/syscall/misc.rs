@@ -11,11 +11,11 @@ use rand::Rng;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
 use crate::driver::random::KRNG;
-use crate::fs::ffi::OpenFlags;
+use crate::fs::ffi::{InodeMode, OpenFlags, PATH_MAX};
 use crate::fs::file::{File, FileMeta};
-use crate::mm::protect::user_slice_w;
+use crate::mm::protect::{user_slice_w, user_transmute_str};
 use crate::result::Errno::{EINVAL, ESRCH};
-use crate::result::SyscallResult;
+use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
 
 pub fn sys_getpriority(which: i32, who: i32) -> SyscallResult<usize> {
@@ -166,4 +166,11 @@ pub fn sys_sched_get_priority_min(policy: i32)-> SyscallResult<usize>{
         SchedPolicy::SchedDeadline => Ok(0),
         SchedPolicy::InVaild => Err(EINVAL),
     }
+}
+
+// Fifo , not impl yet
+pub fn sys_fifo(path: usize,mode: u32) -> SyscallResult<usize>{
+    let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let mode = InodeMode::from_bits_misc(mode);
+    todo!()
 }

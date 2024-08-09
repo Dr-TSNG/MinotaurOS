@@ -64,6 +64,7 @@ pub enum SyscallCode {
     Fcntl = 25,
     InotifyInit = 26,
     Ioctl = 29,
+    Fifo = 33,
     Mkdirat = 34,
     Unlinkat = 35,
     Symlinkat = 36,
