@@ -32,7 +32,7 @@ use crate::mm::region::lazy::LazyRegion;
 use crate::mm::region::shared::SharedRegion;
 use crate::mm::sysv_shm::SysVShm;
 use crate::process::aux::{self, Aux};
-use crate::process::token::AccessToken;
+use crate::process::thread::Audit;
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::Mutex;
@@ -127,7 +127,7 @@ impl AddressSpace {
     pub async fn from_inode(
         mnt_ns: &MountNamespace,
         inode: Arc<dyn Inode>,
-        token: AccessToken,
+        audit: &Audit,
     ) -> SyscallResult<(Self, usize, Vec<Aux>)> {
         let exe = inode.mnt_ns_path(mnt_ns)?;
         let mut snapshots = EXE_SNAPSHOTS.lock();
@@ -138,8 +138,8 @@ impl AddressSpace {
 
         let dev = inode.metadata().dev;
         let ino = inode.metadata().ino;
-        let data = inode.open(OpenFlags::O_RDONLY, token)?.read_all().await?;
-        let mut snapshot = Self::from_elf(mnt_ns, &exe, dev, ino, &data, token).await?;
+        let data = inode.open(OpenFlags::O_RDONLY, audit)?.read_all().await?;
+        let mut snapshot = Self::from_elf(mnt_ns, &exe, dev, ino, &data, audit).await?;
         let this = (snapshot.0.fork(), snapshot.1, snapshot.2.clone());
         let mut snapshots = EXE_SNAPSHOTS.lock();
         snapshots.put(exe.to_string(), snapshot);
@@ -153,7 +153,7 @@ impl AddressSpace {
         dev: u64,
         ino: usize,
         data: &[u8],
-        token: AccessToken,
+        audit: &Audit,
     ) -> SyscallResult<(Self, usize, Vec<Aux>)> {
         let mut addr_space = Self::new_bare();
         addr_space.copy_global_mappings();
@@ -167,7 +167,7 @@ impl AddressSpace {
         let mut entry = offset + elf.entry as usize;
         if let Some(linker) = elf.interpreter {
             debug!("[addr_space] Load linker: {} at {:?}", linker, DYNAMIC_LINKER_BASE);
-            entry = addr_space.load_linker(mnt_ns, linker, token).await?;
+            entry = addr_space.load_linker(mnt_ns, linker, audit).await?;
         }
 
         let mut load_base = None;
@@ -537,10 +537,10 @@ impl AddressSpace {
         &mut self,
         mnt_ns: &MountNamespace,
         linker: &str,
-        token: AccessToken,
+        audit: &Audit,
     ) -> SyscallResult<VirtAddr> {
-        let inode = mnt_ns.lookup_absolute(linker, true, token).await?;
-        let file = inode.clone().open(OpenFlags::O_RDONLY, AccessToken::root()).unwrap();
+        let inode = mnt_ns.lookup_absolute(linker, true, audit).await?;
+        let file = inode.clone().open(OpenFlags::O_RDONLY, &Audit::default()).unwrap();
         let data = file.read_all().await.unwrap();
         let elf = Elf::parse(&data).map_err(|_| Errno::ENOEXEC)?;
 

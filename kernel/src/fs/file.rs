@@ -9,7 +9,7 @@ use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::{AsyncMutex, Mutex};
 use crate::fs::ffi::OpenFlags;
 use crate::net::Socket;
-use crate::process::token::AccessToken;
+use crate::process::thread::Audit;
 
 pub struct FileMeta {
     pub inode: Option<Arc<dyn Inode>>,
@@ -163,15 +163,15 @@ impl File for CharacterFile {
 pub struct DirFile {
     metadata: FileMeta,
     pos: AsyncMutex<usize>,
-    token: AccessToken,
+    audit: Audit,
 }
 
 impl DirFile {
-    pub fn new(metadata: FileMeta, token: AccessToken) -> Arc<Self> {
+    pub fn new(metadata: FileMeta, audit: Audit) -> Arc<Self> {
         Arc::new(Self {
             metadata,
             pos: AsyncMutex::default(),
-            token,
+            audit,
         })
     }
 }
@@ -191,7 +191,7 @@ impl File for DirFile {
         let inode = match *pos {
             0 => inode.clone(),
             1 => inode.metadata().parent.clone().and_then(|p| p.upgrade()).unwrap_or(inode.clone()),
-            _ => match inode.clone().lookup_idx(*pos - 2, self.token).await {
+            _ => match inode.clone().lookup_idx(*pos - 2, &self.audit).await {
                 Ok(inode) => inode,
                 Err(Errno::ENOENT) => return Ok(None),
                 Err(e) => return Err(e),
