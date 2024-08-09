@@ -66,6 +66,10 @@ pub fn sys_dup3(old_fd: FdNum, new_fd: FdNum, flags: u32) -> SyscallResult<usize
     Ok(new_fd as usize)
 }
 
+pub fn sys_inotify_init(flags: u32) -> SyscallResult<usize> {
+    Ok(0)
+}
+
 pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
     let cmd = FcntlCmd::try_from(cmd).map_err(|_| Errno::EINVAL)?;
     debug!("[fcntl] fd: {}, cmd: {:?}, arg2: {}", fd, cmd, arg2);
@@ -105,6 +109,12 @@ pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     let ret = fd_impl.file.ioctl(request, arg2, arg3, arg4, arg5).await?;
     Ok(ret as usize)
+}
+
+pub fn sys_fifo(path: usize, mode: u32) -> SyscallResult<usize> {
+    let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let mode = InodeMode::from_bits_misc(mode);
+    todo!()
 }
 
 pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
@@ -632,7 +642,6 @@ pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, flags: u32) -
     stat.st_dev = inode.metadata().dev;
     stat.st_ino = inode.metadata().ino as u64;
     let inner = inode.metadata().inner.lock();
-    stat.st_uid = inner.uid as u32;
     stat.st_mode = inner.mode.bits();
     stat.st_nlink = inner.nlink as u32;
     stat.st_uid = inner.uid as u32;
@@ -654,7 +663,6 @@ pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
         stat.st_dev = inode.metadata().dev;
         stat.st_ino = inode.metadata().ino as u64;
         let inner = inode.metadata().inner.lock();
-        stat.st_uid = inner.uid as u32;
         stat.st_mode = inner.mode.bits();
         stat.st_nlink = inner.nlink as u32;
         stat.st_uid = inner.uid as u32;

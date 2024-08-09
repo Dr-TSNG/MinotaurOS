@@ -1,5 +1,4 @@
 use alloc::boxed::Box;
-use alloc::format;
 use alloc::string::ToString;
 use alloc::sync::{Arc, Weak};
 use core::cmp::min;
@@ -9,9 +8,7 @@ use macros::InodeFactory;
 use crate::fs::ffi::InodeMode;
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
 use crate::fs::procfs::ProcFileSystem;
-use crate::fs::procfs::sys::kernel::pid_max::PidMaxInode;
-use crate::result::{Errno, SyscallResult};
-use crate::system::PID_MAX;
+use crate::result::SyscallResult;
 
 #[derive(InodeFactory)]
 pub struct PrintKInode {
@@ -41,7 +38,7 @@ impl InodeInternal for PrintKInode {
         if offset != 0 {
             return Ok(0);
         }
-        let data = "4 4 1 7\n".to_string().into_bytes();
+        let data = b"4 4 1 7\n";
         let read = min(buf.len(), data.len());
         buf[..read].copy_from_slice(&data[..read]);
         Ok(read as isize)

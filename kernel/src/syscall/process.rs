@@ -16,6 +16,7 @@ use crate::process::thread::event_bus::{Event, WaitPidFuture};
 use crate::processor::{current_process, current_thread};
 use crate::result::{Errno, SyscallResult};
 use crate::sched::{suspend_now, yield_now};
+use crate::sched::ffi::SchedPolicy;
 use crate::signal::ffi::Signal;
 
 pub async fn sys_acct(filename: usize) -> SyscallResult<usize> {
@@ -152,6 +153,28 @@ pub fn sys_sched_getaffinity(tid: Pid, cpusetsize: usize, mask: usize) -> Syscal
 pub async fn sys_sched_yield() -> SyscallResult<usize> {
     yield_now().await;
     Ok(0)
+}
+
+pub fn sys_sched_get_priority_max(policy: i32) -> SyscallResult<usize> {
+    match SchedPolicy::try_from(policy).map_err(|_| Errno::EINVAL)? {
+        SchedPolicy::SchedFifo => Ok(99),
+        SchedPolicy::SchedRr => Ok(99),
+        SchedPolicy::SchedOther => Ok(0),
+        SchedPolicy::SchedBatch => Ok(0),
+        SchedPolicy::SchedIdle => Ok(0),
+        SchedPolicy::SchedDeadline => Ok(0),
+    }
+}
+
+pub fn sys_sched_get_priority_min(policy: i32) -> SyscallResult<usize> {
+    match SchedPolicy::try_from(policy).map_err(|_| Errno::EINVAL)? {
+        SchedPolicy::SchedFifo => Ok(1),
+        SchedPolicy::SchedRr => Ok(1),
+        SchedPolicy::SchedOther => Ok(0),
+        SchedPolicy::SchedBatch => Ok(0),
+        SchedPolicy::SchedIdle => Ok(0),
+        SchedPolicy::SchedDeadline => Ok(0),
+    }
 }
 
 pub fn sys_kill(pid: Pid, signal: usize) -> SyscallResult<usize> {
