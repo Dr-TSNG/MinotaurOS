@@ -44,8 +44,8 @@ pub fn sys_syslog(cmd: i32, buf: usize, len: usize) -> SyscallResult<usize> {
                 size += line.len();
             }
             Ok(size)
-        }
-        _ => Err(Errno::EINVAL),
+        },
+        _ => Ok(0),
     }
 }
 

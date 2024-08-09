@@ -6,6 +6,7 @@ use crate::result::{Errno, SyscallResult};
 use log::{debug, info, warn};
 use macros::suspend;
 use crate::mm::protect::{user_slice_r, user_slice_w, user_transmute_w};
+use crate::result::Errno::{EFAULT, EINVAL, ENOPROTOOPT};
 
 /// socket level
 const SOL_SOCKET: u32 = 1;
@@ -195,6 +196,12 @@ pub fn sys_setsockopt(
     optval_ptr: usize,
     _optlen: u32,
 ) -> SyscallResult<usize> {
+    if optval_ptr == 0 {
+        return Err(EFAULT);
+    }
+    if _optlen == 0 {
+        return Err(EINVAL);
+    }
     info!("[sys_setsockopt] socketfd: {}",sockfd);
     let socket = current_process().inner.lock()
         .fd_table.get(sockfd)?.file.as_socket()?;
@@ -237,6 +244,7 @@ pub fn sys_setsockopt(
         }
         _ => {
             warn!("[sys_setsockopt] level: {}, optname: {}", level, optname);
+            return Err(ENOPROTOOPT);
         }
     }
     Ok(0)

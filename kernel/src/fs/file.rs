@@ -9,6 +9,8 @@ use crate::result::{Errno, SyscallResult};
 use crate::sync::mutex::{AsyncMutex, Mutex};
 use crate::fs::ffi::OpenFlags;
 use crate::net::Socket;
+use crate::process::token::AccessToken;
+use crate::result::Errno::EISDIR;
 use crate::process::thread::Audit;
 
 pub struct FileMeta {
@@ -199,6 +201,10 @@ impl File for DirFile {
         };
         *pos += 1;
         Ok(Some((*pos - 1, inode)))
+    }
+
+    async fn read(&self, _buf: &mut [u8]) -> SyscallResult<isize> {
+        Err(EISDIR)
     }
 }
 
