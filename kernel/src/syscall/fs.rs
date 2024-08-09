@@ -117,35 +117,22 @@ pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4
     Ok(ret as usize)
 }
 
-pub async fn sys_mknodat(dirfd: FdNum, path: usize, mode: u32, dev: u32) -> SyscallResult<usize>{
-    let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
-
-    let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
-    //let modes = InodeMode::from_bits(mode).ok_or(Errno::EINVAL)?;
-    debug!("[mknodat] fd: {}, path: {:?}, mode: {:?}, dev: {}", dirfd, path, mode, dev);
-    let token = current_thread().token();
-    let inode = resolve_path(dirfd, &parent, true, token).await?;
-    let mode:InodeMode = match inode.metadata().ifmt {
-        InodeMode::S_IFDIR => {
-            let mode = InodeMode::from_bits_truncate(mode & 0xfffff000);
-            if mode == InodeMode::from_bits_truncate(0)|| mode == InodeMode::S_IFREG{
-                InodeMode::S_IFREG
-            } else if mode == InodeMode::S_IFBLK {
-                InodeMode::S_IFBLK
-            } else if mode == InodeMode::S_IFCHR {
-                InodeMode::S_IFCHR
-            } else if mode == InodeMode::S_IFIFO {
-                InodeMode::S_IFIFO
-            } else if mode == InodeMode::S_IFSOCK  {
-                InodeMode::S_IFSOCK
-            } else {
-                InodeMode::S_IFDIR
-            }
-        },
-        _ => InodeMode::def_dir() - current_process().inner.lock().umask
+pub async fn sys_mknodat(dirfd: FdNum, path: usize, mode: u32, dev: u32) -> SyscallResult<usize> {
+    let mode = InodeMode::from_bits_truncate(mode);
+    match mode.file_type() {
+        InodeMode::S_IFREG
+        | InodeMode::S_IFCHR
+        | InodeMode::S_IFBLK
+        | InodeMode::S_IFIFO
+        | InodeMode::S_IFSOCK => (),
+        _ => return Err(Errno::EINVAL),
     };
-    debug!("[mknodat] fd: {}, path: {:?}, mode: {:?}, dev: {}", dirfd, path, mode, dev);
-    inode.create(mode, &name, token).await?;
+    let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    debug!("[mknodat] fd: {}, path: {:?}, mode: {}, dev: {}", dirfd, path, mode, dev);
+    let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
+    let audit = &current_thread().inner().audit;
+    let inode = resolve_path(dirfd, &parent, true, audit).await?;
+    inode.create(mode, &name, audit).await?;
     Ok(0)
 }
 
@@ -651,7 +638,7 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     ret
 }
 
-pub async fn sys_splice(_infd: FdNum, _off_in: usize, outfd: FdNum, off_out: usize, len: usize, flag: u32) -> SyscallResult<usize> {
+pub async fn sys_splice(_infd: FdNum, _off_in: usize, _outfd: FdNum, _off_out: usize, _len: usize, _flag: u32) -> SyscallResult<usize> {
     Ok(1)
 }
 

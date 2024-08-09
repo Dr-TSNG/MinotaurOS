@@ -253,8 +253,7 @@ impl dyn Inode {
             InodeMode::S_IFDIR => Ok(DirFile::new(FileMeta::new(Some(self), flags), audit.clone())),
             InodeMode::S_IFREG => Ok(RegularFile::new(FileMeta::new(Some(self), flags))),
             InodeMode::S_IFIFO => Ok(RegularFile::new(FileMeta::new(Some(self), flags))),
-            _ => {
-                Err(Errno::EPERM)},
+            _ => Err(Errno::EPERM),
         }
     }
 
