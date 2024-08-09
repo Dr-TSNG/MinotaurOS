@@ -369,8 +369,9 @@ pub fn sys_getrusage(who: i32, buf: usize) -> SyscallResult<usize> {
 
 pub fn sys_umask(mask: u32) -> SyscallResult<usize> {
     let mut proc_inner = current_process().inner.lock();
-    proc_inner.umask = InodeMode::from_bits_access(mask).ok_or(Errno::EINVAL)?;
-    Ok(0)
+    let prev = proc_inner.umask;
+    proc_inner.umask = InodeMode::from_bits_access(mask);
+    Ok(prev.bits() as usize)
 }
 
 pub fn sys_prctl(option: i32, arg1: usize, _arg2: usize, _arg3: usize, _arg4: usize) -> SyscallResult<usize> {

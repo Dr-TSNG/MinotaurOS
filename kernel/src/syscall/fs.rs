@@ -110,7 +110,7 @@ pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4
 pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
     let mode = match mode {
         0 => InodeMode::def_dir() - current_process().inner.lock().umask,
-        _ => InodeMode::from_bits_access(mode).ok_or(Errno::EINVAL)? | InodeMode::S_IFDIR,
+        _ => InodeMode::S_IFDIR | InodeMode::from_bits_misc(mode),
     };
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     debug!("[mkdirat] fd: {}, path: {:?}, mode: {}", dirfd, path, mode);
@@ -276,24 +276,21 @@ pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
 }
 
 pub async fn sys_fchmodat(dirfd: FdNum, path: usize, mode: u32, flags: u32) -> SyscallResult<usize> {
-    // TODO: Permission check
-    let mode = InodeMode::from_bits_access(mode).ok_or(Errno::EINVAL)?;
+    let mode = InodeMode::from_bits_misc(mode);
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
     let token = current_thread().token();
     let inode = resolve_path(dirfd, path, follow_link, token).await?;
-    inode.chmod(mode);
+    inode.chmod(mode, token)?;
     Ok(0)
 }
 
 pub async fn sys_fchownat(dirfd: FdNum, path: usize, uid: Uid, gid: Gid, flags: u32) -> SyscallResult<usize> {
-    // TODO: Permission check
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
     let token = current_thread().token();
     let inode = resolve_path(dirfd, path, follow_link, token).await?;
-    inode.metadata().inner.lock().uid = uid;
-    inode.metadata().inner.lock().gid = gid;
+    inode.chown(uid, gid, token)?;
     Ok(0)
 }
 
@@ -313,7 +310,7 @@ pub async fn sys_openat(dirfd: FdNum, path: usize, flags: u32, mode: u32) -> Sys
         Err(Errno::ENOENT) if flags.contains(OpenFlags::O_CREAT) => {
             let mode = match mode {
                 0 => InodeMode::def_file() - current_process().inner.lock().umask,
-                _ => InodeMode::from_bits_access(mode).ok_or(Errno::EINVAL)? | InodeMode::S_IFREG,
+                _ => InodeMode::S_IFREG | InodeMode::from_bits_misc(mode),
             };
             let (parent, name) = split_last_path(path).ok_or(Errno::EISDIR)?;
             let parent_inode = resolve_path(dirfd, &parent, true, token).await?;
@@ -637,6 +634,8 @@ pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, flags: u32) -
     let inner = inode.metadata().inner.lock();
     stat.st_mode = inner.mode.bits();
     stat.st_nlink = inner.nlink as u32;
+    stat.st_uid = inner.uid as u32;
+    stat.st_gid = inner.gid as u32;
     stat.st_size = inner.size as u64;
     stat.st_atim = inner.atime;
     stat.st_mtim = inner.mtime;
@@ -656,6 +655,8 @@ pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
         let inner = inode.metadata().inner.lock();
         stat.st_mode = inner.mode.bits();
         stat.st_nlink = inner.nlink as u32;
+        stat.st_uid = inner.uid as u32;
+        stat.st_gid = inner.gid as u32;
         stat.st_size = inner.size as u64;
         stat.st_atim = inner.atime;
         stat.st_mtim = inner.mtime;
