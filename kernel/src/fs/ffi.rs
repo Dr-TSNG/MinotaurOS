@@ -177,6 +177,7 @@ bitflags! {
         const S_IXOTH  = 0x0001;
         const S_IRWXO  = Self::S_IROTH.bits() | Self::S_IWOTH.bits() | Self::S_IXOTH.bits();
         const S_ACCESS = Self::S_IRWXU.bits() | Self::S_IRWXG.bits() | Self::S_IRWXO.bits();
+        const S_MISC   = Self::S_ACCESS.bits() | Self::S_ISUID.bits() | Self::S_ISGID.bits() | Self::S_ISVTX.bits();
     }
 }
 
@@ -226,10 +227,12 @@ impl InodeMode {
         InodeMode::S_IFLNK | InodeMode::from_bits(0o777).unwrap()
     }
 
-    pub fn from_bits_access(bits: u32) -> Option<Self> {
-        Self::from_bits(bits).take_if(|mode| {
-            mode.difference(InodeMode::S_ACCESS).is_empty()
-        })
+    pub fn from_bits_access(bits: u32) -> Self {
+        Self::from_bits_retain(bits) & InodeMode::S_ACCESS
+    }
+    
+    pub fn from_bits_misc(bits: u32) -> Self {
+        Self::from_bits_retain(bits) & InodeMode::S_MISC
     }
 
     pub fn file_type(&self) -> InodeMode {

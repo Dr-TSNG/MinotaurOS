@@ -375,9 +375,41 @@ impl dyn Inode {
         self.do_readlink().await
     }
 
-    pub fn chmod(&self, mode: InodeMode) {
+    pub fn chmod(&self, mode: InodeMode, token: AccessToken) -> SyscallResult {
+        let fs = self.file_system().upgrade().unwrap();
+        if fs.flags().contains(VfsFlags::ST_RDONLY) {
+            return Err(Errno::EROFS);
+        }
         let mut inner = self.metadata().inner.lock();
-        inner.mode = inner.mode.difference(InodeMode::S_ACCESS) | mode;
+        if token.uid != 0 && token.uid != inner.uid {
+            return Err(Errno::EPERM);
+        }
+        inner.mode = inner.mode.difference(InodeMode::S_MISC) | mode;
+        Ok(())
+    }
+
+    pub fn chown(&self, uid: Uid, gid: Gid, token: AccessToken) -> SyscallResult {
+        let fs = self.file_system().upgrade().unwrap();
+        if fs.flags().contains(VfsFlags::ST_RDONLY) {
+            return Err(Errno::EROFS);
+        }
+        let mut inner = self.metadata().inner.lock();
+        if token.uid != 0 && token.uid != inner.uid {
+            return Err(Errno::EPERM);
+        }
+        if uid != Uid::MAX {
+            inner.uid = uid;
+        }
+        if gid != Gid::MAX {
+            inner.gid = gid;
+        }
+        if inner.mode & (InodeMode::S_IXUSR | InodeMode::S_IXGRP | InodeMode::S_IXOTH) != InodeMode::empty() {
+            inner.mode -= InodeMode::S_ISUID;
+            if token.uid != 0 || inner.mode.contains(InodeMode::S_IXGRP) {
+                inner.mode -= InodeMode::S_ISGID;
+            }
+        }
+        Ok(())
     }
 
     pub fn mnt_ns_path(&self, mnt_ns: &MountNamespace) -> SyscallResult<String> {
