@@ -120,10 +120,6 @@ pub async fn sys_mknodat(dirfd: FdNum, path: usize, mode: u32, dev: u32) -> Sysc
     let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
     //let modes = InodeMode::from_bits(mode).ok_or(Errno::EINVAL)?;
     debug!("[mknodat] fd: {}, path: {:?}, mode: {:?}, dev: {}", dirfd, path, mode, dev);
-    // let mode = match mode {
-    //     0 => InodeMode::def_dir() - current_process().inner.lock().umask,
-    //     _ => modes | InodeMode::S_IFDIR,
-    // };
     let token = current_thread().token();
     let inode = resolve_path(dirfd, &parent, true, token).await?;
     let mode:InodeMode = match inode.metadata().ifmt {

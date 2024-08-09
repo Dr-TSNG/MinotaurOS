@@ -94,7 +94,7 @@ pub fn sys_delete_module(name: usize, _flags: u32) -> SyscallResult<usize> {
     //let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
     if name.starts_with("dummy_") {
         if current_thread().inner().audit.euid == 0 {
-            return  Err(Errno::ENOENT)
+            return Err(Errno::ENOENT)
         }
         else {
             return Err(Errno::EPERM)
