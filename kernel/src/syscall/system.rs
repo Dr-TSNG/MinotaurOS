@@ -92,7 +92,7 @@ pub fn sys_sysinfo(buf: usize) -> SyscallResult<usize> {
 pub fn sys_delete_module(name: usize, _flags: u32) -> SyscallResult<usize> {
     let name = user_transmute_str(name, MAX_NAME_LEN)?.ok_or(Errno::EINVAL)?;
     //let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
-    if name == "dummy_5" {
+    if name.starts_with("dummy_") {
         if current_thread().inner().audit.euid == 0 {
             return Err(Errno::ENOENT);
         } else {

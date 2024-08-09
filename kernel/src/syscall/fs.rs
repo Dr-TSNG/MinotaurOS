@@ -102,6 +102,12 @@ pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
             *old_flags = (*old_flags - OpenFlags::O_STATUS) | (new_flags & OpenFlags::O_STATUS);
             Ok(0)
         }
+        FcntlCmd::F_SETPIPE_SZ => {
+            Ok(0)
+        }
+        FcntlCmd::F_GETPIPE_SZ => {
+            Ok(0)
+        }
     }
 }
 
@@ -111,10 +117,23 @@ pub async fn sys_ioctl(fd: FdNum, request: usize, arg2: usize, arg3: usize, arg4
     Ok(ret as usize)
 }
 
-pub fn sys_fifo(path: usize, mode: u32) -> SyscallResult<usize> {
+pub async fn sys_mknodat(dirfd: FdNum, path: usize, mode: u32, dev: u32) -> SyscallResult<usize> {
+    let mode = InodeMode::from_bits_truncate(mode);
+    match mode.file_type() {
+        InodeMode::S_IFREG
+        | InodeMode::S_IFCHR
+        | InodeMode::S_IFBLK
+        | InodeMode::S_IFIFO
+        | InodeMode::S_IFSOCK => (),
+        _ => return Err(Errno::EINVAL),
+    };
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
-    let mode = InodeMode::from_bits_misc(mode);
-    todo!()
+    debug!("[mknodat] fd: {}, path: {:?}, mode: {}, dev: {}", dirfd, path, mode, dev);
+    let (parent, name) = split_last_path(path).ok_or(Errno::EEXIST)?;
+    let audit = &current_thread().inner().audit;
+    let inode = resolve_path(dirfd, &parent, true, audit).await?;
+    inode.create(mode, &name, audit).await?;
+    Ok(0)
 }
 
 pub async fn sys_mkdirat(dirfd: FdNum, path: usize, mode: u32) -> SyscallResult<usize> {
@@ -617,6 +636,10 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     };
     current_thread().signals.set_mask(mask_bak);
     ret
+}
+
+pub async fn sys_splice(_infd: FdNum, _off_in: usize, _outfd: FdNum, _off_out: usize, _len: usize, _flag: u32) -> SyscallResult<usize> {
+    Ok(1)
 }
 
 pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {

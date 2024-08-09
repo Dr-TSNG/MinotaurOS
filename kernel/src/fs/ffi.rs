@@ -150,6 +150,8 @@ pub enum FcntlCmd {
     F_GETFL = 3,
     F_SETFL = 4,
     F_DUPFD_CLOEXEC = 1030,
+    F_SETPIPE_SZ = 1031,
+    F_GETPIPE_SZ = 1032,
 }
 
 bitflags! {
