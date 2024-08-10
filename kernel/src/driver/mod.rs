@@ -31,6 +31,7 @@ pub mod ns16550a;
 pub mod plic;
 pub mod random;
 pub mod virtio;
+pub mod jh7110;
 
 pub static BOARD_INFO: LateInit<BoardInfo> = LateInit::new();
 pub static GLOBAL_MAPPINGS: LateInit<Vec<GlobalMapping>> = LateInit::new();
@@ -150,7 +151,10 @@ trait IrqDevice: Send + Sync {
 }
 
 pub fn init_dtb(dtb_paddr: usize) {
-    parse_dev_tree(dtb_paddr).unwrap()
+    #[cfg(feature = "qemu")]
+    parse_dev_tree_qemu(dtb_paddr).unwrap();
+    #[cfg(feature = "jh7110")]
+    parse_dev_tree_jh7110(dtb_paddr).unwrap();
 }
 
 pub fn init_driver() -> SyscallResult<()> {
@@ -179,7 +183,7 @@ pub fn total_memory() -> usize {
     })
 }
 
-fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
+fn parse_dev_tree_qemu(dtb_paddr: usize) -> Result<(), DevTreeError> {
     let mut b_smp = 0;
     let mut b_freq = 0;
     let mut b_plic_base = VirtAddr(0);
@@ -222,7 +226,8 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     b_smp += 1;
                 }
             }
-        } else if name.starts_with("memory") {
+        }
+        else if name.starts_with("memory") {
             let reg = parse_reg(&node, addr_cells, size_cells);
             for (phys_start, size) in reg {
                 let mapping = GlobalMapping::new(
@@ -234,7 +239,8 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                 );
                 g_mappings.push(mapping);
             }
-        } else if name == "soc" {
+        }
+        else if name == "soc" {
             for node in node.children() {
                 let name = node.name()?;
                 let compatible = node
@@ -255,7 +261,8 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     DEVICES.lock().insert(dev.metadata().dev_id, Device::Block(dev));
                     println!("[kernel] Register virtio block device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
-                } else if name == "virtio_mmio@10008000" {
+                }
+                else if name == "virtio_mmio@10008000" {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let mapping = GlobalMapping::new(
                         "[virtio_net]".to_string(),
@@ -269,7 +276,8 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     NET_DEVICE_ADDR.lock().replace(mapping.virt_start);
                     println!("[kernel] Register virtio net device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
-                } else if name.starts_with("plic@") {
+                }
+                else if name.starts_with("plic@") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     if mmio_offset % reg[0].1 != 0 {
                         mmio_offset += reg[0].1 - mmio_offset % reg[0].1;
@@ -285,7 +293,8 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     mmio_offset += reg[0].1;
                     println!("[kernel] Register PLIC at {:?}", b_plic_base);
                     g_mappings.push(mapping);
-                } else if compatible == Some("ns16550a") {
+                }
+                else if compatible == Some("ns16550a") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
                     let intr = node
@@ -323,7 +332,124 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
     GLOBAL_MAPPINGS.init(g_mappings);
     Ok(())
 }
-
+fn parse_dev_tree_jh7110(dtb_paddr: usize) -> Result<(), DevTreeError>{
+    let mut mmio_offset = 0;
+    let mut b_smp = 0;
+    let mut b_freq = 0;
+    let mut g_mappings = Vec::new();
+    let mut b_plic_base = VirtAddr(0);
+    let mut b_plic_intr = BTreeMap::new();
+    let fdt = unsafe {
+        DevTree::from_raw_pointer(dtb_paddr as *const u8)?
+    };
+    let layout = DevTreeIndex::get_layout(&fdt)?;
+    let mut buf = vec![0u8; layout.size() + layout.align()];
+    let dti = DevTreeIndex::new(fdt, &mut buf)?;
+    let root = dti.root();
+    let addr_cells = root
+        .props()
+        .find(|prop| prop.name() == Ok("#address-cells"))
+        .unwrap()
+        .u32(0)? as usize;
+    let size_cells = root
+        .props()
+        .find(|prop| prop.name() == Ok("#size-cells"))
+        .unwrap()
+        .u32(0)? as usize;
+    for node in root.children(){
+        let name = node.name()?;
+        if name == "cpus"{
+            let freq = node
+                .props()
+                .find(|prop| prop.name() == Ok("timebase-frequency"))
+                .unwrap()
+                .propbuf();
+            b_freq = match freq.len() {
+                4 => u32::from_be_bytes(freq.try_into().unwrap()) as usize,
+                8 => u64::from_be_bytes(freq.try_into().unwrap()) as usize,
+                _ => return Err(DevTreeError::ParseError),
+            };
+            for cpu in node.children() {
+                if cpu.name()?.starts_with("cpu@") {
+                    b_smp += 1;
+                }
+            }
+        }
+        else if name.starts_with("memory"){
+            let reg = parse_reg(&node, addr_cells, size_cells);
+            for (phys_start, size) in reg {
+                let mapping = GlobalMapping::new(
+                    format!("[memory@{:x}]", phys_start),
+                    PhysAddr(phys_start),
+                    VirtAddr(KERNEL_ADDR_OFFSET + phys_start),
+                    size,
+                    ASPerms::R | ASPerms::W | ASPerms::X,
+                );
+                g_mappings.push(mapping);
+            }
+        }
+        else if name == "soc"{
+            for node in node.children(){
+                let name = node.name()?;
+                let compatible = node
+                    .props()
+                    .find(|prop| prop.name() == Ok("compatible"))
+                    .and_then(|prop| prop.str().ok());
+                if name.starts_with("plic@"){
+                    let reg = parse_reg(&node, addr_cells, size_cells);
+                    if mmio_offset % reg[0].1 != 0 {
+                        mmio_offset += reg[0].1 - mmio_offset % reg[0].1;
+                    }
+                    b_plic_base = KERNEL_MMIO_BASE + mmio_offset;
+                    let mapping = GlobalMapping::new(
+                        format!("[plic@{:x}]", reg[0].0),
+                        PhysAddr(reg[0].0),
+                        b_plic_base,
+                        reg[0].1,
+                        ASPerms::R | ASPerms::W,
+                    );
+                    mmio_offset += reg[0].1;
+                    println!("[kernel] Register PLIC at {:?}", b_plic_base);
+                    g_mappings.push(mapping);
+                }
+                else if name ==  "serial@10010000"{
+                    let reg = parse_reg(&node, addr_cells, size_cells);
+                    let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+                    // 33
+                    let intr = node
+                        .props()
+                        .find(|prop| prop.name() == Ok("interrupts"))
+                        .unwrap().u32(0)?;
+                    let mapping = GlobalMapping::new(
+                        format!("[serial@{:x}]", reg[0].0),
+                        PhysAddr(reg[0].0),
+                        KERNEL_MMIO_BASE + mmio_offset,
+                        size,
+                        ASPerms::R | ASPerms::W,
+                    );
+                    mmio_offset += size;
+                    let dev = Arc::new(jh7110::uart::Jh7710Uart::new(mapping.virt_start));
+                    b_plic_intr.insert(intr as usize, dev.clone());
+                    DEVICES.lock().insert(dev.metadata().dev_id, Device::Character(dev));
+                    println!("[kernel] Register serial device at {:?}", mapping.virt_start);
+                    g_mappings.push(mapping);
+                }
+            }
+        }
+    }
+    let b_plic = PLIC::new(b_plic_base);
+    for (intr_id, dev) in b_plic_intr {
+        b_plic.register_device(intr_id, dev);
+    }
+    let board_info = BoardInfo {
+        smp: b_smp,
+        freq: b_freq,
+        plic: b_plic,
+    };
+    BOARD_INFO.init(board_info);
+    GLOBAL_MAPPINGS.init(g_mappings);
+    Ok(())
+}
 fn parse_reg(node: &DevTreeIndexNode, addr_cells: usize, size_cells: usize) -> Vec<(usize, usize)> {
     let reg = node
         .props()

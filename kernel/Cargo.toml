@@ -53,5 +53,7 @@ trace = []
 strace = []
 nocolor = []
 tombstone = []
+qemu = []
+jh7110 = []
 
-default = ["error"]
+default = ["error","jh7110"]
