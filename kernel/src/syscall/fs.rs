@@ -665,7 +665,6 @@ pub async fn sys_newfstatat(dirfd: FdNum, path: usize, buf: usize, flags: u32) -
     stat.st_dev = inode.metadata().dev;
     stat.st_ino = inode.metadata().ino as u64;
     let inner = inode.metadata().inner.lock();
-    stat.st_uid = inner.uid as u32;
     stat.st_mode = inner.mode.bits();
     stat.st_nlink = inner.nlink as u32;
     stat.st_uid = inner.uid as u32;
@@ -687,7 +686,6 @@ pub fn sys_fstat(fd: FdNum, buf: usize) -> SyscallResult<usize> {
         stat.st_dev = inode.metadata().dev;
         stat.st_ino = inode.metadata().ino as u64;
         let inner = inode.metadata().inner.lock();
-        stat.st_uid = inner.uid as u32;
         stat.st_mode = inner.mode.bits();
         stat.st_nlink = inner.nlink as u32;
         stat.st_uid = inner.uid as u32;
