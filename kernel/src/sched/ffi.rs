@@ -1,6 +1,7 @@
 use core::time::Duration;
 use num_enum::TryFromPrimitive;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use crate::result::{Errno, SyscallResult};
 
 pub const UTIME_NOW: i64 = 1073741823;
 pub const UTIME_OMIT: i64 = 1073741822;
@@ -51,6 +52,11 @@ pub struct TimeZone {
 impl TimeSpec {
     pub fn new(sec: i64, nsec: i64) -> Self {
         Self { sec, nsec }
+    }
+
+    pub fn check_forward(&self) -> SyscallResult {
+        let ok = self.sec >= 0 && (0..1_000_000_000).contains(&self.nsec);
+        ok.then_some(()).ok_or(Errno::EINVAL)
     }
 }
 

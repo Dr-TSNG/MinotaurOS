@@ -90,9 +90,14 @@ impl FdTable {
     }
 
     /// 删除一个文件描述符
-    pub fn remove(&mut self, fd: FdNum) -> SyscallResult<()> {
+    pub fn remove(&mut self, fd: FdNum) -> SyscallResult {
         self.table.get_mut(fd as usize).and_then(Option::take).ok_or(Errno::EBADF)?;
         Ok(())
+    }
+
+    /// 清空文件描述符表（防止僵尸进程的管道堵塞）
+    pub fn clear(&mut self) {
+        self.table.clear();
     }
 }
 

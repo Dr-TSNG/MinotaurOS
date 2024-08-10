@@ -407,6 +407,7 @@ impl Process {
         proc_inner.threads.remove(&tid);
         // 如果没有线程了，通知父进程
         if proc_inner.threads.is_empty() {
+            proc_inner.fd_table.clear();
             proc_inner.exit_code = Some(exit_code);
             if let Some(parent) = proc_inner.parent.upgrade() {
                 parent.on_child_exit(self.pid.0, exit_code);
