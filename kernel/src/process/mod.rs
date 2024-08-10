@@ -12,6 +12,7 @@ use alloc::vec::Vec;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
 use core::sync::atomic::Ordering;
+use core::time::Duration;
 use log::{info, warn};
 use tap::{Pipe, Tap};
 use crate::arch::VirtAddr;
@@ -34,6 +35,7 @@ use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
 use crate::sched::ffi::ITimerVal;
 use crate::sched::{IdleFuture, spawn_user_thread, suspend_now};
+use crate::sched::time::DurationExt;
 use crate::signal::ffi::Signal;
 use crate::signal::SignalController;
 use crate::sync::futex::FutexQueue;
@@ -438,7 +440,32 @@ impl Process {
             Some(parent) => parent.pid.0,
             None => 0,
         };
-        format!("{} ({}) {} {} {}", self.pid.0, inner.exe, state, ppid, inner.pgid.0)
+        let mut utime = Duration::ZERO;
+        let mut stime = Duration::ZERO;
+        for thread in inner.threads.values() {
+            if let Some(thread) = thread.upgrade() {
+                utime += thread.inner().rusage.user_time;
+                stime += thread.inner().rusage.sys_time;
+            }
+        }
+        format!(
+            "{} ({}) {} {} {} {} {} {} {} {} {} {} {} {} {}\n",
+            self.pid.0,   // 1: pid
+            inner.exe,    // 2: comm
+            state,        // 3: state
+            ppid,         // 4: ppid
+            inner.pgid.0, // 5: pgrp
+            0,            // 6: session
+            0,            // 7: tty_nr
+            0,            // 8: tpgid
+            0,            // 9: flags
+            0,            // 10: minflt
+            0,            // 11: cminflt
+            0,            // 12: majflt
+            0,            // 13: cmajflt
+            utime.as_ticks(), // 14: utime
+            stime.as_ticks(), // 15: stime
+        )
     }
 }
 

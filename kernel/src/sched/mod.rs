@@ -16,7 +16,7 @@ use crate::processor::context::HartContext;
 use crate::processor::current_thread;
 use crate::processor::hart::local_hart;
 use crate::result::{Errno, SyscallResult};
-use crate::sched::ffi::{CLOCK_MONOTONIC, CLOCK_REALTIME};
+use crate::sched::ffi::{CLOCK_BOOTTIME, CLOCK_MONOTONIC, CLOCK_MONOTONIC_COARSE, CLOCK_MONOTONIC_RAW, CLOCK_REALTIME, CLOCK_REALTIME_COARSE};
 use crate::sched::time::{GLOBAL_CLOCK, TimeoutFuture, TimeoutResult};
 use crate::trap::user::{check_signal, trap_from_user, trap_return};
 
@@ -138,4 +138,8 @@ pub fn init() {
     const TODAY: Duration = Duration::from_secs(1725120000);
     GLOBAL_CLOCK.set(CLOCK_REALTIME, TODAY);
     GLOBAL_CLOCK.set(CLOCK_MONOTONIC, Duration::ZERO);
+    GLOBAL_CLOCK.set(CLOCK_MONOTONIC_RAW, Duration::ZERO);
+    GLOBAL_CLOCK.set(CLOCK_REALTIME_COARSE, TODAY);
+    GLOBAL_CLOCK.set(CLOCK_MONOTONIC_COARSE, Duration::ZERO);
+    GLOBAL_CLOCK.set(CLOCK_BOOTTIME, Duration::ZERO);
 }

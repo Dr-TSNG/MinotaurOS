@@ -10,6 +10,10 @@ pub const CLOCK_REALTIME: usize = 0;
 pub const CLOCK_MONOTONIC: usize = 1;
 pub const CLOCK_PROCESS_CPUTIME_ID: usize = 2;
 pub const CLOCK_THREAD_CPUTIME_ID: usize = 3;
+pub const CLOCK_MONOTONIC_RAW: usize = 4;
+pub const CLOCK_REALTIME_COARSE: usize = 5;
+pub const CLOCK_MONOTONIC_COARSE: usize = 6;
+pub const CLOCK_BOOTTIME: usize = 7;
 
 pub const TIMER_ABSTIME: i32 = 1;
 
