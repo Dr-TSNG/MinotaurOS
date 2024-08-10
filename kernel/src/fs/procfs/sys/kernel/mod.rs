@@ -13,7 +13,7 @@ pub fn new_kernel_dir(fs: Arc<ProcFileSystem>, parent: Arc<dyn Inode>) -> Arc<dy
     SimpleDirInode::new(fs.clone(), parent, 0o555, "kernel", |dir| {
         vec![
             PidMaxInode::new(fs.clone(), dir.clone()),
-            PrintKInode::new(fs,dir),
+            PrintKInode::new(fs, dir),
         ]
     })
 }

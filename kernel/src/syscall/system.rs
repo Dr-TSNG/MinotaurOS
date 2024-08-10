@@ -44,7 +44,7 @@ pub fn sys_syslog(cmd: i32, buf: usize, len: usize) -> SyscallResult<usize> {
                 size += line.len();
             }
             Ok(size)
-        },
+        }
         _ => Ok(0),
     }
 }
@@ -92,19 +92,18 @@ pub fn sys_sysinfo(buf: usize) -> SyscallResult<usize> {
 pub fn sys_delete_module(name: usize, _flags: u32) -> SyscallResult<usize> {
     let name = user_transmute_str(name, MAX_NAME_LEN)?.ok_or(Errno::EINVAL)?;
     //let flags = OpenFlags::from_bits(flags).ok_or(Errno::EINVAL)?;
-    if name =="dummy_5" {
+    if name.starts_with("dummy_") {
         if current_thread().inner().audit.euid == 0 {
-            return  Err(Errno::ENOENT)
-        }
-        else {
-            return Err(Errno::EPERM)
+            return Err(Errno::ENOENT);
+        } else {
+            return Err(Errno::EPERM);
         }
     }
     if name.is_empty() {
-        return Err(Errno::ENOENT)
+        return Err(Errno::ENOENT);
     }
     if name == "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm" {
-        return  Err(Errno::ENOENT)
+        return Err(Errno::ENOENT);
     }
     Ok(0)
 }

@@ -6,7 +6,6 @@ use crate::result::{Errno, SyscallResult};
 use log::{debug, info, warn};
 use macros::suspend;
 use crate::mm::protect::{user_slice_r, user_slice_w, user_transmute_w};
-use crate::result::Errno::{EFAULT, EINVAL, ENOPROTOOPT};
 
 /// socket level
 const SOL_SOCKET: u32 = 1;
@@ -193,24 +192,20 @@ pub fn sys_setsockopt(
     sockfd: FdNum,
     level: u32,
     optname: u32,
-    optval_ptr: usize,
-    _optlen: u32,
+    optval: usize,
+    optlen: u32,
 ) -> SyscallResult<usize> {
-    if optval_ptr == 0 {
-        return Err(EFAULT);
+    if optlen == 0 {
+        return Err(Errno::EINVAL);
     }
-    if _optlen == 0 {
-        return Err(EINVAL);
-    }
-    info!("[sys_setsockopt] socketfd: {}",sockfd);
+    let optval = user_slice_r(optval, optlen as usize)?;
+    info!("[sys_setsockopt] socketfd: {}", sockfd);
     let socket = current_process().inner.lock()
         .fd_table.get(sockfd)?.file.as_socket()?;
 
     match (level, optname) {
         (SOL_SOCKET, SO_SNDBUF | SO_RCVBUF) => {
-            // 在此处检查用户是否有读optval_ptr到optlen长度的权限
-
-            let size = unsafe { *(optval_ptr as *mut u32) };
+            let size: u32 = zerocopy::FromBytes::read_from_prefix(optval).ok_or(Errno::EINVAL)?;
             match optname {
                 SO_SNDBUF => {
                     socket.set_send_buf_size(size as usize)?;
@@ -223,9 +218,7 @@ pub fn sys_setsockopt(
         }
         (SOL_TCP, TCP_NODELAY) => {
             // close Nagle’s Algorithm
-            // 在此处检查用户是否有读optval_ptr到optlen长度的权限
-
-            let enabled = unsafe { *(optval_ptr as *const u32) };
+            let enabled: u8 = zerocopy::FromBytes::read_from_prefix(optval).ok_or(Errno::EINVAL)?;
             debug!("[sys_setsockopt] set TCPNODELY: {}", enabled);
             match enabled {
                 0 => socket.set_nagle_enabled(true)?,
@@ -233,9 +226,7 @@ pub fn sys_setsockopt(
             };
         }
         (SOL_SOCKET, SO_KEEPALIVE) => {
-            // 在此处检查用户是否有读optval_ptr到optlen长度的权限
-
-            let enabled = unsafe { *(optval_ptr as *const u32) };
+            let enabled: u8 = zerocopy::FromBytes::read_from_prefix(optval).ok_or(Errno::EINVAL)?;
             debug!("[sys_setsockopt] set socket KEEPALIVE: {}", enabled);
             match enabled {
                 1 => socket.set_keep_alive(true)?,
@@ -244,7 +235,7 @@ pub fn sys_setsockopt(
         }
         _ => {
             warn!("[sys_setsockopt] level: {}, optname: {}", level, optname);
-            return Err(ENOPROTOOPT);
+            return Err(Errno::ENOPROTOOPT);
         }
     }
     Ok(0)

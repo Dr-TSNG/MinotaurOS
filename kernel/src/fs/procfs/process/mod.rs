@@ -63,7 +63,7 @@ impl ProcessDirInner {
         self.children.insert("exe".to_string(), ExeInode::new(fs.clone(), this.clone()));
         self.children.insert("maps".to_string(), MapsInode::new(fs.clone(), this.clone()));
         self.children.insert("mounts".to_string(), MountsInode::new(fs.clone(), this.clone()));
-        self.children.insert("stat".to_string(),StatInode::new(fs.clone(),this.clone()));
+        self.children.insert("stat".to_string(), StatInode::new(fs.clone(), this.clone()));
         self.initialized = true;
         Ok(())
     }

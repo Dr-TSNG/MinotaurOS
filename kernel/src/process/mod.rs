@@ -5,9 +5,9 @@ pub mod thread;
 
 use alloc::collections::BTreeMap;
 use alloc::ffi::CString;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::sync::{Arc, Weak};
-use alloc::vec;
+use alloc::{format, vec};
 use alloc::vec::Vec;
 use core::mem::size_of;
 use core::ptr::copy_nonoverlapping;
@@ -429,22 +429,15 @@ impl Process {
     }
 }
 
-impl Process{
-    pub fn print_stat(&self) -> String{
-        use alloc::format;
-        let pid = self.pid.0.clone();
-        let stat = "R".to_string();
+impl Process {
+    pub fn print_stat(&self) -> String {
+        let state = "R";
         let inner = self.inner.lock();
-        let exe_name = inner.exe.clone();
-        let o_ppid = inner.parent.upgrade();
-        let ppid;
-        if o_ppid.is_none(){
-            ppid = 0;
-        }else{
-            ppid = o_ppid.unwrap().pid.0.clone();
-        }
-        let pgrp = inner.pgid.0.clone();
-        format!("{} ({}) {} {} {}",pid,exe_name,stat,ppid,pgrp)
+        let ppid = match inner.parent.upgrade() {
+            Some(parent) => parent.pid.0,
+            None => 0,
+        };
+        format!("{} ({}) {} {} {}", self.pid.0, inner.exe, state, ppid, inner.pgid.0)
     }
 }
 

@@ -79,7 +79,7 @@ impl FdTable {
     /// 在指定位置插入一个文件描述符，如果位置已经占用，则替换
     pub fn insert(&mut self, fd: FdNum, fd_impl: FileDescriptor) -> SyscallResult {
         let fd = fd as usize;
-        if fd > MAX_FD_NUM {
+        if fd >= MAX_FD_NUM {
             return Err(Errno::EBADF);
         }
         if fd >= self.table.len() {
