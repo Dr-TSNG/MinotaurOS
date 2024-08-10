@@ -9,6 +9,7 @@ use macros::InodeFactory;
 use crate::fs::ffi::{InodeMode, VfsFlags};
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::{Inode, InodeInternal, InodeMeta};
+use crate::fs::procfs::cpuinfo::CpuInfoInode;
 use crate::fs::procfs::meminfo::MeminfoInode;
 use crate::fs::procfs::mounts::MountsInode;
 use crate::fs::procfs::process::ProcessDirInode;
@@ -21,6 +22,7 @@ use crate::sched::ffi::TimeSpec;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
 
+mod cpuinfo;
 mod mounts;
 mod meminfo;
 mod process;
@@ -104,6 +106,7 @@ impl RootInode {
             children: Mutex::new(BTreeMap::new()),
         });
         root.children.lock().tap_mut(|it| {
+            it.insert("cpuinfo".to_string(), CpuInfoInode::new(fs.clone(), root.clone()));
             it.insert("mounts".to_string(), MountsInode::new(fs.clone(), root.clone()));
             it.insert("meminfo".to_string(), MeminfoInode::new(fs.clone(), root.clone()));
             it.insert("self".to_string(), SelfInode::new(fs.clone(), root.clone()));

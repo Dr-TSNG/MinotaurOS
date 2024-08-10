@@ -15,7 +15,8 @@ use crate::signal::ffi::Signal;
 
 #[suspend]
 pub async fn sys_nanosleep(req: usize, _rem: usize) -> SyscallResult<usize> {
-    let req = user_transmute_r::<TimeSpec>(req)?.ok_or(Errno::EINVAL)?;
+    let req = user_transmute_r::<TimeSpec>(req)?.ok_or(Errno::EFAULT)?;
+    req.check_forward()?;
     let duration = Duration::from(*req);
     sleep_for(duration).await?;
     Ok(0)
@@ -102,12 +103,9 @@ pub fn sys_clock_gettime(clock_id: usize, buf: usize) -> SyscallResult<usize> {
             *writeback = time;
         }
         _ => {
-            if let Some(clock_time) = GLOBAL_CLOCK.get(clock_id) {
-                let time = TimeSpec::from(clock_time + cpu_time());
-                *writeback = time;
-            } else {
-                return Err(Errno::EINVAL);
-            }
+            let clock_time = GLOBAL_CLOCK.get(clock_id).ok_or(Errno::EINVAL)?;
+            let time = TimeSpec::from(clock_time + cpu_time());
+            *writeback = time;
         }
     }
     Ok(0)
@@ -125,7 +123,8 @@ pub fn sys_clock_getres(clock_id: usize, buf: usize) -> SyscallResult<usize> {
 
 pub async fn sys_clock_nanosleep(clock_id: usize, flags: i32, rqtp: usize, remain: usize) -> SyscallResult<usize> {
     let rqtp = *user_transmute_r::<TimeSpec>(rqtp)?.ok_or(Errno::EFAULT)?;
-    let clock_time = GLOBAL_CLOCK.get(clock_id).ok_or(Errno::EFAULT)?;
+    rqtp.check_forward()?;
+    let clock_time = GLOBAL_CLOCK.get(clock_id).ok_or(Errno::EOPNOTSUPP)?;
     let now = cpu_time();
     let sleep_time = if flags & TIMER_ABSTIME != 0 {
         Duration::from(rqtp).checked_sub(now + clock_time).unwrap_or_default()

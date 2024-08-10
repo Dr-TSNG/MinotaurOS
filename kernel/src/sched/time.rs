@@ -13,6 +13,16 @@ use crate::sync::mutex::IrqMutex;
 const MICROS_PER_SEC: usize = 1000000;
 const TICKS_PER_SEC: usize = 100;
 
+pub trait DurationExt {
+    fn as_ticks(&self) -> usize;
+}
+
+impl DurationExt for Duration {
+    fn as_ticks(&self) -> usize {
+        self.as_micros() as usize / (MICROS_PER_SEC / TICKS_PER_SEC)
+    }
+}
+
 /// 获取从系统启动到现在的时间
 pub fn cpu_time() -> Duration {
     if !BOARD_INFO.is_initialized() {

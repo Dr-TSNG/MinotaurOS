@@ -21,7 +21,13 @@ pub async fn sys_futex(uaddr: usize, op: i32, val: u32, timeout: usize, uaddr2: 
     match op {
         FutexOp::Wait => {
             if cval == val {
-                let timeout = user_transmute_r::<TimeSpec>(timeout)?.cloned().map(Duration::from);
+                let timeout = match user_transmute_r::<TimeSpec>(timeout)? {
+                    Some(timeout) => {
+                        timeout.check_forward()?;
+                        Some(Duration::from(*timeout))
+                    },
+                    None => None,
+                };
                 suspend_now(timeout, Event::all(), FutexFuture::new(VirtAddr(uaddr), val)).await
                     .tap_mut(|it| {
                     if matches!(it, Err(Errno::ETIMEDOUT)) {
