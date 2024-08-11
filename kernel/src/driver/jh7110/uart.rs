@@ -15,13 +15,14 @@ use crate::driver::{CharacterDevice, DeviceMeta, IrqDevice};
 use crate::driver::ffi::DEV_CHAR_TTY;
 use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::result::SyscallResult;
+use crate::sync::mutex::Mutex;
 
 const CTRL_C: u8 = 3;
 
 pub struct Jh7710Uart{
     metadata: DeviceMeta,
     base_addr: VirtAddr,
-    uart: RefCell<jh71xx_hal::uart::Uart<Uart0>>,
+    uart: Mutex<jh71xx_hal::uart::Uart<Uart0>>,
     waker: AtomicWaker,
     buf: AtomicU8,
 }
@@ -32,7 +33,7 @@ impl Jh7710Uart{
         Self{
             metadata: DeviceMeta::new(DEV_CHAR_TTY,0,"uart".to_string()),
             base_addr,
-            uart: RefCell::from(jh71xx_hal::uart::Uart::new(dp.uart0)),
+            uart: Mutex::new(jh71xx_hal::uart::Uart::new(dp.uart0)),
             waker: AtomicWaker::new(),
             buf: AtomicU8::new(0xff),
         }
@@ -111,7 +112,7 @@ impl CharacterDevice for Jh7710Uart{
             }
         }).await
          */
-        let res = self.uart.read_byte();
+        let res = self.uart.lock().read_byte();
         Ok(res.unwrap())
     }
 
@@ -122,7 +123,7 @@ impl CharacterDevice for Jh7710Uart{
             self.txdata_ptr().write_volatile(ch);
         }
          */
-        self.uart.write_byte(ch);
+        self.uart.lock().write_byte(ch);
         Ok(())
     }
 }
@@ -131,7 +132,7 @@ impl CharacterDevice for Jh7710Uart{
 impl IrqDevice for Jh7710Uart{
     fn handle_irq(&self) {
         // let ch = unsafe { self.rxdata_ptr().read_volatile() };
-        let ch = self.uart.read_byte().unwrap();
+        let ch = self.uart.lock().read_byte().unwrap();
         if ch == crate::driver::jh7110::uart::CTRL_C {
             DEFAULT_TTY.handle_ctrl_c();
         }

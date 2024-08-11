@@ -53,6 +53,7 @@ use crate::processor::hart::{KERNEL_STACK, local_hart};
 use crate::result::SyscallResult;
 use crate::sched::executor::run_executor;
 use crate::sync::block_on;
+use jh71xx_hal as _;
 
 global_asm!(include_str!("entry.asm"));
 
