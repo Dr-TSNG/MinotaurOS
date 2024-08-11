@@ -412,10 +412,10 @@ fn parse_dev_tree_jh7110(dtb_paddr: usize) -> Result<(), DevTreeError>{
                     println!("[kernel] Register PLIC at {:?}", b_plic_base);
                     g_mappings.push(mapping);
                 }
-                else if name ==  "serial@10010000"{
+                else if name ==  "serial@10000000"{
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
-                    // 33
+                    // 32
                     let intr = node
                         .props()
                         .find(|prop| prop.name() == Ok("interrupts"))

@@ -1,11 +1,14 @@
 use alloc::boxed::Box;
 use alloc::string::ToString;
+use core::cell::RefCell;
 use core::future::poll_fn;
 use core::sync::atomic::{AtomicU8, Ordering};
 use core::task::{Poll, Waker};
 use async_trait::async_trait;
 
 use futures::task::AtomicWaker;
+use jh71xx_hal::pac;
+use jh71xx_hal::pac::Uart0;
 
 use crate::arch::VirtAddr;
 use crate::driver::{CharacterDevice, DeviceMeta, IrqDevice};
@@ -18,15 +21,18 @@ const CTRL_C: u8 = 3;
 pub struct Jh7710Uart{
     metadata: DeviceMeta,
     base_addr: VirtAddr,
+    uart: RefCell<jh71xx_hal::uart::Uart<Uart0>>,
     waker: AtomicWaker,
     buf: AtomicU8,
 }
 
 impl Jh7710Uart{
     pub fn new(base_addr: VirtAddr) -> Self{
+        let dp = pac::Peripherals::take().unwrap();
         Self{
             metadata: DeviceMeta::new(DEV_CHAR_TTY,0,"uart".to_string()),
             base_addr,
+            uart: RefCell::from(jh71xx_hal::uart::Uart::new(dp.uart0)),
             waker: AtomicWaker::new(),
             buf: AtomicU8::new(0xff),
         }
@@ -85,6 +91,7 @@ impl CharacterDevice for Jh7710Uart{
     }
 
     async fn getchar(&self) -> SyscallResult<u8> {
+        /*
         poll_fn(|cx| unsafe {
             // Fast path
             let val = self.buf.swap(0xff, Ordering::Relaxed);
@@ -103,13 +110,19 @@ impl CharacterDevice for Jh7710Uart{
                 Poll::Pending
             }
         }).await
+         */
+        let res = self.uart.read_byte();
+        Ok(res.unwrap())
     }
 
     async fn putchar(&self, ch: u8) -> SyscallResult {
+        /*
         unsafe {
             while (self.line_status_ptr().read_volatile() & (1 << 5)) == 0 {}
             self.txdata_ptr().write_volatile(ch);
         }
+         */
+        self.uart.write_byte(ch);
         Ok(())
     }
 }
@@ -117,11 +130,12 @@ impl CharacterDevice for Jh7710Uart{
 
 impl IrqDevice for Jh7710Uart{
     fn handle_irq(&self) {
-        let ch = unsafe { self.rxdata_ptr().read_volatile() };
+        // let ch = unsafe { self.rxdata_ptr().read_volatile() };
+        let ch = self.uart.read_byte().unwrap();
         if ch == crate::driver::jh7110::uart::CTRL_C {
             DEFAULT_TTY.handle_ctrl_c();
         }
-        self.buf.store(ch, Ordering::Relaxed);
-        self.waker.wake();
+        // self.buf.store(ch, Ordering::Relaxed);
+        // self.waker.wake();
     }
 }
