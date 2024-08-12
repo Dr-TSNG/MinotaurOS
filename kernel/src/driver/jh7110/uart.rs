@@ -72,11 +72,11 @@ impl Jh7710Uart{
     }
 
     fn ie_ptr(&self) -> *mut u8 {
-        (self.base_addr + 1).as_ptr()
+        (self.base_addr + 0x4).as_ptr()
     }
 
     fn fifo_ctrl_ptr(&self) -> *mut u8 {
-        (self.base_addr + 2).as_ptr()
+        (self.base_addr + 0x8).as_ptr()
     }
 
     /* fn is_ptr(&self) -> *mut u8 {
@@ -84,23 +84,23 @@ impl Jh7710Uart{
     }*/
 
     fn line_ctrl_ptr(&self) -> *mut u8 {
-        (self.base_addr + 3).as_ptr()
+        (self.base_addr + 0xc).as_ptr()
     }
 
     fn line_status_ptr(&self) -> *mut u8 {
-        (self.base_addr + 5).as_ptr()
+        (self.base_addr + 0x14).as_ptr()
     }
 
     fn modem_ctrl_ptr(&self) -> *mut u8 {
-        (self.base_addr + 4).as_ptr()
+        (self.base_addr + 0x10).as_ptr()
     }
 
     fn modem_status_ptr(&self) -> *mut u8 {
-        (self.base_addr + 6).as_ptr()
+        (self.base_addr + 0x18).as_ptr()
     }
 
     fn scr_ptr(&self) -> *mut u8 {
-        (self.base_addr + 7).as_ptr()
+        (self.base_addr + 0x1c).as_ptr()
     }
 }
 
