@@ -11,7 +11,7 @@ use jh71xx_hal::pac;
 use jh71xx_hal::pac::Uart0;
 
 use crate::arch::VirtAddr;
-use crate::driver::{CharacterDevice, DeviceMeta, IrqDevice};
+use crate::driver::{CharacterDevice, DeviceMeta, IrqDevice, jh7110};
 use crate::driver::ffi::DEV_CHAR_TTY;
 use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::result::SyscallResult;
@@ -45,7 +45,7 @@ pub struct Jh7710Uart{
     metadata: DeviceMeta,
     base_addr: VirtAddr,
     // uart: Mutex<jh71xx_hal::uart::Uart<Uart0>>,
-    dw8250: dw_apb_uart::DW8250,
+    dw8250: Mutex<dw_apb_uart::DW8250>,
     waker: AtomicWaker,
     buf: AtomicU8,
 }
@@ -57,7 +57,7 @@ impl Jh7710Uart{
             metadata: DeviceMeta::new(DEV_CHAR_TTY,0,"uart".to_string()),
             base_addr,
             // uart: Mutex::new(jh71xx_hal::uart::Uart::new(dp.uart0)),
-            dw8250: dw_apb_uart::DW8250::new(base_addr.0),
+            dw8250: Mutex::new(dw_apb_uart::DW8250::new(base_addr.0)),
             waker: AtomicWaker::new(),
             buf: AtomicU8::new(0xff),
         }
