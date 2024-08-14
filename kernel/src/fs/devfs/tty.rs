@@ -72,7 +72,7 @@ impl File for TtyFile {
     }
 
     async fn read(&self, buf: &mut [u8]) -> SyscallResult<isize> {
-        let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
+        let mut device = self.device.upgrade().ok_or(Errno::ENODEV)?;
         for i in 0..buf.len() {
             buf[i] = device.getchar().await?;
         }
@@ -80,7 +80,7 @@ impl File for TtyFile {
     }
 
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
-        let device = self.device.upgrade().ok_or(Errno::ENODEV)?;
+        let mut device = self.device.upgrade().ok_or(Errno::ENODEV)?;
         for ch in buf.iter() {
             device.putchar(*ch).await?;
         }

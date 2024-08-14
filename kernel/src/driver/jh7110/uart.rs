@@ -1,180 +1,288 @@
 use alloc::boxed::Box;
+
+macro_rules! wait_for {
+    ($cond:expr) => {{
+        let mut timeout = 10000000;
+        while !$cond && timeout > 0 {
+            core::hint::spin_loop();
+            timeout -= 1;
+        }
+    }};
+}
 use alloc::string::ToString;
-use core::cell::RefCell;
-use core::future::poll_fn;
-use core::sync::atomic::{AtomicU8, Ordering};
-use core::task::{Poll, Waker};
+use core::task::Waker;
 use async_trait::async_trait;
+pub(crate) use wait_for;
 
-use futures::task::AtomicWaker;
-use jh71xx_hal::pac;
-use jh71xx_hal::pac::Uart0;
-
-use crate::arch::VirtAddr;
-use crate::driver::{CharacterDevice, DeviceMeta, IrqDevice, jh7110};
+use bitflags::{bitflags,Flags};
+use log::info;
+use crate::driver::{CharacterDevice, DeviceMeta, IrqDevice};
 use crate::driver::ffi::DEV_CHAR_TTY;
-use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::result::SyscallResult;
-use crate::sync::mutex::Mutex;
 
-const CTRL_C: u8 = 3;
-/*
-register_structs! {
-    DW8250Regs {
-        /// Get or Put Register.
-        (0x00 => rbr: ReadWrite<u32>),    // 用于读取接收到的数据。当UART接收到数据时，该寄存器会存储接收到的字节。通常情况下，这个寄存器会与发送寄存器共享同一个地址
-        (0x04 => ier: ReadWrite<u32>),    // 用于控制UART中断的使能。通过设置该寄存器的位，可以启用或禁用特定类型的中断
-        (0x08 => fcr: ReadWrite<u32>),    // 控制FIFO缓冲区的操作，例如清除发送和接收FIFO，设置FIFO触发级别等
-        (0x0c => lcr: ReadWrite<u32>),    // 用于配置数据格式，包括数据位长度、停止位、校验位等。
-        (0x10 => mcr: ReadWrite<u32>),    // 控制调制解调器的操作，比如RTS（请求发送）、DTR（数据终端就绪）等控制信号的状态。
-        (0x14 => lsr: ReadOnly<u32>),     // 用于指示UART的当前状态，包括接收FIFO是否有数据可读、发送FIFO是否为空、接收缓冲区是否溢出、帧错误、校验错误等
-        (0x18 => msr: ReadOnly<u32>),     // 提供调制解调器控制信号的当前状态，比如CTS（清除发送）、DSR（数据设置就绪）、RI（振铃指示）和DCD（数据载波检测）等信号的状态
-        (0x1c => scr: ReadWrite<u32>),    // 通常作为临时存储数据的寄存器，没有特定的硬件功能，供用户自定义用途。
-        (0x20 => lpdll: ReadWrite<u32>),  // 设置波特率分频器的低字节。与高字节寄存器一起控制UART的波特率
-        (0x24 => _reserved0),
-        /// Uart Status Register.
-        (0x7c => usr: ReadOnly<u32>),     // 提供UART内部状态的摘要，比如发送和接收FIFO的状态、是否正在忙碌等。这是一个只读寄存器。
-        (0x80 => _reserved1),
-        (0xc0 => dlf: ReadWrite<u32>),    // 用于调整波特率的分数部分，以提高波特率的分辨率。这个寄存器结合lpdll和lpdhl（高位寄存器）可以精确控制UART的波特率。
-        (0xc4 => @END),
+const RHR: usize = 0; // receive holding register (for input bytes)
+const THR: usize = 0; // transmit holding register (for output bytes)
+const IER: usize = 1; // interrupt enable register
+const FCR: usize = 2; // FIFO control register
+const ISR: usize = 2; // interrupt status register
+const LCR: usize = 3; // line control register
+const MCR: usize = 4; // modem control register
+const LSR: usize = 5; // line status register
+
+bitflags! {
+    /// Interrupt enable flags
+    struct IntEnFlags: u8 {
+        const RECEIVED = 1;
+        const SENT = 1 << 1;
+        const ERRORED = 1 << 2;
+        const STATUS_CHANGE = 1 << 3;
+        // 4 to 7 are unused
     }
 }
-*/
 
-pub struct Jh7710Uart{
-    metadata: DeviceMeta,
-    base_addr: VirtAddr,
-    // uart: Mutex<jh71xx_hal::uart::Uart<Uart0>>,
-    dw8250: Mutex<dw_apb_uart::DW8250>,
-    waker: AtomicWaker,
-    buf: AtomicU8,
+bitflags! {
+    /// Line status flags
+    struct LineStsFlags: u8 {
+        const INPUT_FULL = 1;
+        // 1 to 4 unknown
+        const OUTPUT_EMPTY = 1 << 5;
+        // 6 and 7 unknown
+    }
 }
 
-impl Jh7710Uart{
-    pub fn new(base_addr: VirtAddr) -> Self{
-        let dp = pac::Peripherals::take().unwrap();
-        Self{
+pub struct Uart {
+    metadata: DeviceMeta,
+    /// UART MMIO base address
+    mmio_base_vaddr: usize,
+    clock_frequency: u32,
+    baud_rate: u32,
+    reg_io_width: usize,
+    reg_shift: usize,
+    is_snps: bool,
+}
+
+impl Uart{
+    pub unsafe fn new(
+        mmio_base_vaddr: usize,
+        clock_frequency: usize,
+        baud_rate: usize,
+        reg_io_width: usize,
+        reg_shift: usize,
+        is_snps: bool,
+    ) -> Self {
+        Self {
             metadata: DeviceMeta::new(DEV_CHAR_TTY,0,"uart".to_string()),
-            base_addr,
-            // uart: Mutex::new(jh71xx_hal::uart::Uart::new(dp.uart0)),
-            dw8250: Mutex::new(dw_apb_uart::DW8250::new(base_addr.0)),
-            waker: AtomicWaker::new(),
-            buf: AtomicU8::new(0xff),
+            mmio_base_vaddr,
+            clock_frequency: clock_frequency as u32,
+            baud_rate: baud_rate as u32,
+            reg_io_width,
+            reg_shift,
+            is_snps,
         }
     }
 
-    fn rxdata_ptr(&self) -> *mut u8 {
-        self.base_addr.as_ptr()
+    pub fn _init(&self) {
+        match self.reg_io_width {
+            1 => self.init_u8(),
+            4 => self.init_u32(),
+            _ => {
+                panic!("Unsupported UART register width");
+            }
+        }
     }
 
-    fn txdata_ptr(&self) -> *mut u8 {
-        self.base_addr.as_ptr()
+    pub fn send(&self, c: u8) {
+        match self.reg_io_width {
+            1 => self.send_u8(c),
+            4 => self.send_u32(c),
+            _ => {
+                panic!("Unsupported UART register width");
+            }
+        }
     }
 
-    fn ie_ptr(&self) -> *mut u8 {
-        (self.base_addr + 0x4).as_ptr()
+    fn init_u8(&self) {
+        let reg = self.mmio_base_vaddr as *mut u8;
+
+        unsafe {
+            // Disable Interrupt
+            reg.byte_add(IER << self.reg_shift).write_volatile(0x00);
+
+            // Enable DLAB
+            // Enter a setting mode to set baud rate
+            reg.byte_add(LCR << self.reg_shift).write_volatile(0x80);
+
+            // Set baud rate
+            let divisor = self.clock_frequency / (16 * self.baud_rate);
+            reg.byte_add(0 << self.reg_shift)
+                .write_volatile(divisor as u8);
+            reg.byte_add(1 << self.reg_shift)
+                .write_volatile((divisor >> 8) as u8);
+
+            // Disable DLAB and set data word length to 8 bits
+            // Leave setting mode
+            reg.byte_add(LCR << self.reg_shift).write_volatile(0x03);
+
+            // // Enable FIFO
+            // reg.byte_add(FCR << self.reg_shift).write_volatile(0x01);
+
+            // No modem control
+            reg.byte_add(MCR << self.reg_shift).write_volatile(0x00);
+
+            // Enable interrupts now
+            reg.byte_add(IER << self.reg_shift).write_volatile(0x01);
+        }
     }
 
-    fn fifo_ctrl_ptr(&self) -> *mut u8 {
-        (self.base_addr + 0x8).as_ptr()
+    fn init_u32(&self) {
+        let reg = self.mmio_base_vaddr as *mut u32;
+
+        unsafe {
+            // Disable Interrupt
+            reg.byte_add(IER << self.reg_shift).write_volatile(0x00);
+
+            // Enable DLAB
+            // Enter a setting mode to set baud rate
+            reg.byte_add(LCR << self.reg_shift).write_volatile(0x80);
+
+            // Set baud rate
+            let divisor = self.clock_frequency / (16 * self.baud_rate);
+            reg.byte_add(0 << self.reg_shift)
+                .write_volatile(divisor & 0xff);
+            reg.byte_add(1 << self.reg_shift)
+                .write_volatile((divisor >> 8) & 0xff);
+
+            // Disable DLAB and set data word length to 8 bits
+            // Leave setting mode
+            reg.byte_add(LCR << self.reg_shift).write_volatile(0x03);
+
+            // Enable FIFO
+            reg.byte_add(FCR << self.reg_shift).write_volatile(0x01);
+
+            // No modem control
+            reg.byte_add(MCR << self.reg_shift).write_volatile(0x00);
+
+            // Enable interrupts now
+            reg.byte_add(IER << self.reg_shift).write_volatile(0x01);
+        }
+        info!("IER register: 0b{:b}", unsafe {
+            reg.byte_add(IER << self.reg_shift).read_volatile()
+        });
     }
 
-    /* fn is_ptr(&self) -> *mut u8 {
-        (self.base_addr + 2).as_ptr()
-    }*/
-
-    fn line_ctrl_ptr(&self) -> *mut u8 {
-        (self.base_addr + 0xc).as_ptr()
+    fn line_sts_u8(&self) -> LineStsFlags {
+        let ptr = self.mmio_base_vaddr as *mut u8;
+        unsafe {
+            LineStsFlags::from_bits_truncate(ptr.byte_add(LSR << self.reg_shift).read_volatile())
+        }
     }
 
-    fn line_status_ptr(&self) -> *mut u8 {
-        (self.base_addr + 0x14).as_ptr()
+    fn line_sts_u32(&self) -> LineStsFlags {
+        let ptr = self.mmio_base_vaddr as *mut u32;
+        unsafe {
+            LineStsFlags::from_bits_truncate(
+                ptr.byte_add(LSR << self.reg_shift).read_volatile() as u8
+            )
+        }
     }
 
-    fn modem_ctrl_ptr(&self) -> *mut u8 {
-        (self.base_addr + 0x10).as_ptr()
+    /// Sends a byte on the serial port.
+    pub fn send_u8(&self, c: u8) {
+        let ptr = self.mmio_base_vaddr as *mut u8;
+        unsafe {
+            match c {
+                8 | 0x7F => {
+                    // For backspace and delete char
+                    wait_for!(self.line_sts_u8().contains(LineStsFlags::OUTPUT_EMPTY));
+                    ptr.byte_add(THR << self.reg_shift).write_volatile(8);
+                    wait_for!(self.line_sts_u8().contains(LineStsFlags::OUTPUT_EMPTY));
+                    ptr.byte_add(THR << self.reg_shift).write_volatile(b' ');
+                    wait_for!(self.line_sts_u8().contains(LineStsFlags::OUTPUT_EMPTY));
+                    ptr.byte_add(THR << self.reg_shift).write_volatile(8);
+                }
+                _ => {
+                    // Wait until previous data is flushed
+                    wait_for!(self.line_sts_u8().contains(LineStsFlags::OUTPUT_EMPTY));
+                    // Write data
+                    ptr.byte_add(THR << self.reg_shift).write_volatile(c);
+                }
+            }
+        }
     }
 
-    fn modem_status_ptr(&self) -> *mut u8 {
-        (self.base_addr + 0x18).as_ptr()
+    pub fn send_u32(&self, c: u8) {
+        let ptr = self.mmio_base_vaddr as *mut u32;
+        unsafe {
+            match c {
+                8 | 0x7F => {
+                    wait_for!(self.line_sts_u32().contains(LineStsFlags::OUTPUT_EMPTY));
+                    ptr.byte_add(THR << self.reg_shift).write_volatile(8);
+                    wait_for!(self.line_sts_u32().contains(LineStsFlags::OUTPUT_EMPTY));
+                    ptr.byte_add(THR << self.reg_shift)
+                        .write_volatile(b' '.into());
+                    wait_for!(self.line_sts_u32().contains(LineStsFlags::OUTPUT_EMPTY));
+                    ptr.byte_add(THR << self.reg_shift).write_volatile(8);
+                }
+                _ => {
+                    // Wait until previous data is flushed
+                    wait_for!(self.line_sts_u32().contains(LineStsFlags::OUTPUT_EMPTY));
+                    // Write data
+                    ptr.byte_add(THR << self.reg_shift).write_volatile(c.into());
+                }
+            }
+        }
     }
 
-    fn scr_ptr(&self) -> *mut u8 {
-        (self.base_addr + 0x1c).as_ptr()
+    /// Receives a byte on the serial port.
+    pub fn receive(&self) -> u8 {
+        let ptr = self.mmio_base_vaddr as *mut u32;
+        unsafe {
+            wait_for!(self.line_sts_u8().contains(LineStsFlags::INPUT_FULL));
+            if self.is_snps {
+                // Clear busy detect interrupt
+                // by reading UART status register. see Synopsys documentation
+                // hard-coded register offset
+                ptr.byte_add(31 << self.reg_shift).read_volatile();
+            }
+            ptr.add(0).read_volatile() as u8
+        }
     }
+
 }
 
 #[async_trait]
-impl CharacterDevice for Jh7710Uart{
+impl CharacterDevice for Uart{
     fn metadata(&self) -> &DeviceMeta {
         &self.metadata
     }
 
     fn init(&self) {
-        unsafe {
-            /*self.ie_ptr().write_volatile(0);
-            self.fifo_ctrl_ptr().write_volatile((1 << 0) | (3 << 1));
-            self.ie_ptr().write_volatile(1);*/
-            self.dw8250.lock().init();
-        }
+        self._init();
     }
 
     fn has_data(&self) -> bool {
-        self.buf.load(Ordering::Relaxed) != 0xff ||
-            unsafe { self.line_status_ptr().read_volatile() & 0x01 == 0x01 }
+        match self.reg_io_width {
+            1 => self.line_sts_u8().contains(LineStsFlags::INPUT_FULL),
+            4 => self.line_sts_u32().contains(LineStsFlags::INPUT_FULL),
+            _ => unimplemented!(),
+        }
     }
 
     fn register_waker(&self, waker: Waker) {
-        self.waker.register(&waker);
+        todo!()
     }
 
     async fn getchar(&self) -> SyscallResult<u8> {
-        poll_fn(|cx| unsafe {
-            // Fast path
-            let val = self.buf.swap(0xff, Ordering::Relaxed);
-            if val != 0xff {
-                return Poll::Ready(Ok(val));
-            } else if self.line_status_ptr().read_volatile() & 0x01 == 0x01 {
-                return Poll::Ready(Ok(self.rxdata_ptr().read_volatile()));
-            }
-
-            self.waker.register(cx.waker());
-
-            // Slow path
-            if self.buf.swap(0xff, Ordering::Relaxed) != 0xff {
-                Poll::Ready(Ok(self.buf.load(Ordering::Relaxed)))
-            } else {
-                Poll::Pending
-            }
-        }).await
-
-        /*
-        let res = self.uart.lock().read_byte();
-        Ok(res.unwrap())
-         */
+        Ok(self.receive())
     }
 
     async fn putchar(&self, ch: u8) -> SyscallResult {
-        unsafe {
-            while (self.line_status_ptr().read_volatile() & (1 << 5)) == 0 {}
-            self.txdata_ptr().write_volatile(ch);
-        }
-        Ok(())
-        /*
-       self.uart.lock().write_byte(ch).expect("TODO: panic message");
-        */
+        Ok(self.send(ch))
     }
 }
 
-
-impl IrqDevice for Jh7710Uart{
+impl IrqDevice for Uart{
     fn handle_irq(&self) {
-        let ch = unsafe { self.rxdata_ptr().read_volatile() };
-        // let ch = self.uart.lock().read_byte().unwrap();
-        if ch == crate::driver::jh7110::uart::CTRL_C {
-            DEFAULT_TTY.handle_ctrl_c();
-        }
-        self.buf.store(ch, Ordering::Relaxed);
-        self.waker.wake();
+        todo!()
     }
 }

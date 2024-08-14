@@ -22,6 +22,7 @@ use crate::fs::ffi::OpenFlags;
 use crate::fs::file::FileMeta;
 use crate::mm::addr_space::ASPerms;
 use crate::{arch, println};
+use crate::driver::jh7110::uart::Uart;
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
@@ -388,14 +389,14 @@ fn parse_dev_tree_jh7110(dtb_paddr: usize) -> Result<(), DevTreeError>{
                 g_mappings.push(mapping);
             }
         }
-        else if name == "soc"{
-            for node in node.children(){
+        else if name == "soc" {
+            for node in node.children() {
                 let name = node.name()?;
                 let compatible = node
                     .props()
                     .find(|prop| prop.name() == Ok("compatible"))
                     .and_then(|prop| prop.str().ok());
-                if name.starts_with("plic@"){
+                if name.starts_with("plic@") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     if mmio_offset % reg[0].1 != 0 {
                         mmio_offset += reg[0].1 - mmio_offset % reg[0].1;
@@ -412,7 +413,7 @@ fn parse_dev_tree_jh7110(dtb_paddr: usize) -> Result<(), DevTreeError>{
                     println!("[kernel] Register PLIC at {:?}", b_plic_base);
                     g_mappings.push(mapping);
                 }
-                else if name ==  "serial@10000000"{
+                else if name == "serial@10000000" {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
                     // 32
@@ -428,11 +429,33 @@ fn parse_dev_tree_jh7110(dtb_paddr: usize) -> Result<(), DevTreeError>{
                         ASPerms::R | ASPerms::W,
                     );
                     mmio_offset += size;
-                    let dev = Arc::new(jh7110::uart::Jh7710Uart::new(mapping.virt_start));
+                    let dev = Arc::new(unsafe{Uart::new(mapping.virt_start.0, 4000000 ,115200,4,2,true)});
                     b_plic_intr.insert(intr as usize, dev.clone());
                     DEVICES.lock().insert(dev.metadata().dev_id, Device::Character(dev));
                     println!("[kernel] Register serial device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
+
+                    /*
+                    let reg = parse_reg(&node, addr_cells, size_cells);
+                    let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+                    let intr = node
+                        .props()
+                        .find(|prop| prop.name() == Ok("interrupts"))
+                        .unwrap().u32(0)?;
+                    let mapping = GlobalMapping::new(
+                        format!("[serial@{:x}]", reg[0].0),
+                        PhysAddr(reg[0].0),
+                        KERNEL_MMIO_BASE + mmio_offset,
+                        size,
+                        ASPerms::R | ASPerms::W,
+                    );
+                    mmio_offset += size;
+                    let dev = Arc::new(ns16550a::UartDevice::new(mapping.virt_start));
+                    b_plic_intr.insert(intr as usize, dev.clone());
+                    DEVICES.lock().insert(dev.metadata().dev_id, Device::Character(dev));
+                    println!("[kernel] Register serial device at {:?}", mapping.virt_start);
+                    g_mappings.push(mapping);
+                     */
                 }
             }
         }

@@ -142,6 +142,7 @@ fn start_secondary_hart(hart_id: usize) -> SyscallResult<!> {
 #[no_mangle]
 pub unsafe extern "C" fn pspace_main() {
     asm! {
+    "li a1, 0x80000000",      // 设备树地址为 0x80000000
     "la t0, {0}",
     "li t1, {1}",
     "mul sp, a0, t1",
