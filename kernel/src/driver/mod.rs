@@ -241,8 +241,9 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                 let compatible = node
                     .props()
                     .find(|prop| prop.name() == Ok("compatible"))
-                    .and_then(|prop| prop.str().ok())
-                    .unwrap();
+                    .unwrap()
+                    .propbuf();
+                let compatible = core::str::from_utf8(compatible).unwrap();
                 if name == "virtio_mmio@10001000" {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let mapping = GlobalMapping::new(
