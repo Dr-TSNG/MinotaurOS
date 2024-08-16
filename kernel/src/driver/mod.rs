@@ -322,7 +322,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                         ASPerms::R | ASPerms::W,
                     );
                     mmio_offset += size;
-                    let dev = Arc::new(ns16550a::UartDevice::new(mapping.virt_start));
+                    let dev = Arc::new(dw_apb_uart::UartDevice::new(mapping.virt_start));
                     b_plic_intr.insert(intr as usize, dev.clone());
                     DEVICES.lock().insert(dev.metadata().dev_id, Device::Character(dev));
                     println!("[kernel] Register serial device at {:?}", mapping.virt_start);
