@@ -4,6 +4,7 @@ use crate::arch::{PAGE_SIZE, VirtAddr, VirtPageNum};
 use crate::mm::addr_space::{AddressSpace, ASPerms};
 use crate::mm::region::ASRegionMeta;
 use crate::mm::region::lazy::LazyRegion;
+use crate::println;
 use crate::processor::hart::local_hart;
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
@@ -21,9 +22,13 @@ mod sysv_shm;
 pub static KERNEL_SPACE: LateInit<Mutex<AddressSpace>> = LateInit::new();
 
 pub fn vm_init(primary: bool) -> SyscallResult {
+    println!("vm_init begin");
+    info!("vm_init begin");
     if primary {
+        println!("kernel space init begin");
         KERNEL_SPACE.init(Mutex::new(AddressSpace::new_kernel()));
         vm_test()?;
+        println!("kernel space init done");
         info!("Kernel address space initialized");
     }
     let kernel_space = KERNEL_SPACE.lock();

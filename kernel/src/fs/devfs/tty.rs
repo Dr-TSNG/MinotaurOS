@@ -82,8 +82,8 @@ impl File for TtyFile {
     async fn write(&self, buf: &[u8]) -> SyscallResult<isize> {
         let mut device = self.device.upgrade().ok_or(Errno::ENODEV)?;
         for ch in buf.iter() {
-            // device.putchar(*ch).await?;
-            sbi_rt::legacy::console_putchar(*ch as usize);
+            device.putchar(*ch).await?;
+            // sbi_rt::legacy::console_putchar(*ch as usize);
         }
         Ok(buf.len() as isize)
     }

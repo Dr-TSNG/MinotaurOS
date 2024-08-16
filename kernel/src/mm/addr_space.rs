@@ -31,6 +31,7 @@ use crate::mm::region::file::FileRegion;
 use crate::mm::region::lazy::LazyRegion;
 use crate::mm::region::shared::SharedRegion;
 use crate::mm::sysv_shm::SysVShm;
+use crate::println;
 use crate::process::aux::{self, Aux};
 use crate::process::thread::Audit;
 use crate::processor::hart::local_hart;
@@ -99,7 +100,7 @@ pub struct AddressSpace {
 impl AddressSpace {
     pub fn new_bare() -> Self {
         let root_pt_page = alloc_kernel_frames(1);
-        debug!("[addr_space] create root page table {:?}", root_pt_page.ppn);
+        info!("[addr_space] create root page table {:?}", root_pt_page.ppn);
         let mut addr_space = AddressSpace {
             token: TOKEN_COUNTER.fetch_add(1, Ordering::Relaxed),
             root_pt: PageTable::new(root_pt_page.ppn),
@@ -114,8 +115,11 @@ impl AddressSpace {
     }
 
     pub fn new_kernel() -> Self {
+        info!("address space new_kernel() enter");
         let mut addr_space = Self::new_bare();
+        info!("new_bare done");
         addr_space.copy_global_mappings();
+        info!("copy_global_mappings done");
         for region in addr_space.regions.values() {
             let start = region.metadata().start;
             let end = start + region.metadata().pages;
@@ -494,8 +498,10 @@ impl AddressSpace {
 
     fn copy_global_mappings(&mut self) {
         for map in GLOBAL_MAPPINGS.iter() {
-            debug!("[addr_space] Copy global mappings: {} from {:?} to {:?}", map.name, map.phys_start, map.phys_end());
+            info!("[addr_space] Copy global mappings: {} from {:?} to {:?}", map.name, map.phys_start, map.phys_end());
             let ppn_start = PhysPageNum::from(map.phys_start);
+            info!("[addr_space] map.virt_start is {:x}",map.virt_start.0);
+            info!("[addr_space] map.size is {:x}",map.size);
             let vpn_start = VirtPageNum::from(map.virt_start);
             let vpn_end = VirtPageNum::from(map.virt_end());
 

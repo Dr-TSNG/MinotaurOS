@@ -36,25 +36,25 @@ mod syscall;
 mod system;
 mod trap;
 
-use core::arch::{asm, global_asm};
-use core::fmt::{Binary, Debug};
-use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicBool, Ordering};
-use log::{error, info, warn};
-use sbi_spec::hsm::hart_state;
-use arch::shutdown;
-use config::KERNEL_ADDR_OFFSET;
 use crate::arch::sbi;
 use crate::config::{KERNEL_PADDR_BASE, KERNEL_STACK_SIZE, LINKAGE_EBSS, LINKAGE_SBSS};
 use crate::debug::console::dmesg_flush_tty;
 use crate::driver::BOARD_INFO;
 use crate::process::Process;
 use crate::processor::hart;
-use crate::processor::hart::{KERNEL_STACK, local_hart};
+use crate::processor::hart::{local_hart, KERNEL_STACK};
 use crate::result::SyscallResult;
 use crate::sched::executor::run_executor;
 use crate::sync::block_on;
+use arch::shutdown;
+use config::KERNEL_ADDR_OFFSET;
+use core::arch::{asm, global_asm};
+use core::fmt::{Binary, Debug};
+use core::panic::PanicInfo;
+use core::sync::atomic::{AtomicBool, Ordering};
 use jh71xx_hal as _;
+use log::{error, info, warn};
+use sbi_spec::hsm::hart_state;
 
 global_asm!(include_str!("entry.asm"));
 
@@ -75,18 +75,23 @@ fn clear_bss() {
 }
 
 fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
+    let dtb_paddr = 0x70000000;
     // crate::arch::sbi::console_write("start_main_hart begin\n");
     clear_bss();
     // crate::arch::sbi::console_write("clear_bss done\n");
     mm::allocator::init_heap();
     crate::arch::sbi::console_write("init heap done\n");
     println!("println down , hart id is {}",hart_id);
-    println!("dtb_paddr is {:#13x}",dtb_paddr);
+    // println!("dtb_paddr is {:#13x}",dtb_paddr);
     hart::init(hart_id);
     crate::arch::sbi::console_write("hart init done\n");
     trap::init();
     crate::arch::sbi::console_write("trap init done\n");
-
+    //                                  ppn[2] ppn[1]       ppn[0]
+    // 0x8000 0 ->                      10     00_0000_000  0_0000_0000_   0000000000
+    // 0xf700 0 ->                      11     11_0111_000  0_0000_0000_   0000000000
+    // 0xffff_ffff_8000_0000    (510  1fe) 1 111111 10     00_0000_000  0_0000_0000_   0000000000
+    // 0xffff_ffff_f700_0000    ()
     println!("dtb_paddr is {:#13x}", dtb_paddr);
     driver::init_dtb(dtb_paddr);
     crate::arch::sbi::console_write("init_dtb done");
@@ -104,9 +109,13 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     println!("╚══════════════════════╩═══════════════╝");
 
     sched::init();
+    println!("sched::init() down");
     mm::vm_init(true)?;
+    println!("mm::vm_init() down");
     driver::init_driver()?;
+    println!("driver::init_driver() down");
     builtin::init();
+    println!("builtin::init() down");
     dmesg_flush_tty();
     let data = builtin::builtin_app("shell").unwrap();
     let mnt_ns = fs::init()?;

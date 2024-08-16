@@ -11,6 +11,7 @@ use fdt_rs::base::DevTree;
 use fdt_rs::error::DevTreeError;
 use fdt_rs::index::{DevTreeIndex, DevTreeIndexNode};
 use fdt_rs::prelude::PropReader;
+use log::info;
 use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 use crate::config::{KERNEL_ADDR_OFFSET, KERNEL_MMIO_BASE};
 use crate::driver::ffi::make_dev;
@@ -159,14 +160,17 @@ pub fn init_dtb(dtb_paddr: usize) {
 }
 
 pub fn init_driver() -> SyscallResult<()> {
+    info!("[init_driver()] DEVICES init begin");
     for device in DEVICES.lock().values() {
         device.init();
         if let Device::Character(dev) = device {
+            println!("char dev init entry");
             if dev.metadata().dev_name == "uart" {
                 DEFAULT_TTY.init(TtyFile::new(FileMeta::new(None, OpenFlags::O_RDWR), dev.clone()));
             }
         }
     }
+    info!("[init_driver()] DEVICES init end");
     BOARD_INFO.plic.init(BOARD_INFO.smp);
     if let Some(addr) = NET_DEVICE_ADDR.lock().deref() {
         let dev = VirtIONetDevice::new(*addr);
@@ -334,6 +338,7 @@ fn parse_dev_tree_qemu(dtb_paddr: usize) -> Result<(), DevTreeError> {
     Ok(())
 }
 fn parse_dev_tree_jh7110(dtb_paddr: usize) -> Result<(), DevTreeError>{
+    println!("init dtb jh7110 begin...");
     let mut mmio_offset = 0;
     let mut b_smp = 0;
     let mut b_freq = 0;
@@ -392,11 +397,13 @@ fn parse_dev_tree_jh7110(dtb_paddr: usize) -> Result<(), DevTreeError>{
         else if name == "soc" {
             for node in node.children() {
                 let name = node.name()?;
+                // println!("[soc:node] name is {}",name);
                 let compatible = node
                     .props()
                     .find(|prop| prop.name() == Ok("compatible"))
-                    .and_then(|prop| prop.str().ok());
-                if name.starts_with("plic@") {
+                    .and_then(|prop| prop.str().ok())
+                    .unwrap();
+                if compatible.contains("sifive,plic-1.0.0") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     if mmio_offset % reg[0].1 != 0 {
                         mmio_offset += reg[0].1 - mmio_offset % reg[0].1;
@@ -471,6 +478,11 @@ fn parse_dev_tree_jh7110(dtb_paddr: usize) -> Result<(), DevTreeError>{
     };
     BOARD_INFO.init(board_info);
     GLOBAL_MAPPINGS.init(g_mappings);
+
+    for i in GLOBAL_MAPPINGS.iter(){
+        println!("name is {} ; virt_start is {:x} ; phys_start is {:x} ;  size is {:x} ; ",i.name,i.virt_start.0,i.phys_start.0,i.size);
+    }
+
     Ok(())
 }
 fn parse_reg(node: &DevTreeIndexNode, addr_cells: usize, size_cells: usize) -> Vec<(usize, usize)> {

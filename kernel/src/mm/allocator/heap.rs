@@ -1,6 +1,7 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::NonNull;
 use buddy_system_allocator::Heap;
+use log::info;
 use crate::arch::{kvpn_to_ppn, PAGE_SIZE, PhysPageNum, ppn_to_kvpn, VirtAddr, VirtPageNum};
 use crate::config::KERNEL_HEAP_SIZE;
 use crate::println;
@@ -51,6 +52,7 @@ unsafe impl GlobalAlloc for HeapAllocator {
 ///
 /// SAFETY: 保证分配的页已经清零
 pub fn alloc_kernel_frames(pages: usize) -> HeapFrameTracker {
+    info!("alloc_kernel_frames enter");
     let vpn = KERNEL_HEAP.0.lock()
         .alloc(Layout::from_size_align(pages * PAGE_SIZE, PAGE_SIZE).unwrap())
         .map(|va| VirtPageNum::from(VirtAddr(va.as_ptr() as usize)))

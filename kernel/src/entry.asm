@@ -18,9 +18,9 @@ _start:
 boot_page_table:
     # 0x0000_0000_8000_0000 -> 0x0000_0000_8000_0000
     # 0xffff_ffff_8000_0000 -> 0x0000_0000_8000_0000
-    .quad 0
-    .quad 0
+    .quad (0x00000 << 10) | 0xcf
+    .quad (0x40000 << 10) | 0xcf
     .quad (0x80000 << 10) | 0xcf # VRWXAD
-    .zero 8 * 507
+    .zero 8 * 447
     .quad (0x80000 << 10) | 0xcf # VRWXAD
-    .zero 8 * 253
+    .zero 8 * 313
