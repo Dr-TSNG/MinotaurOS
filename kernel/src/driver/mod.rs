@@ -240,7 +240,8 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                 let compatible = node
                     .props()
                     .find(|prop| prop.name() == Ok("compatible"))
-                    .and_then(|prop| prop.str().ok());
+                    .and_then(|prop| prop.str().ok())
+                    .unwrap();
                 if name == "virtio_mmio@10001000" {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let mapping = GlobalMapping::new(
@@ -269,7 +270,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     NET_DEVICE_ADDR.lock().replace(mapping.virt_start);
                     println!("[kernel] Register virtio net device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
-                } else if name.starts_with("plic@") {
+                } else if compatible.contains("sifive,plic-1.0.0") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     if mmio_offset % reg[0].1 != 0 {
                         mmio_offset += reg[0].1 - mmio_offset % reg[0].1;
@@ -285,7 +286,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     mmio_offset += reg[0].1;
                     println!("[kernel] Register PLIC at {:?}", b_plic_base);
                     g_mappings.push(mapping);
-                } else if compatible == Some("ns16550a") {
+                } else if compatible.contains("ns16550a") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
                     let intr = node
