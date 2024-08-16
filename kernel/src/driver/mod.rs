@@ -26,6 +26,7 @@ use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
 
+pub mod dw_apb_uart;
 pub mod ffi;
 pub mod ns16550a;
 pub mod plic;
@@ -157,7 +158,7 @@ pub fn init_driver() -> SyscallResult<()> {
     for device in DEVICES.lock().values() {
         device.init();
         if let Device::Character(dev) = device {
-            if dev.metadata().dev_name == "uart" {
+            if !DEFAULT_TTY.is_initialized() && dev.metadata().dev_name == "uart" {
                 DEFAULT_TTY.init(TtyFile::new(FileMeta::new(None, OpenFlags::O_RDWR), dev.clone()));
             }
         }
@@ -183,7 +184,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
     let mut b_smp = 0;
     let mut b_freq = 0;
     let mut b_plic_base = VirtAddr(0);
-    let mut b_plic_intr = BTreeMap::new();
+    let mut b_plic_intr = BTreeMap::<_, Arc<dyn IrqDevice>>::new();
 
     let mut g_mappings = Vec::new();
     let mut mmio_offset = 0;
@@ -287,6 +288,26 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     println!("[kernel] Register PLIC at {:?}", b_plic_base);
                     g_mappings.push(mapping);
                 } else if compatible.contains("ns16550a") {
+                    let reg = parse_reg(&node, addr_cells, size_cells);
+                    let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+                    let intr = node
+                        .props()
+                        .find(|prop| prop.name() == Ok("interrupts"))
+                        .unwrap().u32(0)?;
+                    let mapping = GlobalMapping::new(
+                        format!("[serial@{:x}]", reg[0].0),
+                        PhysAddr(reg[0].0),
+                        KERNEL_MMIO_BASE + mmio_offset,
+                        size,
+                        ASPerms::R | ASPerms::W,
+                    );
+                    mmio_offset += size;
+                    let dev = Arc::new(ns16550a::UartDevice::new(mapping.virt_start));
+                    b_plic_intr.insert(intr as usize, dev.clone());
+                    DEVICES.lock().insert(dev.metadata().dev_id, Device::Character(dev));
+                    println!("[kernel] Register serial device at {:?}", mapping.virt_start);
+                    g_mappings.push(mapping);
+                } else if compatible.contains("snps,dw-apb-uart") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
                     let intr = node
