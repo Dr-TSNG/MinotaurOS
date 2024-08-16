@@ -33,8 +33,8 @@ pub const PIPE_BUF_CAP: usize = 16 * PAGE_SIZE;
 
 
 extern {
-    fn sbss();
-    fn ebss();
+    pub fn sbss();
+    pub fn ebss();
     fn ekernel();
 }
 

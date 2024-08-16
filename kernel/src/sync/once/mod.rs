@@ -1,4 +1,5 @@
 use core::ops::{Deref, DerefMut};
+use crate::println;
 
 // TODO: Replace with own `Once` implementation
 pub type Once<T> = spin::once::Once<T>;
@@ -16,8 +17,11 @@ impl<T> LateInit<T> {
     }
 
     pub fn init(&self, val: T) {
+        println!("lateinit init begin");
         debug_assert!(self.0.get().is_none(), "LateInit::init called twice");
+        println!("lateinit init ...");
         self.0.call_once(|| val);
+        println!("lateinit init down");
     }
 
     fn get(&self) -> &T {

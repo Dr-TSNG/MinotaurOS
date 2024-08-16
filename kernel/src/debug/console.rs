@@ -25,6 +25,8 @@ lazy_static! {
 
 pub fn print(args: Arguments) {
     let fmt = fmt::format(args);
+    crate::arch::sbi::console_write(fmt.as_str()).expect("TODO: panic message");
+    /*
     DMESG.lock().tap_mut(|dmesg| {
         dmesg.buf.push_back(Arc::new(fmt));
         if dmesg.buf.len() > MAX_LINES {
@@ -35,6 +37,7 @@ pub fn print(args: Arguments) {
     if DEFAULT_TTY.is_initialized() {
         dmesg_flush_tty();
     }
+     */
 }
 
 pub fn dmesg_flush_tty() {

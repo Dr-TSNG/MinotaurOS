@@ -43,3 +43,12 @@ pub fn shutdown() -> Result<!, SBIError> {
     sbi_call(EID_SRST, SYSTEM_RESET, RESET_TYPE_SHUTDOWN as usize, RESET_REASON_NO_REASON as usize, 0)?;
     unreachable!()
 }
+use sbi_spec::dbcn::{CONSOLE_READ, CONSOLE_WRITE, EID_DBCN};
+use crate::arch::kvaddr_to_paddr;
+
+pub fn console_write(content: &str) -> Result<usize, SBIError> {
+    for s in content.as_bytes() {
+        sbi_rt::legacy::console_putchar(*s as usize);
+    }
+    Ok(content.len())
+}

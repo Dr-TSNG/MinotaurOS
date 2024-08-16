@@ -3,6 +3,7 @@ use core::num::NonZeroUsize;
 use lru::LruCache;
 use riscv::register::satp;
 use crate::config::MAX_ASID;
+use crate::println;
 
 pub type ASID = u16;
 
@@ -12,7 +13,8 @@ pub struct ASIDManager {
 }
 
 impl ASIDManager {
-    pub fn new() -> Self {
+    pub fn new() -> Option<Self> {
+        println!("asid manager new begin ... ");
         let asid_cap = unsafe {
             let satp = satp::read();
             satp::set(satp.mode(), ASID::MAX as usize, satp.ppn());
@@ -20,10 +22,19 @@ impl ASIDManager {
             satp::set(satp.mode(), satp.asid(), satp.ppn());
             min(cap, MAX_ASID)
         };
-        Self {
-            cache: LruCache::new(NonZeroUsize::new(asid_cap).unwrap()),
-            allocated: 0,
+        println!("asid manager new end ");
+        println!("asid_cap is {}",asid_cap);
+        let temp = NonZeroUsize::new(asid_cap);
+        if temp.is_none(){
+            return None;
         }
+        println!("temp new end ");
+        let cache = LruCache::new(temp.unwrap());
+        println!("cache new end ");
+        Some(Self {
+            cache,
+            allocated: 0,
+        })
     }
 
     pub fn get(&mut self, token: usize) -> Option<ASID> {
