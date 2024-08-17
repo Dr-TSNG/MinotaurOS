@@ -12,7 +12,6 @@ use crate::mm::page_table::PageTable;
 use crate::process::thread::Thread;
 use crate::processor::context::HartContext;
 use crate::result::SyscallResult;
-use crate::sync::once::LateInit;
 
 pub struct Hart {
     pub id: usize,
@@ -21,7 +20,7 @@ pub struct Hart {
     pub on_page_test: bool,
     pub last_page_fault: SyscallResult,
     kintr_rec: usize,
-    asid_manager: LateInit<ASIDManager>,
+    asid_manager: Option<ASIDManager>,
 }
 
 pub struct KIntrGuard;
@@ -48,7 +47,7 @@ impl Hart {
             on_page_test: false,
             last_page_fault: Ok(()),
             kintr_rec: 0,
-            asid_manager: LateInit::new(),
+            asid_manager: None,
         }
     }
 
@@ -105,23 +104,32 @@ impl Hart {
 
     pub unsafe fn switch_page_table(&mut self, token: usize, root_pt: PageTable) {
         self.disable_kintr();
-        if let Some(asid) = self.asid_manager.get(token) {
-            fence_i();
-            satp::set(satp::Mode::Sv39, asid as usize, root_pt.ppn.0);
-            fence_i();
+        if let Some(manager) = &mut self.asid_manager {
+            if let Some(asid) = manager.get(token) {
+                fence_i();
+                satp::set(satp::Mode::Sv39, asid as usize, root_pt.ppn.0);
+                fence_i();
+            } else {
+                let asid = manager.assign(token);
+                fence_i();
+                satp::set(satp::Mode::Sv39, asid as usize, root_pt.ppn.0);
+                asm!("sfence.vma x0, {}", in(reg) asid);
+            }
         } else {
-            let asid = self.asid_manager.assign(token);
-            fence_i();
-            satp::set(satp::Mode::Sv39, asid as usize, root_pt.ppn.0);
-            asm!("sfence.vma x0, {}", in(reg) asid);
+            satp::set(satp::Mode::Sv39, 0, root_pt.ppn.0);
+            asm!("sfence.vma");
         }
         self.enable_kintr();
     }
 
     pub unsafe fn refresh_tlb(&mut self, token: usize) {
         self.disable_kintr();
-        let asid = self.asid_manager.get(token).unwrap();
-        asm!("sfence.vma x0, {}", in(reg) asid);
+        if let Some(manager) = &mut self.asid_manager {
+            let asid = manager.get(token).unwrap();
+            asm!("sfence.vma x0, {}", in(reg) asid);
+        } else {
+            asm!("sfence.vma");
+        }
         self.enable_kintr();
     }
 }
@@ -145,7 +153,7 @@ pub fn init(hart_id: usize) {
         // 将当前 hart 的 id 保存到 tp 寄存器
         asm!("mv tp, {}", in(reg) hart_id);
         HARTS[hart_id].id = hart_id;
-        HARTS[hart_id].asid_manager.init(ASIDManager::new());
+        HARTS[hart_id].asid_manager = ASIDManager::new();
         // 允许内核访问用户态地址空间
         sstatus::set_sum();
         sstatus::set_fs(FS::Clean);

@@ -44,7 +44,7 @@ use sbi_spec::hsm::hart_state;
 use arch::shutdown;
 use config::KERNEL_ADDR_OFFSET;
 use crate::arch::sbi;
-use crate::config::{KERNEL_PADDR_BASE, KERNEL_STACK_SIZE, LINKAGE_EBSS, LINKAGE_SBSS};
+use crate::config::{KERNEL_PADDR_BASE, KERNEL_STACK_SIZE, linkage_ebss, linkage_sbss};
 use crate::debug::console::dmesg_flush_tty;
 use crate::driver::BOARD_INFO;
 use crate::process::Process;
@@ -63,8 +63,8 @@ static MAIN_HART: AtomicBool = AtomicBool::new(false);
 
 fn clear_bss() {
     unsafe {
-        let len = LINKAGE_EBSS.0 - LINKAGE_SBSS.0;
-        core::slice::from_raw_parts_mut(LINKAGE_SBSS.as_ptr(), len).fill(0);
+        let len = linkage_ebss() - linkage_sbss();
+        core::slice::from_raw_parts_mut(linkage_sbss().as_ptr(), len).fill(0);
     }
 }
 

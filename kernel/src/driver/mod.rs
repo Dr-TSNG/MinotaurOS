@@ -26,12 +26,11 @@ use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
 
-pub mod dw_apb_uart;
 pub mod ffi;
-pub mod ns16550a;
-pub mod plic;
+mod plic;
 pub mod random;
-pub mod virtio;
+mod serial;
+mod virtio;
 
 pub static BOARD_INFO: LateInit<BoardInfo> = LateInit::new();
 pub static GLOBAL_MAPPINGS: LateInit<Vec<GlobalMapping>> = LateInit::new();
@@ -303,7 +302,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                         ASPerms::R | ASPerms::W,
                     );
                     mmio_offset += size;
-                    let dev = Arc::new(ns16550a::UartDevice::new(mapping.virt_start));
+                    let dev = Arc::new(serial::ns16550a::UartDevice::new(mapping.virt_start));
                     b_plic_intr.insert(intr as usize, dev.clone());
                     DEVICES.lock().insert(dev.metadata().dev_id, Device::Character(dev));
                     println!("[kernel] Register serial device at {:?}", mapping.virt_start);
@@ -323,7 +322,7 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                         ASPerms::R | ASPerms::W,
                     );
                     mmio_offset += size;
-                    let dev = Arc::new(dw_apb_uart::UartDevice::new(mapping.virt_start));
+                    let dev = Arc::new(serial::dw_apb_uart::UartDevice::new(mapping.virt_start));
                     b_plic_intr.insert(intr as usize, dev.clone());
                     DEVICES.lock().insert(dev.metadata().dev_id, Device::Character(dev));
                     println!("[kernel] Register serial device at {:?}", mapping.virt_start);

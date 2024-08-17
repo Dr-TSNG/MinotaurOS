@@ -2,7 +2,7 @@ use core::cmp::max;
 use buddy_system_allocator::FrameAllocator;
 use log::warn;
 use crate::arch::{kvaddr_to_paddr, PAGE_SIZE, PhysPageNum};
-use crate::config::LINKAGE_EKERNEL;
+use crate::config::linkage_ekernel;
 use crate::driver::GLOBAL_MAPPINGS;
 use crate::println;
 use crate::result::{Errno, SyscallResult};
@@ -73,7 +73,7 @@ pub fn init() {
     let mut allocator = UserFrameAllocator::new();
     for map in GLOBAL_MAPPINGS.iter() {
         if map.name.starts_with("[memory") {
-            let start = max(map.phys_start, kvaddr_to_paddr(*LINKAGE_EKERNEL));
+            let start = max(map.phys_start, kvaddr_to_paddr(linkage_ekernel()));
             let end = map.phys_end();
             allocator.add_frame(start.into(), end.into());
             println!("[kernel] Initialize user memory: {:?} - {:?}", start, end);

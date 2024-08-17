@@ -1,4 +1,3 @@
-use lazy_static::lazy_static;
 use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 
 pub const MAX_HARTS: usize = 4;
@@ -38,9 +37,14 @@ extern {
     fn ekernel();
 }
 
-lazy_static! {
-    pub static ref LINKAGE_ETEXT: VirtAddr = VirtAddr(ekernel as usize);
-    pub static ref LINKAGE_SBSS: VirtAddr = VirtAddr(sbss as usize);
-    pub static ref LINKAGE_EBSS: VirtAddr = VirtAddr(ebss as usize);
-    pub static ref LINKAGE_EKERNEL: VirtAddr = VirtAddr(ekernel as usize);
+pub fn linkage_sbss() -> VirtAddr {
+    VirtAddr(sbss as usize)
+}
+
+pub fn linkage_ebss() -> VirtAddr {
+    VirtAddr(ebss as usize)
+}
+
+pub fn linkage_ekernel() -> VirtAddr {
+    VirtAddr(ekernel as usize)
 }

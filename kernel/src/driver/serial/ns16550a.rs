@@ -8,6 +8,7 @@ use futures::task::AtomicWaker;
 use crate::arch::VirtAddr;
 use crate::driver::{CharacterDevice, DeviceMeta, IrqDevice};
 use crate::driver::ffi::DEV_CHAR_TTY;
+use crate::driver::serial::CHAR_TTY_COUNTER;
 use crate::fs::devfs::tty::DEFAULT_TTY;
 use crate::result::SyscallResult;
 
@@ -23,36 +24,41 @@ pub struct UartDevice {
 #[allow(unused)]
 impl UartDevice {
     pub fn new(base_addr: VirtAddr) -> Self {
+        let minor = CHAR_TTY_COUNTER.fetch_add(1, Ordering::Relaxed);
         Self {
-            metadata: DeviceMeta::new(DEV_CHAR_TTY, 0, "uart".to_string()),
+            metadata: DeviceMeta::new(DEV_CHAR_TTY, minor, "uart".to_string()),
             base_addr,
             waker: AtomicWaker::new(),
             buf: AtomicU8::new(0xff),
         }
     }
 
-    fn rxdata_ptr(&self) -> *mut u32 {
-        self.base_addr.as_ptr().cast()
+    fn rxdata_ptr(&self) -> *mut u8 {
+        self.base_addr.as_ptr()
     }
 
-    fn txdata_ptr(&self) -> *mut u32 {
-        self.base_addr.as_ptr().cast()
+    fn txdata_ptr(&self) -> *mut u8 {
+        self.base_addr.as_ptr()
     }
 
-    fn ie_ptr(&self) -> *mut u32 {
-        (self.base_addr + 4).as_ptr().cast()
+    fn ie_ptr(&self) -> *mut u8 {
+        (self.base_addr + 1).as_ptr()
     }
 
-    fn fifo_ctrl_ptr(&self) -> *mut u32 {
-        (self.base_addr + 8).as_ptr().cast()
+    fn fifo_ctrl_ptr(&self) -> *mut u8 {
+        (self.base_addr + 2).as_ptr()
     }
 
-    fn line_ctrl_ptr(&self) -> *mut u32 {
-        (self.base_addr + 12).as_ptr().cast()
+    fn is_ptr(&self) -> *mut u8 {
+        (self.base_addr + 2).as_ptr()
     }
 
-    fn line_status_ptr(&self) -> *mut u32 {
-        (self.base_addr + 20).as_ptr().cast()
+    fn line_ctrl_ptr(&self) -> *mut u8 {
+        (self.base_addr + 3).as_ptr()
+    }
+
+    fn line_status_ptr(&self) -> *mut u8 {
+        (self.base_addr + 5).as_ptr()
     }
 }
 
@@ -86,7 +92,7 @@ impl CharacterDevice for UartDevice {
             if val != 0xff {
                 return Poll::Ready(Ok(val));
             } else if self.line_status_ptr().read_volatile() & 0x01 == 0x01 {
-                return Poll::Ready(Ok(self.rxdata_ptr().read_volatile() as u8));
+                return Poll::Ready(Ok(self.rxdata_ptr().read_volatile()));
             }
 
             self.waker.register(cx.waker());
@@ -102,8 +108,8 @@ impl CharacterDevice for UartDevice {
 
     async fn putchar(&self, ch: u8) -> SyscallResult<()> {
         unsafe {
-            while (self.line_status_ptr().read_volatile() & (1 << 6)) == 0 {}
-            self.txdata_ptr().write_volatile(ch as u32);
+            while (self.line_status_ptr().read_volatile() & (1 << 5)) == 0 {}
+            self.txdata_ptr().write_volatile(ch);
         }
         Ok(())
     }
@@ -111,7 +117,7 @@ impl CharacterDevice for UartDevice {
 
 impl IrqDevice for UartDevice {
     fn handle_irq(&self) {
-        let ch = unsafe { self.rxdata_ptr().read_volatile() as u8 };
+        let ch = unsafe { self.rxdata_ptr().read_volatile() };
         if ch == CTRL_C {
             DEFAULT_TTY.handle_ctrl_c();
         }

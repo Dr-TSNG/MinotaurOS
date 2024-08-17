@@ -12,7 +12,7 @@ pub struct ASIDManager {
 }
 
 impl ASIDManager {
-    pub fn new() -> Self {
+    pub fn new() -> Option<Self> {
         let asid_cap = unsafe {
             let satp = satp::read();
             satp::set(satp.mode(), ASID::MAX as usize, satp.ppn());
@@ -20,10 +20,11 @@ impl ASIDManager {
             satp::set(satp.mode(), satp.asid(), satp.ppn());
             min(cap, MAX_ASID)
         };
-        Self {
-            cache: LruCache::new(NonZeroUsize::new(asid_cap).unwrap()),
+        let asid_cap = NonZeroUsize::new(asid_cap)?;
+        Some(Self {
+            cache: LruCache::new(asid_cap),
             allocated: 0,
-        }
+        })
     }
 
     pub fn get(&mut self, token: usize) -> Option<ASID> {
