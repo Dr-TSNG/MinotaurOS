@@ -58,7 +58,7 @@ global_asm!(include_str!("entry.asm"));
 
 const LOGO: &str = include_str!("../../logo.txt");
 
-#[link_section = ".bss.uninit"]
+#[link_section = ".data"]
 static MAIN_HART: AtomicBool = AtomicBool::new(false);
 
 fn clear_bss() {
