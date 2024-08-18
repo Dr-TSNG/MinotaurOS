@@ -69,6 +69,7 @@ fn clear_bss() {
 }
 
 fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
+    let dtb_paddr = 0x7000_0000;
     clear_bss();
     mm::allocator::init_heap();
     hart::init(hart_id);
@@ -88,6 +89,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     sched::init();
     mm::vm_init(true)?;
     driver::init_driver()?;
+    net::init();
     builtin::init();
     dmesg_flush_tty();
 
@@ -96,7 +98,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     info!("Spawn init process");
     block_on(Process::new_initproc(mnt_ns, data))?;
 
-    for secondary in 0..BOARD_INFO.smp {
+    for secondary in 1..BOARD_INFO.smp {
         if secondary != hart_id {
             if sbi::hart_status(secondary).unwrap() != hart_state::STOPPED {
                 warn!("Hart {} is already started?", secondary);
@@ -111,13 +113,15 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     run_executor();
 
     info!("Init process exited, wait for other harts to stop");
-    for secondary in 0..BOARD_INFO.smp {
+
+    for secondary in 1..BOARD_INFO.smp {
         if secondary != hart_id {
             while sbi::hart_status(secondary).unwrap() != hart_state::STOPPED {
                 core::hint::spin_loop();
             }
         }
     }
+
     info!("Shutdown system");
     shutdown();
 }

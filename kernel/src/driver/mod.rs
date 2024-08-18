@@ -21,7 +21,7 @@ use crate::fs::devfs::tty::{DEFAULT_TTY, TtyFile};
 use crate::fs::ffi::OpenFlags;
 use crate::fs::file::FileMeta;
 use crate::mm::addr_space::ASPerms;
-use crate::{arch, println};
+use crate::{arch, driver, println};
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
@@ -32,7 +32,7 @@ mod mmc;
 pub mod random;
 mod serial;
 mod virtio;
-
+pub mod ramdisk;
 
 pub static BOARD_INFO: LateInit<BoardInfo> = LateInit::new();
 pub static GLOBAL_MAPPINGS: LateInit<Vec<GlobalMapping>> = LateInit::new();
@@ -259,7 +259,8 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     DEVICES.lock().insert(dev.metadata().dev_id, Device::Block(dev));
                     println!("[kernel] Register virtio block device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
-                } else if name == "virtio_mmio@10008000" {
+                }
+                else if name == "virtio_mmio@10008000" {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let mapping = GlobalMapping::new(
                         "[virtio_net]".to_string(),
@@ -273,7 +274,9 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     NET_DEVICE_ADDR.lock().replace(mapping.virt_start);
                     println!("[kernel] Register virtio net device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
-                } else if compatible.contains("starfive,jh7110-mmc") {
+                }
+                    /*
+                else if compatible.contains("starfive,jh7110-mmc") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     if reg[0].0 != 0x16020000 {
                         continue;
@@ -294,7 +297,31 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     DEVICES.lock().insert(dev.metadata().dev_id, Device::Block(dev));
                     println!("[kernel] Register mmc device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
-                } else if compatible.contains("sifive,plic-1.0.0") {
+                }
+                    */
+                else if compatible.contains("starfive,jh7110-mmc") {
+                    let reg = parse_reg(&node, addr_cells, size_cells);
+                    if reg[0].0 != 0x16020000 {
+                        continue;
+                    }
+                    let size = 512 * 1024 * 1024;
+                    if mmio_offset % size != 0 {
+                        mmio_offset += size - mmio_offset % size;
+                    }
+                    let mapping = GlobalMapping::new(
+                        format!("[mmc@{:x}]", 0x5000_0000),
+                        PhysAddr(0x5000_0000),
+                        KERNEL_MMIO_BASE + mmio_offset,
+                        size,
+                        ASPerms::R | ASPerms::W,
+                    );
+                    mmio_offset += size;
+                    let dev = Arc::new(driver::ramdisk::Disk::new(mapping.virt_start));
+                    DEVICES.lock().insert(dev.metadata().dev_id, Device::Block(dev));
+                    println!("[kernel] Register mmc device at {:?}", mapping.virt_start);
+                    g_mappings.push(mapping);
+                }
+                else if compatible.contains("sifive,plic-1.0.0") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
                     if mmio_offset % size != 0 {
@@ -311,7 +338,8 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     mmio_offset += size;
                     println!("[kernel] Register PLIC at {:?}", b_plic_base);
                     g_mappings.push(mapping);
-                } else if compatible.contains("ns16550a") {
+                }
+                else if compatible.contains("ns16550a") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
                     let intr = node
@@ -331,7 +359,8 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     DEVICES.lock().insert(dev.metadata().dev_id, Device::Character(dev));
                     println!("[kernel] Register serial device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
-                } else if compatible.contains("snps,dw-apb-uart") {
+                }
+                else if compatible.contains("snps,dw-apb-uart") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
                     let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
                     let intr = node
@@ -367,6 +396,11 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
     };
     BOARD_INFO.init(board_info);
     GLOBAL_MAPPINGS.init(g_mappings);
+
+    for i in GLOBAL_MAPPINGS.iter(){
+        println!("[GLOBAL_MAPPINGS] name is {} , vaddr is {:x} , phy_addr is {:x} , len is {:x}",i.name,i.virt_start.0,i.phys_start.0,i.size);
+    }
+
     Ok(())
 }
 

@@ -6,6 +6,7 @@ use crate::fs::ext4::wrapper::Ext4;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::{FileSystem, FileSystemMeta, FileSystemType};
 use crate::fs::inode::Inode;
+use crate::println;
 use crate::sync::mutex::AsyncMutex;
 use crate::sync::once::LateInit;
 
@@ -35,6 +36,7 @@ impl Ext4FileSystem {
             driver_lock: AsyncMutex::new(()),
             root: ManuallyDrop::new(LateInit::new()),
         });
+        println!("ext4 sys new()");
         fs.root.init(Ext4Inode::root(&fs, None));
         fs
     }

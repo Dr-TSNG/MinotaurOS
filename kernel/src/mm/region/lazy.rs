@@ -60,10 +60,8 @@ impl ASRegion for LazyRegion {
     }
 
     fn split(&mut self, start: usize, size: usize) -> Vec<Box<dyn ASRegion>> {
+        assert!(size < self.metadata.pages);
         assert!(start + size <= self.metadata.pages);
-        if size == self.metadata.pages {
-            return vec![];
-        }
         let mut regions: Vec<Box<dyn ASRegion>> = vec![];
         if start != 0 {
             let mut off = self.pages.split_off(start);

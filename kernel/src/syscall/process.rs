@@ -226,15 +226,11 @@ pub fn sys_tgkill(tgid: Pid, tid: Pid, signal: usize) -> SyscallResult<usize> {
 
 pub fn sys_setregid(rgid: Uid, egid: Uid) -> SyscallResult<usize> {
     let audit = &mut current_thread().inner().audit;
-    if egid != Gid::MAX {
-        if egid != audit.egid {
-            audit.sgid = egid;
-        }
-        audit.egid = egid;
-    }
-    if rgid != Gid::MAX {
+    if rgid != Uid::MAX {
         audit.rgid = rgid;
-        audit.sgid = audit.egid;
+    }
+    if egid != Uid::MAX {
+        audit.egid = egid;
     }
     Ok(0)
 }
@@ -250,15 +246,11 @@ pub fn sys_setgid(gid: Uid) -> SyscallResult<usize> {
 
 pub fn sys_setreuid(ruid: Uid, euid: Uid) -> SyscallResult<usize> {
     let audit = &mut current_thread().inner().audit;
-    if euid != Uid::MAX {
-        if euid != audit.euid {
-            audit.suid = euid;
-        }
-        audit.euid = euid;
-    }
     if ruid != Uid::MAX {
         audit.ruid = ruid;
-        audit.suid = audit.euid;
+    }
+    if euid != Uid::MAX {
+        audit.euid = euid;
     }
     Ok(0)
 }

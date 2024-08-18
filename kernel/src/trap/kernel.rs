@@ -1,4 +1,4 @@
-use log::{debug, error, trace, warn};
+use log::{debug, error, info, trace, warn};
 use riscv::register::{scause, sepc, stval};
 use riscv::register::scause::{Exception, Interrupt, Trap};
 use crate::arch::VirtAddr;
@@ -46,7 +46,7 @@ fn trap_from_kernel() -> bool {
 }
 
 fn handle_page_fault(addr: VirtAddr, perform: ASPerms) -> SyscallResult {
-    debug!("Kernel page fault at {:?} for {}", addr, perform);
+    info!("Kernel page fault at {:?} for {}", addr, perform);
     let thread = local_hart()
         .current_thread()
         .expect("Page fault while running kernel thread");

@@ -4,6 +4,7 @@ use crate::driver::{DEVICES, Device};
 use crate::fs::ext4::Ext4FileSystem;
 use crate::fs::ffi::VfsFlags;
 use crate::fs::file_system::MountNamespace;
+use crate::println;
 use crate::result::SyscallResult;
 
 pub mod devfs;
@@ -23,6 +24,7 @@ pub mod tmpfs;
 mod inotify;
 
 pub fn init() -> SyscallResult<Arc<MountNamespace>> {
+    println!("fs_init");
     let mut root_dev = None;
     for device in DEVICES.lock().values() {
         if let Device::Block(blk) = device {
@@ -31,8 +33,11 @@ pub fn init() -> SyscallResult<Arc<MountNamespace>> {
         }
     }
     let root_dev = root_dev.expect("Missing root block device");
+    println!("root_dev getted");
+
     let root_fs = Ext4FileSystem::new(root_dev, VfsFlags::ST_WRITE | VfsFlags::ST_RELATIME);
     let mnt_ns = Arc::new(MountNamespace::new(root_fs));
+
     info!("File systems initialized");
     path::path_test();
     Ok(mnt_ns)

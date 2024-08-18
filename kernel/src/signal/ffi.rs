@@ -40,38 +40,9 @@ pub enum Signal {
     SIGSYS = 31,
     SIGRTMIN = 32,
     SIGCANCEL = 33,
-    SIG34 = 34,
-    SIG35 = 35,
-    SIG36 = 36,
-    SIG37 = 37,
-    SIG38 = 38,
-    SIG39 = 39,
-    SIG40 = 40,
-    SIG41 = 41,
-    SIG42 = 42,
-    SIG43 = 43,
-    SIG44 = 44,
-    SIG45 = 45,
-    SIG46 = 46,
-    SIG47 = 47,
-    SIG48 = 48,
-    SIG49 = 49,
-    SIG50 = 50,
-    SIG51 = 51,
-    SIG52 = 52,
-    SIG53 = 53,
-    SIG54 = 54,
-    SIG55 = 55,
-    SIG56 = 56,
-    SIG57 = 57,
-    SIG58 = 58,
-    SIG59 = 59,
-    SIG60 = 60,
-    SIG61 = 61,
-    SIG62 = 62,
 }
 
-pub const SIG_MAX: usize = 63;
+pub const SIG_MAX: usize = 34;
 pub const SIG_DFL: usize = 0;
 pub const SIG_IGN: usize = 1;
 

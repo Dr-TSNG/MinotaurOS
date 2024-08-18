@@ -1,6 +1,6 @@
 use crate::arch::{PAGE_SIZE, PhysAddr, VirtAddr};
 
-pub const MAX_HARTS: usize = 4;
+pub const MAX_HARTS: usize = 6;
 pub const MAX_ASID: usize = 256;
 pub const MAX_SYMLINKS: usize = 40;
 pub const MAX_PID_DEFAULT: usize = 0x400000;
