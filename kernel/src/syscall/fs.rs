@@ -304,6 +304,14 @@ pub async fn sys_chdir(path: usize) -> SyscallResult<usize> {
     Ok(0)
 }
 
+pub async fn sys_fchmod(fd: FdNum, mode: u32) -> SyscallResult<usize> {
+    let mode = InodeMode::from_bits_misc(mode);
+    let audit = &current_thread().inner().audit;
+    let inode = resolve_path(fd, ".", true, audit).await?;
+    inode.chmod(mode, audit)?;
+    Ok(0)
+}
+
 pub async fn sys_fchmodat(dirfd: FdNum, path: usize, mode: u32, flags: u32) -> SyscallResult<usize> {
     let mode = InodeMode::from_bits_misc(mode);
     let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
@@ -319,6 +327,13 @@ pub async fn sys_fchownat(dirfd: FdNum, path: usize, uid: Uid, gid: Gid, flags: 
     let follow_link = flags & AT_SYMLINK_NOFOLLOW == 0;
     let audit = &current_thread().inner().audit;
     let inode = resolve_path(dirfd, path, follow_link, audit).await?;
+    inode.chown(uid, gid, audit)?;
+    Ok(0)
+}
+
+pub async fn sys_fchown(fd: FdNum, uid: Uid, gid: Gid) -> SyscallResult<usize> {
+    let audit = &current_thread().inner().audit;
+    let inode = resolve_path(fd, ".", true, audit).await?;
     inode.chown(uid, gid, audit)?;
     Ok(0)
 }
