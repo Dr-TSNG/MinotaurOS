@@ -106,7 +106,7 @@ impl CharacterDevice for UartDevice {
         }).await
     }
 
-    async fn putchar(&self, ch: u8) -> SyscallResult<()> {
+    async fn putchar(&self, ch: u8) -> SyscallResult {
         unsafe {
             while (self.line_status_ptr().read_volatile() & (1 << 5)) == 0 {}
             self.txdata_ptr().write_volatile(ch);

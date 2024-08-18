@@ -17,6 +17,7 @@ smoltcp = { git = "https://github.com/Dr-TSNG/smoltcp", default-features = false
     "socket-tcp",
     "async",
 ] }
+visionfive2-sd = { git = "https://github.com/Dr-TSNG/visionfive2-sd" }
 aligned = "0.4.2"
 async-task = { version = "4.7", default-features = false }
 async-trait = "0.1"

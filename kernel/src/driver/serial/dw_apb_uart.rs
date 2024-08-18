@@ -101,8 +101,7 @@ impl CharacterDevice for UartDevice {
     }
 
     fn has_data(&self) -> bool {
-        self.buf.load(Ordering::Relaxed) != 0xff ||
-            unsafe { self.regs().lsr.get() & 0x01 == 0x01 }
+        self.buf.load(Ordering::Relaxed) != 0xff || self.regs().lsr.get() & 0x01 == 0x01
     }
 
     fn register_waker(&self, waker: Waker) {
@@ -110,7 +109,7 @@ impl CharacterDevice for UartDevice {
     }
 
     async fn getchar(&self) -> SyscallResult<u8> {
-        poll_fn(|cx| unsafe {
+        poll_fn(|cx| {
             // Fast path
             let val = self.buf.swap(0xff, Ordering::Relaxed);
             if val != 0xff {
@@ -130,11 +129,13 @@ impl CharacterDevice for UartDevice {
         }).await
     }
 
-    async fn putchar(&self, ch: u8) -> SyscallResult<()> {
-        unsafe {
+    async fn putchar(&self, ch: u8) -> SyscallResult {
+        if ch == b'\n' {
             while self.regs().lsr.get() & (1 << 6) == 0 {}
-            self.regs().rbr.set(ch as u32)
+            self.regs().rbr.set(b'\r' as u32);
         }
+        while self.regs().lsr.get() & (1 << 6) == 0 {}
+        self.regs().rbr.set(ch as u32);
         Ok(())
     }
 }

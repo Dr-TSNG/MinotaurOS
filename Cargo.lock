@@ -149,6 +149,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitfield-struct"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de05f8756f1c68937349406d4632ae96ae35901019b5e59c508d9c38c64715fb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.72",
+]
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -598,6 +609,7 @@ dependencies = [
  "time",
  "tock-registers",
  "virtio-drivers",
+ "visionfive2-sd",
  "zerocopy",
 ]
 
@@ -813,6 +825,12 @@ name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
+
+[[package]]
+name = "preprint"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "067d7939a17011d73ee0f868eb26b569680437d379583e5f97c18ca570b4a32f"
 
 [[package]]
 name = "prettyplease"
@@ -1186,6 +1204,16 @@ dependencies = [
  "enumn",
  "log",
  "zerocopy",
+]
+
+[[package]]
+name = "visionfive2-sd"
+version = "0.1.0"
+source = "git+https://github.com/Dr-TSNG/visionfive2-sd#ecb5a12acbb02661f202e09352361796f63c37a0"
+dependencies = [
+ "bitfield-struct",
+ "log",
+ "preprint",
 ]
 
 [[package]]

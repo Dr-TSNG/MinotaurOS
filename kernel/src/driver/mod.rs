@@ -28,9 +28,11 @@ use crate::sync::once::LateInit;
 
 pub mod ffi;
 mod plic;
+mod mmc;
 pub mod random;
 mod serial;
 mod virtio;
+
 
 pub static BOARD_INFO: LateInit<BoardInfo> = LateInit::new();
 pub static GLOBAL_MAPPINGS: LateInit<Vec<GlobalMapping>> = LateInit::new();
@@ -271,20 +273,42 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     NET_DEVICE_ADDR.lock().replace(mapping.virt_start);
                     println!("[kernel] Register virtio net device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);
+                } else if compatible.contains("starfive,jh7110-mmc") {
+                    let reg = parse_reg(&node, addr_cells, size_cells);
+                    if reg[0].0 != 0x16020000 {
+                        continue;
+                    }
+                    let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+                    if mmio_offset % size != 0 {
+                        mmio_offset += size - mmio_offset % size;
+                    }
+                    let mapping = GlobalMapping::new(
+                        format!("[mmc@{:x}]", reg[0].0),
+                        PhysAddr(reg[0].0),
+                        KERNEL_MMIO_BASE + mmio_offset,
+                        size,
+                        ASPerms::R | ASPerms::W,
+                    );
+                    mmio_offset += size;
+                    let dev = Arc::new(mmc::jh7110::MmcDevice::new(mapping.virt_start));
+                    DEVICES.lock().insert(dev.metadata().dev_id, Device::Block(dev));
+                    println!("[kernel] Register mmc device at {:?}", mapping.virt_start);
+                    g_mappings.push(mapping);
                 } else if compatible.contains("sifive,plic-1.0.0") {
                     let reg = parse_reg(&node, addr_cells, size_cells);
-                    if mmio_offset % reg[0].1 != 0 {
-                        mmio_offset += reg[0].1 - mmio_offset % reg[0].1;
+                    let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+                    if mmio_offset % size != 0 {
+                        mmio_offset += size - mmio_offset % size;
                     }
                     b_plic_base = KERNEL_MMIO_BASE + mmio_offset;
                     let mapping = GlobalMapping::new(
                         format!("[plic@{:x}]", reg[0].0),
                         PhysAddr(reg[0].0),
                         b_plic_base,
-                        reg[0].1,
+                        size,
                         ASPerms::R | ASPerms::W,
                     );
-                    mmio_offset += reg[0].1;
+                    mmio_offset += size;
                     println!("[kernel] Register PLIC at {:?}", b_plic_base);
                     g_mappings.push(mapping);
                 } else if compatible.contains("ns16550a") {

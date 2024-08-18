@@ -20,8 +20,8 @@ boot_page_table:
     # 0x0000_0000_4000_0000 -> 0x0000_0000_4000_0000
     # 0x0000_0000_8000_0000 -> 0x0000_0000_8000_0000
     # 0xffff_fff0_8000_0000 -> 0x0000_0000_8000_0000
-    .quad (0x00000 << 10) | 0xcf # VRWXAD
-    .quad (0x40000 << 10) | 0xcf # VRWXAD
+    .quad (0x00000 << 10) | 0xc3 # VRAD
+    .quad (0x40000 << 10) | 0xc3 # VRAD
     .quad (0x80000 << 10) | 0xcf # VRWXAD
     .zero 8 * 447
     .quad (0x80000 << 10) | 0xcf # VRWXAD

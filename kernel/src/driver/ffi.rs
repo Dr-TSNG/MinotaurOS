@@ -3,6 +3,7 @@ use bitflags::bitflags;
 pub const DEV_CHAR_TTY: u32 = 4;
 
 pub const DEV_BLOCK_SCSI: u32 = 8;
+pub const DEV_BLOCK_MMC: u32 = 179;
 
 pub const fn make_dev(major: u32, minor: u32) -> u64 {
     ((major as u64) << 8) | (minor as u64)
