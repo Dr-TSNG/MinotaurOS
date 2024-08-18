@@ -22,6 +22,7 @@ use crate::fs::ffi::OpenFlags;
 use crate::fs::file::FileMeta;
 use crate::mm::addr_space::ASPerms;
 use crate::{arch, println};
+use crate::driver::ramdisk::RamDisk;
 use crate::result::SyscallResult;
 use crate::sync::mutex::Mutex;
 use crate::sync::once::LateInit;
@@ -29,10 +30,10 @@ use crate::sync::once::LateInit;
 pub mod ffi;
 mod plic;
 mod mmc;
+mod ramdisk;
 pub mod random;
 mod serial;
 mod virtio;
-
 
 pub static BOARD_INFO: LateInit<BoardInfo> = LateInit::new();
 pub static GLOBAL_MAPPINGS: LateInit<Vec<GlobalMapping>> = LateInit::new();
@@ -278,19 +279,19 @@ fn parse_dev_tree(dtb_paddr: usize) -> Result<(), DevTreeError> {
                     if reg[0].0 != 0x16020000 {
                         continue;
                     }
-                    let size = reg[0].1.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+                    let size = 512 * 1024 * 1024;
                     if mmio_offset % size != 0 {
                         mmio_offset += size - mmio_offset % size;
                     }
                     let mapping = GlobalMapping::new(
                         format!("[mmc@{:x}]", reg[0].0),
-                        PhysAddr(reg[0].0),
+                        PhysAddr(0x50000000),
                         KERNEL_MMIO_BASE + mmio_offset,
                         size,
                         ASPerms::R | ASPerms::W,
                     );
                     mmio_offset += size;
-                    let dev = Arc::new(mmc::jh7110::MmcDevice::new(mapping.virt_start));
+                    let dev = Arc::new(RamDisk::new(mapping.virt_start, size));
                     DEVICES.lock().insert(dev.metadata().dev_id, Device::Block(dev));
                     println!("[kernel] Register mmc device at {:?}", mapping.virt_start);
                     g_mappings.push(mapping);

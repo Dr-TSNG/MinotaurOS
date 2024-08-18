@@ -134,8 +134,7 @@ impl Hart {
     }
 }
 
-const HART_EACH: Hart = Hart::new();
-static mut HARTS: [Hart; MAX_HARTS] = [HART_EACH; MAX_HARTS];
+static mut HARTS: [Hart; MAX_HARTS] = [const { Hart::new() }; MAX_HARTS];
 
 #[link_section = ".bss.uninit"]
 pub static mut KERNEL_STACK: Aligned<A16, [u8; KERNEL_STACK_SIZE * MAX_HARTS]> = Aligned([0; KERNEL_STACK_SIZE * MAX_HARTS]);

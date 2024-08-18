@@ -96,7 +96,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     info!("Spawn init process");
     block_on(Process::new_initproc(mnt_ns, data))?;
 
-    for secondary in 0..BOARD_INFO.smp {
+    for secondary in 1..BOARD_INFO.smp {
         if secondary != hart_id {
             if sbi::hart_status(secondary).unwrap() != hart_state::STOPPED {
                 warn!("Hart {} is already started?", secondary);
