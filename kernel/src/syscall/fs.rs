@@ -274,6 +274,16 @@ pub fn sys_fstatfs(fd: FdNum, buf: usize) -> SyscallResult<usize> {
 }
 
 #[suspend]
+pub async fn sys_truncate(path: usize, size: isize) -> SyscallResult<usize> {
+    let path = user_transmute_str(path, PATH_MAX)?.ok_or(Errno::EINVAL)?;
+    let audit = &current_thread().inner().audit;
+    let inode = resolve_path(AT_FDCWD, path, true, audit).await?;
+    inode.audit_access(audit, AccessMode::W_OK)?;
+    inode.truncate(size).await?;
+    Ok(0)
+}
+
+#[suspend]
 pub async fn sys_ftruncate(fd: FdNum, size: isize) -> SyscallResult<usize> {
     let fd_impl = current_process().inner.lock().fd_table.get(fd)?;
     if !fd_impl.file.metadata().flags.lock().writable() {
