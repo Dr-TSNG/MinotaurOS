@@ -3,6 +3,7 @@ use core::arch::asm;
 pub use sbi_spec::binary::Error as SBIError;
 use sbi_spec::binary::SbiRet;
 use sbi_spec::hsm::{EID_HSM, HART_GET_STATUS, HART_START, HART_STOP};
+use sbi_spec::legacy::LEGACY_SHUTDOWN;
 use sbi_spec::srst::{EID_SRST, RESET_REASON_NO_REASON, RESET_TYPE_SHUTDOWN, SYSTEM_RESET};
 use sbi_spec::time::{EID_TIME, SET_TIMER};
 
@@ -40,6 +41,7 @@ pub fn hart_status(hart_id: usize) -> Result<usize, SBIError> {
 }
 
 pub fn shutdown() -> Result<!, SBIError> {
-    sbi_call(EID_SRST, SYSTEM_RESET, RESET_TYPE_SHUTDOWN as usize, RESET_REASON_NO_REASON as usize, 0)?;
+    let _ = sbi_call(EID_SRST, SYSTEM_RESET, RESET_TYPE_SHUTDOWN as usize, RESET_REASON_NO_REASON as usize, 0);
+    sbi_call(LEGACY_SHUTDOWN, 0, 0, 0, 0)?;
     unreachable!()
 }
