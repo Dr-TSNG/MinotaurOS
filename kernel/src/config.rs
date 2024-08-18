@@ -12,7 +12,7 @@ pub const KERNEL_MMIO_BASE: VirtAddr = VirtAddr(0xFFFF_FFF3_0000_0000);
 pub const TRAMPOLINE_BASE: VirtAddr = VirtAddr(0xFFFF_FFF2_0000_0000);
 pub const DYNAMIC_LINKER_BASE: VirtAddr = VirtAddr(0x20_0000_0000);
 pub const USER_LOAD_BASE: VirtAddr = VirtAddr(0x1000_0000);
-pub const USER_STACK_TOP: VirtAddr = VirtAddr(0xFFFF_FFF0_8000_0000);
+pub const USER_STACK_TOP: VirtAddr = VirtAddr(0xFFFF_FFF0_0000_0000);
 
 const KB: usize = 1024;
 const MB: usize = 1024 * KB;
