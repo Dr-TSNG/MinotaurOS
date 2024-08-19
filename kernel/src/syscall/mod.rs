@@ -242,7 +242,7 @@ pub async fn syscall(code: usize, args: [usize; 6]) -> SyscallResult<usize> {
         SyscallCode::Sendfile => async_syscall!(sys_sendfile, args[0] as FdNum, args[1] as FdNum, args[2], args[3]),
         SyscallCode::Pselect6 => async_syscall!(sys_pselect6, args[0] as FdNum , args[1],args[2],args[3], args[4], args[5]),
         SyscallCode::Ppoll => async_syscall!(sys_ppoll, args[0], args[1], args[2], args[3]),
-        SyscallCode::Splice => async_syscall!(sys_splice,args[0] as FdNum, args[1], args[2] as FdNum, args[3], args[4], args[5] as u32),
+        SyscallCode::Splice => async_syscall!(sys_splice, args[0] as FdNum, args[1], args[2] as FdNum, args[3], args[4], args[5] as u32),
         SyscallCode::Readlinkat => async_syscall!(sys_readlinkat, args[0] as FdNum, args[1], args[2], args[3]),
         SyscallCode::Newfstatat => async_syscall!(sys_newfstatat, args[0] as FdNum, args[1], args[2], args[3] as u32),
         SyscallCode::Fstat => syscall!(sys_fstat, args[0] as FdNum, args[1]),

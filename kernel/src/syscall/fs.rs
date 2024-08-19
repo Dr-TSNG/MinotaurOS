@@ -663,8 +663,47 @@ pub async fn sys_pselect6(nfds: FdNum, readfds: usize, writefds: usize, exceptfd
     ret
 }
 
-pub async fn sys_splice(_infd: FdNum, _off_in: usize, _outfd: FdNum, _off_out: usize, _len: usize, _flag: u32) -> SyscallResult<usize> {
-    Ok(1)
+#[suspend]
+pub async fn sys_splice(fd_in: FdNum, off_in: usize, fd_out: FdNum, off_out: usize, len: usize, _flags: u32) -> SyscallResult<usize> {
+    let off_in = user_transmute_w::<isize>(off_in)?;
+    let off_out = user_transmute_w::<isize>(off_out)?;
+    let proc_inner = current_process().inner.lock();
+    let fd_in_impl = proc_inner.fd_table.get(fd_in)?;
+    let fd_out_impl = proc_inner.fd_table.get(fd_out)?;
+    drop(proc_inner);
+    let mut sent = 0isize;
+    if let Some(off_in) = off_in {
+        if *off_in < 0 {
+            return Err(Errno::EINVAL);
+        }
+        let mut buf = vec![0; PAGE_SIZE];
+        while sent < len as isize {
+            let end = min(len - sent as usize, buf.len());
+            let read = fd_in_impl.file.pread(&mut buf[..end], *off_in + sent).await?;
+            if read == 0 {
+                break;
+            }
+            fd_out_impl.file.write(&buf[..read as usize]).await?;
+            sent += read;
+        }
+        *off_in += sent;
+    } else if let Some(off_out) = off_out {
+        if *off_out < 0 {
+            return Err(Errno::EINVAL);
+        }
+        let mut buf = vec![0; PAGE_SIZE];
+        while sent < len as isize {
+            let end = min(len - sent as usize, buf.len());
+            let read = fd_in_impl.file.read(&mut buf[..end]).await?;
+            if read == 0 {
+                break;
+            }
+            fd_out_impl.file.pwrite(&buf[..read as usize], *off_out + sent).await?;
+            sent += read;
+        }
+        *off_out += sent;
+    }
+    Ok(sent as usize)
 }
 
 pub async fn sys_readlinkat(dirfd: FdNum, path: usize, buf: usize, bufsiz: usize) -> SyscallResult<usize> {
