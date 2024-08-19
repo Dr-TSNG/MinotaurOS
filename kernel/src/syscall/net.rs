@@ -235,7 +235,7 @@ pub fn sys_setsockopt(
         }
         _ => {
             warn!("[sys_setsockopt] level: {}, optname: {}", level, optname);
-            return Err(Errno::ENOPROTOOPT);
+            // return Err(Errno::ENOPROTOOPT);
         }
     }
     Ok(0)

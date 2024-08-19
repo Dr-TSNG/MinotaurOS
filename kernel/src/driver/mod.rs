@@ -170,7 +170,6 @@ pub fn init_driver() -> SyscallResult<()> {
         let dev = VirtIONetDevice::new(*addr);
         dev.init();
         NET_DEVICE.lock().replace(dev);
-        crate::net::init();
     }
     arch::enable_external_interrupt();
     Ok(())

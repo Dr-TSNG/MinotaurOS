@@ -88,6 +88,7 @@ fn start_main_hart(hart_id: usize, dtb_paddr: usize) -> SyscallResult<!> {
     sched::init();
     mm::vm_init(true)?;
     driver::init_driver()?;
+    net::init();
     builtin::init();
     dmesg_flush_tty();
 
