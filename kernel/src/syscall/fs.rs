@@ -425,6 +425,7 @@ pub async fn sys_getdents(fd: FdNum, buf: usize, count: u32) -> SyscallResult<us
         let name_bytes = name.as_bytes_with_nul();
         let dirent_size = MAX_DIRENT_SIZE - (MAX_NAME_LEN - name_bytes.len());
         if cur + dirent_size > buf + count as usize {
+            file.rewinddir().await?;
             break;
         }
         let mut dirent: LinuxDirent = FromZeroes::new_zeroed();

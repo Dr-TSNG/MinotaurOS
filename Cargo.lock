@@ -1044,7 +1044,7 @@ dependencies = [
 [[package]]
 name = "smoltcp"
 version = "0.11.0"
-source = "git+https://github.com/Dr-TSNG/smoltcp#58a1a7ca83461f404d56223623b3cccb8031536f"
+source = "git+https://github.com/rcore-os/smoltcp#8bf9a9a61ce9d50e72b71d541ecb24e29cc5450e"
 dependencies = [
  "bitflags 1.3.2",
  "byteorder",

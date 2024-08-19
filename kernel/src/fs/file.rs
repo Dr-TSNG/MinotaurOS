@@ -93,6 +93,10 @@ pub trait File: Send + Sync {
         Err(Errno::ENOTDIR)
     }
 
+    async fn rewinddir(&self) -> SyscallResult {
+        Err(Errno::ENOTDIR)
+    }
+
     fn pollin(&self, waker: Option<Waker>) -> SyscallResult<bool> {
         Ok(true)
     }
@@ -199,6 +203,12 @@ impl File for DirFile {
         };
         *pos += 1;
         Ok(Some((*pos - 1, inode)))
+    }
+
+    async fn rewinddir(&self) -> SyscallResult {
+        let mut pos = self.pos.lock().await;
+        *pos -= 1;
+        Ok(())
     }
 
     async fn read(&self, _buf: &mut [u8]) -> SyscallResult<isize> {
