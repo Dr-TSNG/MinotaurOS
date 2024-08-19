@@ -88,8 +88,7 @@ pub fn sys_fcntl(fd: FdNum, cmd: usize, arg2: usize) -> SyscallResult<usize> {
             Ok(fd_impl.cloexec as usize)
         }
         FcntlCmd::F_SETFD => {
-            let flags = OpenFlags::from_bits(arg2 as u32).ok_or(Errno::EINVAL)?;
-            fd_impl.cloexec = flags.contains(OpenFlags::O_CLOEXEC);
+            fd_impl.cloexec = arg2 == 1;
             Ok(0)
         }
         FcntlCmd::F_GETFL => {
